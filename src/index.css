@@ -1,0 +1,79 @@
+@import "tailwindcss";
+
+@theme {
+  --color-ripple-950: #09090b;
+  --color-ripple-900: #18181b;
+  --color-ripple-800: #27272a;
+  --color-ripple-accent: #7c3aed;
+  --color-ripple-accent-hover: #6d28d9;
+  --font-sans: "Segoe UI", system-ui, -apple-system, sans-serif;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    @apply h-full;
+  }
+
+  body {
+    @apply font-sans antialiased;
+  }
+
+  body.app-shell {
+    @apply bg-zinc-950 text-zinc-100;
+  }
+
+  html.overlay-html,
+  body.overlay-shell,
+  body.overlay-shell #root {
+    background: transparent !important;
+    overflow: hidden;
+  }
+
+  body.overlay-shell {
+    @apply text-zinc-100;
+  }
+}
+
+@layer utilities {
+  .overlay-pill-glow {
+    box-shadow:
+      0 0 0 1px rgb(124 58 237 / 0.35),
+      0 8px 32px rgb(0 0 0 / 0.45),
+      0 0 48px rgb(124 58 237 / 0.15);
+  }
+
+  .drag-region {
+    -webkit-app-region: drag;
+  }
+
+  .voice-pill {
+    -webkit-app-region: no-drag;
+  }
+
+  .indicator-spinner {
+    animation: spin 0.75s linear infinite;
+  }
+
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  .pulse-ring {
+    animation: pulse-ring 1.4s ease-out infinite;
+  }
+
+  @keyframes pulse-ring {
+    0% {
+      transform: scale(0.9);
+      opacity: 0.8;
+    }
+    100% {
+      transform: scale(1.6);
+      opacity: 0;
+    }
+  }
+}

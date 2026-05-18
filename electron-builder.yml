@@ -1,0 +1,25 @@
+appId: com.ripple.desktop
+productName: Ripple
+copyright: Copyright © 2026 Ripple
+directories:
+  output: release
+  buildResources: build
+files:
+  - out/**/*
+  - package.json
+  - "!**/*.map"
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  artifactName: ${productName}-Setup-${version}.${ext}
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+mac:
+  target: dmg
+  artifactName: ${productName}-${version}.${ext}
+linux:
+  target: AppImage
+  artifactName: ${productName}-${version}.${ext}
