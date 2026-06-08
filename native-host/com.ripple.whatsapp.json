@@ -1,0 +1,7 @@
+{
+  "name": "com.ripple.whatsapp",
+  "description": "Ripple WhatsApp Native Messaging Host",
+  "path": "NATIVE_HOST_CMD_PATH",
+  "type": "stdio",
+  "allowed_origins": ["chrome-extension://EXTENSION_ID_PLACEHOLDER/"]
+}

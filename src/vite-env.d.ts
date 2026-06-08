@@ -77,6 +77,7 @@ interface RippleApi {
     sessionId?: string;
     chunk: Uint8Array;
     mimeType?: string;
+    filename?: string;
   }) => Promise<{ ok: boolean; message?: string; data?: unknown }>;
   endVoice: (args: {
     streamId: string;

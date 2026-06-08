@@ -152,6 +152,7 @@ export async function handleShortcutPress(): Promise<void> {
     return;
   }
 
+  // Capture before overlay; skip if foreground is Ripple — we find Chrome WhatsApp at execute time
   await captureFocusContext();
   showOverlay();
   setVoiceSessionActive(true);

@@ -3,7 +3,12 @@ import { loadDesktopEnv, getSocketUrl } from "../config/env.js";
 import { API_BASE } from "../services/api.js";
 import { rippleSocket } from "../socket/rippleSocket.js";
 import { runDesktopCommand } from "../services/commandOrchestrator.js";
-import { focusContextToMetadata } from "../focus/focusContext.js";
+import { buildContextMetadata } from "../automation/appDetector/contextBuilder.js";
+import { readInstagramComposerText } from "../automation/adapters/instagram/readComposer.js";
+import { isEditOrRephraseCommand } from "../automation/commandIntent.js";
+import { isInstagramTabActive } from "../focus/focusContext.js";
+import { extractRephraseSourceText } from "../automation/rephraseParse.js";
+import { normalizeTranscript } from "../automation/voice/normalizeTranscript.js";
 import { setLastVoiceCommand } from "../state/lastCommand.js";
 import {
   setVoiceSessionActive,
@@ -34,6 +39,19 @@ import { registerGlobalShortcuts, unregisterGlobalShortcuts } from "../shortcuts
 import { createTray, destroyTray } from "../tray/index.js";
 import { createMainWindow, showMainWindow } from "../windows/mainWindow.js";
 import { createOverlayWindow } from "../windows/overlay.js";
+import {
+  startWhatsAppExtensionBridge,
+  stopWhatsAppExtensionBridge,
+} from "../bridge/whatsappExtensionBridge.js";
+
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    showMainWindow();
+  });
+}
 
 let sessionId: string | null = null;
 let currentUser: { id: string; email: string; onboarding_completed: boolean } | null =
@@ -262,6 +280,7 @@ function registerIpc(): void {
         sessionId?: string;
         chunk: Uint8Array;
         mimeType?: string;
+        filename?: string;
       },
     ) => {
       if (!rippleSocket.isConnected()) {
@@ -277,6 +296,7 @@ function registerIpc(): void {
           sessionId: args.sessionId ?? sessionId ?? undefined,
           chunk: Buffer.from(args.chunk),
           mimeType: args.mimeType,
+          filename: args.filename,
         });
         return { ok: true, data };
       } catch (e: unknown) {
@@ -359,19 +379,31 @@ function registerIpc(): void {
   );
 
   ipcMain.handle("command:execute", async (_e, args) => {
-    const cmd = args.command;
+    const cmd = normalizeTranscript(args.command);
     setLastVoiceCommand(cmd);
     const preview = cmd.length > 200 ? `${cmd.slice(0, 200)}…` : cmd;
     console.info(
       `[ripple-desktop] command:execute (${cmd.length} chars): "${preview}"`,
     );
+    const contextMetadata = {
+      ...(await buildContextMetadata()),
+      ...args.contextMetadata,
+    };
+    let selectedText = extractRephraseSourceText(cmd) ?? undefined;
+    if (!selectedText && isInstagramTabActive() && isEditOrRephraseCommand(cmd)) {
+      const fromComposer = await readInstagramComposerText();
+      if (fromComposer?.trim()) {
+        selectedText = fromComposer.trim();
+        console.info(
+          `[ripple-desktop] DM rephrase — ${selectedText.length} chars from open composer`,
+        );
+      }
+    }
     return runDesktopCommand({
-      command: args.command,
+      command: cmd,
       sessionId: args.sessionId ?? sessionId,
-      contextMetadata: {
-        ...focusContextToMetadata(),
-        ...args.contextMetadata,
-      },
+      contextMetadata,
+      selectedText,
       getAccessToken: ensureValidAccessToken,
     });
   });
@@ -383,9 +415,19 @@ function registerIpc(): void {
   });
 }
 
+if (gotSingleInstanceLock) {
 app.whenReady().then(async () => {
-  console.info("[ripple-desktop] ===== build textForChatApp-fix-v7 =====");
-  console.info("[ripple-desktop] new email → Gmail URL · rephrase/edit → paste in place");
+  console.info("[ripple-desktop] ===== build phase-3.5.4-linkedin-paste-fix-v9 =====");
+  console.info(
+    "[ripple-desktop] WhatsApp: Chrome extension + Native Messaging — see WHATSAPP_SETUP.md",
+  );
+  startWhatsAppExtensionBridge();
+  console.info(
+    "[ripple-desktop] Voice pipeline: Whisper → normalize → match → confidence → confirm → act",
+  );
+  console.info(
+    "[ripple-desktop] Phase 3.5: WhatsApp + Gmail + desktop + Notion + YouTube + LinkedIn + Instagram",
+  );
   console.info(`[ripple-desktop] API base: ${API_BASE}`);
   console.info(`[ripple-desktop] Socket URL: ${getSocketUrl()}`);
   registerIpc();
@@ -416,6 +458,7 @@ app.whenReady().then(async () => {
     showMainWindow();
   });
 });
+}
 
 app.on("before-quit", () => {
   isQuitting = true;
@@ -423,6 +466,7 @@ app.on("before-quit", () => {
 });
 
 app.on("will-quit", () => {
+  stopWhatsAppExtensionBridge();
   unregisterGlobalShortcuts();
   destroyTray();
 });

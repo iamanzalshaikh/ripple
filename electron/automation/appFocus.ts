@@ -1,24 +1,14 @@
+import { findAppByTarget, isAlreadyInApp } from "./appRegistry.js";
 import type { FocusContext } from "../focus/focusContext.js";
 
-/** True when the user is already inside the app Ripple would open. */
+/** True when the user was already in this app before voice (skip OPEN_APP / new tab). */
 export function isAlreadyInTargetApp(
   target: string | undefined,
   ctx: FocusContext | null,
 ): boolean {
   if (!target || !ctx) return false;
-
+  const app = findAppByTarget(target);
+  if (app) return isAlreadyInApp(app, ctx);
   const key = target.trim().toLowerCase();
-
-  if (key === "whatsapp") {
-    return ctx.isWhatsApp;
-  }
-  if (key === "gmail" || key === "google mail") {
-    return ctx.isGmail;
-  }
-  if (key === "slack") {
-    return ctx.isSlack;
-  }
-
-  const title = ctx.windowTitle.toLowerCase();
-  return title.includes(key);
+  return ctx.windowTitle.toLowerCase().includes(key);
 }

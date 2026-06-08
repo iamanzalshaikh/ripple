@@ -1,0 +1,38 @@
+{
+  "manifest_version": 3,
+  "name": "Ripple Bridge (WhatsApp + YouTube + LinkedIn + Instagram)",
+  "version": "1.6.1",
+  "description": "Ripple automation via Native Messaging (production).",
+  "permissions": ["nativeMessaging", "tabs", "scripting"],
+  "host_permissions": [
+    "https://web.whatsapp.com/*",
+    "https://www.youtube.com/*",
+    "https://www.linkedin.com/*",
+    "https://www.instagram.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://web.whatsapp.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://www.youtube.com/*"],
+      "js": ["youtubeContent.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://www.linkedin.com/*"],
+      "js": ["linkedinContent.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://www.instagram.com/*"],
+      "js": ["instagramContent.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

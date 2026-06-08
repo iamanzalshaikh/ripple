@@ -39,6 +39,7 @@ const api = {
     sessionId?: string;
     chunk: Uint8Array;
     mimeType?: string;
+    filename?: string;
   }) => ipcRenderer.invoke("voice:chunk", args),
   endVoice: (args: { streamId: string; sessionId?: string }) =>
     ipcRenderer.invoke("voice:end", args),

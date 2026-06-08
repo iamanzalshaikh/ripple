@@ -9,6 +9,7 @@ export function buildGmailComposeUrl(parsed: ParsedEmail): string {
   const params = new URLSearchParams();
   params.set("view", "cm");
   params.set("fs", "1");
+  params.set("tf", "cm");
   if (parsed.to) {
     params.set("to", parsed.to.trim());
   }
@@ -19,7 +20,7 @@ export function buildGmailComposeUrl(parsed: ParsedEmail): string {
     params.set("body", parsed.body);
   }
   const qs = params.toString();
-  return `https://mail.google.com/mail/u/0/?${qs}`;
+  return `https://mail.google.com/mail/u/0/?${qs}#compose=new`;
 }
 
 export async function openGmailCompose(parsed: ParsedEmail): Promise<string> {

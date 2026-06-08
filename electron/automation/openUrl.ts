@@ -26,8 +26,8 @@ export async function openUrlInBrowser(url: string): Promise<void> {
     return;
   }
 
-  const ok = await shell.openExternal(url);
-  if (ok) return;
+  await shell.openExternal(url);
+  return;
 
   if (process.platform === "darwin") {
     await execFileAsync("open", [url]);

@@ -42,7 +42,6 @@ export const useHistoryStore = create<HistoryState>((set, get) => ({
       const res = await getRippleApi().getCommandHistory({
         page,
         limit: get().limit,
-        sort: "latest",
         intent: get().intentFilter || undefined,
       });
       if (!res.ok) {

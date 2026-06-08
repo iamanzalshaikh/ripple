@@ -17,12 +17,56 @@ function normalizeEmail(raw: string): string {
     .replace(/[.,;:!?)]+$/, "");
 }
 
+/** Fix STT/backend mistakes like salikandredgmail.com@gmail.com → salikandred@gmail.com */
+export function sanitizeEmailAddress(raw: string): string {
+  let e = normalizeEmail(raw);
+  if (!e) return e;
+
+  e = e.replace(/@gmail\.com@gmail\.com$/i, "@gmail.com");
+
+  const doubleGmail = e.match(/^([a-z0-9][\w.+-]*)gmail\.com@gmail\.com$/i);
+  if (doubleGmail) return `${doubleGmail[1]}@gmail.com`;
+
+  if (!e.includes("@") && /gmail\.com$/i.test(e)) {
+    const local = e.replace(/gmail\.com$/i, "");
+    if (local) return `${local}@gmail.com`;
+  }
+
+  const atCount = (e.match(/@/g) ?? []).length;
+  if (atCount > 1) {
+    const gmailOnly = e.match(/([a-z0-9][\w.+-]*)@gmail\.com/i);
+    if (gmailOnly) return gmailOnly[0].toLowerCase();
+  }
+
+  return e;
+}
+
+/** Backend sometimes returns meta text instead of a real email body. */
+export function isAiGmailFillerBody(text: string): boolean {
+  const t = text.trim().toLowerCase();
+  if (!t) return false;
+  return (
+    /unable to directly open/i.test(t) ||
+    /please open gmail/i.test(t) ||
+    /i(?:'m| am) unable to/i.test(t) ||
+    /as an ai/i.test(t) ||
+    /cannot send emails?/i.test(t) ||
+    /open gmail on your desktop/i.test(t)
+  );
+}
+
 /** Fix STT: "name @ gmail.com" or "name at gmail.com" → email */
 function normalizeSpeechEmailPhrases(text: string): string {
   return text
+    .replace(/\bgmail\s+dot\s+com\b/gi, "gmail.com")
+    .replace(/\bdot\s+com\b/gi, ".com")
     .replace(
       /\b([a-z0-9][\w.+-]*)\s*@\s*([a-z0-9][\w.-]*\.[a-z]{2,})\b/gi,
       "$1@$2",
+    )
+    .replace(
+      /\b([a-z0-9][\w.+-]*)\s+at\s+(?:\w+\s+)*(?:a\s+rate\s+|the\s+)?gmail\.com\b/gi,
+      "$1@gmail.com",
     )
     .replace(
       /\b([a-z0-9][\w.+-]*)\s+at\s+(?:a\s+rate\s+|the\s+)?gmail\.com\b/gi,
@@ -58,14 +102,14 @@ export function extractRecipientFromCommand(command: string): string | undefined
   }
 
   const mailToName = normalized.match(
-    /\b(?:mail|email|message)\s+to\s+([a-z0-9][\w.-]*)\s+at\s+gmail/i,
+    /\b(?:mail|email|message)\s+to\s+([a-z0-9][\w.-]*)\s+at\s+(?:\w+\s+)*gmail\.com/i,
   );
   if (mailToName) {
     return `${mailToName[1].toLowerCase()}@gmail.com`;
   }
 
   const writeToName = normalized.match(
-    /\bwrite\s+(?:a\s+)?(?:mail|email)\s+to\s+([a-z0-9][\w.-]*)(?:\s+at\s+gmail)?/i,
+    /\bwrite\s+(?:a\s+)?(?:mail|email)\s+to\s+([a-z0-9][\w.-]*)(?:\s+at\s+(?:\w+\s+)*gmail\.com)?/i,
   );
   if (writeToName && !writeToName[1].includes("@")) {
     const name = writeToName[1].toLowerCase();

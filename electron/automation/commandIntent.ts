@@ -6,10 +6,13 @@ export function isEditOrRephraseCommand(command: string): boolean {
   return (
     /\b(rephrase|rewrite|reword|revise|edit|modify|adjust|improve|fix|refresh)\b/i.test(c) ||
     /\bmake\s+(it|this|that)(\s+\w+){0,3}\s+(more\s+)?/i.test(c) ||
+    /\bmake\s+(?:this|that)\s+text\s+(more\s+)?(emotional|confident|sad|angry|mad|formal|casual|professional|friendly|short|long)\b/i.test(c) ||
+    /\bmake\s+it\s+(more\s+)?(emotional|confident|sad|angry|mad|formal|casual|professional|friendly|short|long)\b/i.test(c) ||
     /\bmake\s+it\s+like\b/i.test(c) ||
     /\b(more|less)\s+(confident|emotional|formal|casual|professional|friendly|angry)\b/i.test(c) ||
     /\b(change|update)\s+(the\s+)?(tone|wording|text)\b/i.test(c) ||
     /\b(shorten|lengthen|expand|condense)\b/i.test(c) ||
+    /\b(emotional|confident|sad|angry|mad|formal|casual|professional|friendly)\s*$/i.test(c) ||
     c === "undo" ||
     c === "revert"
   );
@@ -17,6 +20,19 @@ export function isEditOrRephraseCommand(command: string): boolean {
 
 const HAS_EMAIL = /[a-z0-9][\w.+-]*@[\w.-]+\.[a-z]{2,}/i;
 const HAS_GMAIL_SPEECH = /\b[a-z0-9][\w.+-]*\s+at\s+(?:a\s+rate\s+)?gmail/i;
+
+/** Gmail / email compose — must not be routed to WhatsApp workflow. */
+export function isGmailVoiceCommand(command: string): boolean {
+  const c = command.trim().toLowerCase();
+  if (!c) return false;
+  if (/\b(gmail|google\s*mail)\b/i.test(c)) return true;
+  if (/\bgmail\s+dot\s+com\b/i.test(c)) return true;
+  if (/\b(write|send|compose|draft)\s+(a\s+)?(mail|email)\b/i.test(c)) return true;
+  if (/\b(mail|email)\s+to\b/i.test(c) && (HAS_EMAIL.test(c) || HAS_GMAIL_SPEECH.test(c) || /\bat\s+gmail/i.test(c))) {
+    return true;
+  }
+  return isNewEmailCommand(command);
+}
 
 /** Brand-new email — OK to open Gmail compose URL with To/Subject/Body. */
 export function isNewEmailCommand(command: string): boolean {

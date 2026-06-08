@@ -280,7 +280,10 @@ export async function apiExecuteCommand(
   args: {
     sessionId?: string;
     command: string;
+    contextType?: string;
+    actionSource?: string;
     contextMetadata?: Record<string, unknown>;
+    selectedText?: string | null;
   },
 ): Promise<ApiResponse<Record<string, unknown>>> {
   try {
@@ -293,10 +296,10 @@ export async function apiExecuteCommand(
       body: JSON.stringify({
         session_id: args.sessionId,
         command: args.command,
-        context_type: "general",
-        action_source: "desktop",
+        context_type: args.contextType ?? "general",
+        action_source: args.actionSource ?? "desktop",
         context_metadata: args.contextMetadata,
-        selected_text: null,
+        selected_text: args.selectedText ?? null,
       }),
     });
     return parseJson(res);

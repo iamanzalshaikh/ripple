@@ -21,7 +21,7 @@ export function OverlayPage() {
   const [phase, setPhase] = useState<OverlayPhase>("idle");
   const [error, setError] = useState<string | null>(null);
 
-  const sessionIdRef = useRef<string | undefined>();
+  const sessionIdRef = useRef<string | undefined>(undefined);
   const streamIdRef = useRef<string>("");
   const recordingRef = useRef(false);
   const busyRef = useRef(false);
@@ -45,16 +45,6 @@ export function OverlayPage() {
       })
       .catch(() => undefined);
   }, []);
-
-  const sendChunk = useCallback(async (buffer: ArrayBuffer) => {
-    if (!streamIdRef.current) return;
-    await getRippleApi().sendVoiceChunk({
-      streamId: streamIdRef.current,
-      sessionId: sessionIdRef.current,
-      chunk: new Uint8Array(buffer),
-      mimeType: voice.getMimeType(),
-    });
-  }, [voice]);
 
   const runCommand = useCallback(async (text: string) => {
     const res = await getRippleApi().executeCommand({
@@ -88,10 +78,24 @@ export function OverlayPage() {
     if (!recordingRef.current || busyRef.current) return;
     busyRef.current = true;
     recordingRef.current = false;
-    await voice.stop();
     setPhase("processing");
 
     try {
+      const { buffer, mimeType, filename } = await voice.stopAndGetBuffer();
+
+      const chunkRes = await getRippleApi().sendVoiceChunk({
+        streamId: streamIdRef.current,
+        sessionId: sessionIdRef.current,
+        chunk: new Uint8Array(buffer),
+        mimeType,
+        filename,
+      });
+      if (!chunkRes.ok) {
+        setError(chunkRes.message ?? "Failed to upload audio");
+        setPhase("error");
+        return;
+      }
+
       const endRes = await getRippleApi().endVoice({
         streamId: streamIdRef.current,
         sessionId: sessionIdRef.current,
@@ -132,7 +136,7 @@ export function OverlayPage() {
     setPhase("listening");
 
     try {
-      await voice.start(sendChunk);
+      await voice.start();
     } catch (e: unknown) {
       recordingRef.current = false;
       await getRippleApi().setOverlayVoiceActive(false);
@@ -141,7 +145,7 @@ export function OverlayPage() {
       );
       setPhase("error");
     }
-  }, [sendChunk, voice]);
+  }, [voice]);
 
   useEffect(() => {
     const api = getRippleApi();

@@ -1,18 +1,42 @@
 import { clipboard } from "electron";
 import { getFocusContext, restoreFocusContext } from "../focus/focusContext.js";
 import { getLastVoiceCommand, isEditIntent } from "../state/lastCommand.js";
+import { isWhatsAppMessagingCommand } from "./adapters/whatsapp/parseContact.js";
+import { resolveTextWithClipboard } from "./clipboard/clipboardService.js";
 import { delay } from "./delay.js";
 import { formatMessageBody } from "./emailFormat.js";
 import {
   extractRecipientFromCommand,
+  isAiGmailFillerBody,
   parseEmailContent,
+  sanitizeEmailAddress,
   type ParsedEmail,
 } from "./emailParse.js";
+import { isAiNotionFillerBody } from "./adapters/notion/notionFiller.js";
+import {
+  isContextualNotionVoiceCommand,
+  isNotionCommand,
+  isNotionSamePageDocCommand,
+} from "./adapters/notion/parseNotionCommand.js";
+import {
+  isContextualYouTubeVoiceCommand,
+  isYouTubeCommand,
+} from "./adapters/youtube/parseYouTubeCommand.js";
+import {
+  isContextualLinkedInVoiceCommand,
+  isLinkedInCommand,
+  isLinkedInTypingBlocked,
+} from "./adapters/linkedin/parseLinkedInCommand.js";
+import { isInstagramTabActive, isLinkedInTabActive } from "../focus/focusContext.js";
+import {
+  isContextualInstagramComposeCommand,
+  isInstagramTypingBlocked,
+} from "./adapters/instagram/parseInstagramCommand.js";
+import { composeInstagramMessage } from "./adapters/instagram/composeMessage.js";
 import {
   isEditOrRephraseCommand,
   isNewEmailCommand,
 } from "./commandIntent.js";
-import { fillGmailComposeKeyboard } from "./gmailFill.js";
 import { openGmailCompose } from "./gmailComposeUrl.js";
 import {
   pasteFromClipboard,
@@ -42,7 +66,7 @@ function hintsFromData(data?: Record<string, unknown>): Partial<ParsedEmail> {
 function isWhatsAppContext(): boolean {
   const focus = getFocusContext();
   const cmd = getLastVoiceCommand() ?? "";
-  return focus?.isWhatsApp === true || /\bwhatsapp\b/i.test(cmd);
+  return focus?.isWhatsApp === true || isWhatsAppMessagingCommand(cmd);
 }
 
 
@@ -61,7 +85,20 @@ function shouldUseGmailCompose(parsed: ParsedEmail, rawText: string): boolean {
     return false;
   }
 
-  return Boolean(parsed.subject || parsed.body.length > 40 || parsed.to);
+  // Always open a new compose window — never type into inbox/search while on Gmail.
+  return true;
+}
+
+function resolveGmailComposeFields(
+  parsed: ParsedEmail,
+  backendText: string,
+): ParsedEmail {
+  const to = parsed.to ? sanitizeEmailAddress(parsed.to) : undefined;
+  let body = parsed.body;
+  if (isAiGmailFillerBody(body) || isAiGmailFillerBody(backendText)) {
+    body = "";
+  }
+  return { ...parsed, to, body };
 }
 
 /** Replace all text in the focused field (for edits). */
@@ -90,7 +127,8 @@ export async function smartInsertText(
   data?: Record<string, unknown>,
 ): Promise<string> {
   const hints = hintsFromData(data);
-  const text = typeof data?.text === "string" ? data.text : rawText;
+  const base = typeof data?.text === "string" ? data.text : rawText;
+  const text = resolveTextWithClipboard(base);
   if (!text.trim()) {
     throw new Error("INSERT_TEXT missing text");
   }
@@ -102,42 +140,89 @@ export async function smartInsertText(
     parsed.to = extractRecipientFromCommand(voiceCommand);
   }
   if (parsed.to) {
-    parsed.to = parsed.to.toLowerCase().replace(/\s+/g, "");
+    parsed.to = sanitizeEmailAddress(parsed.to);
   }
   const focus = getFocusContext();
   const cmd = voiceCommand ?? "";
 
-  if (isEditOrRephraseCommand(cmd) || isEditIntent()) {
-    console.info("[ripple-desktop] edit/rephrase — replace in place (no new Gmail window)");
+  const notionVoice =
+    isNotionCommand(cmd) ||
+    (focus?.isNotion === true && isContextualNotionVoiceCommand(cmd));
+
+  // For Notion docs generation, we want to paste into the current page (no notion.new).
+  const isNotionDocWrite = isNotionSamePageDocCommand(cmd);
+
+  if (notionVoice && !isNotionDocWrite && !isEditOrRephraseCommand(cmd)) {
+    throw new Error(
+      "Notion commands use notion.new + clipboard paste (3.5.1) — on a Notion tab say e.g. Create documentation for X and paste my clipboard",
+    );
+  }
+
+  const youtubeVoice =
+    isYouTubeCommand(cmd) ||
+    (focus?.isYouTube === true && isContextualYouTubeVoiceCommand(cmd));
+
+  if (youtubeVoice && !isEditOrRephraseCommand(cmd)) {
+    throw new Error(
+      "YouTube commands use search URL (B4) — say e.g. Search React tutorial on YouTube",
+    );
+  }
+
+  const linkedinVoice =
+    isLinkedInCommand(cmd) ||
+    (isLinkedInTabActive() && isContextualLinkedInVoiceCommand(cmd));
+
+  if ((linkedinVoice || isLinkedInTypingBlocked(cmd)) && !isEditOrRephraseCommand(cmd)) {
+    throw new Error(
+      "LinkedIn commands use the post composer (extension) — on a LinkedIn tab say e.g. Create post or Search Jasmine Pathan",
+    );
+  }
+
+  const instagramCompose =
+    isInstagramTabActive() && isContextualInstagramComposeCommand(cmd);
+
+  if ((instagramCompose || isInstagramTypingBlocked(cmd)) && !isEditOrRephraseCommand(cmd)) {
+    throw new Error(
+      "Instagram DMs use the open chat composer — on an Instagram DM thread say your message directly",
+    );
+  }
+
+  if (focus?.isNotion === true && isAiNotionFillerBody(text)) {
+    throw new Error(
+      "Blocked AI placeholder text on Notion — copy your content, then say paste clipboard on a Notion tab",
+    );
+  }
+
+  if (
+    (isEditOrRephraseCommand(cmd) || isEditIntent()) &&
+    !instagramCompose
+  ) {
     const formatted = formatMessageBody(parsed, text);
+    if (isInstagramTabActive()) {
+      console.info("[ripple-desktop] DM rephrase — replace in composer via extension");
+      return composeInstagramMessage({ text: formatted, send: false });
+    }
+    console.info("[ripple-desktop] edit/rephrase — replace in place (no new Gmail window)");
     return replaceTextInPlace(formatted);
   }
 
   if (shouldUseGmailCompose(parsed, text)) {
-    if (!parsed.to) {
+    const compose = resolveGmailComposeFields(parsed, text);
+    if (!compose.to) {
       console.warn(
         `[ripple-desktop] No recipient in command — say "write mail to name@gmail.com"`,
       );
     }
     try {
       console.info(
-        `[ripple-desktop] Gmail compose URL — to=${parsed.to ?? "(empty — add email in command)"} subject="${(parsed.subject ?? "").slice(0, 50)}" body=${parsed.body.length}ch`,
+        `[ripple-desktop] Gmail compose URL (new window) — to=${compose.to ?? "(empty)"} subject="${(compose.subject ?? "").slice(0, 50)}" body=${compose.body.length}ch`,
       );
-      return await openGmailCompose(parsed);
+      return await openGmailCompose(compose);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       console.error(`[ripple-desktop] Gmail compose URL failed: ${msg}`);
-      if (focus?.isGmail) {
-        try {
-          return await fillGmailComposeKeyboard(parsed, "body");
-        } catch (e2: unknown) {
-          throw new Error(
-            `Gmail fill failed. Restart Ripple (tray → quit, npm run dev). ${e2 instanceof Error ? e2.message : e2}`,
-          );
-        }
-      }
       throw new Error(
-        `Could not open Gmail compose. Fully quit Ripple and run npm run dev again. ${msg}`,
+        `Could not open new Gmail compose. ${msg}`,
       );
     }
   }
