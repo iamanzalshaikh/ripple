@@ -43,6 +43,8 @@ import {
   startWhatsAppExtensionBridge,
   stopWhatsAppExtensionBridge,
 } from "../bridge/whatsappExtensionBridge.js";
+import { initRippleDb, closeRippleDb } from "../storage/rippleDb.js";
+import { listDesktopHistory } from "../storage/desktopHistory.js";
 
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
 if (!gotSingleInstanceLock) {
@@ -140,7 +142,7 @@ function logApi(
   detail?: string,
 ): void {
   const tag = ok ? "OK" : "FAIL";
-  const extra = detail ? ` — ${detail}` : "";
+  const extra = detail ? ` - ${detail}` : "";
   console.info(`[ripple-desktop] ${method} ${path} -> ${tag}${extra}`);
 }
 
@@ -408,6 +410,21 @@ function registerIpc(): void {
     });
   });
 
+  ipcMain.handle(
+    "desktop-history:list",
+    async (_e, args: { limit?: number } = {}) => {
+      try {
+        const items = listDesktopHistory(args.limit ?? 50);
+        return { ok: true, items };
+      } catch (e: unknown) {
+        return {
+          ok: false,
+          message: e instanceof Error ? e.message : "Failed to load local history",
+        };
+      }
+    },
+  );
+
   ipcMain.handle("overlay:voice-active", (_e, active: boolean) => {
     setVoiceSessionActive(active);
     if (!active) setOverlayState("idle");
@@ -417,16 +434,17 @@ function registerIpc(): void {
 
 if (gotSingleInstanceLock) {
 app.whenReady().then(async () => {
-  console.info("[ripple-desktop] ===== build phase-3.5.4-linkedin-paste-fix-v9 =====");
+  console.info("[ripple-desktop] ===== build phase-4.0-desktop-intelligence-v1 =====");
+  initRippleDb();
   console.info(
-    "[ripple-desktop] WhatsApp: Chrome extension + Native Messaging — see WHATSAPP_SETUP.md",
+    "[ripple-desktop] WhatsApp: Chrome extension + Native Messaging - see WHATSAPP_SETUP.md",
   );
   startWhatsAppExtensionBridge();
   console.info(
-    "[ripple-desktop] Voice pipeline: Whisper → normalize → match → confidence → confirm → act",
+    "[ripple-desktop] Voice pipeline: Whisper -> normalize -> match -> confidence -> confirm -> act",
   );
   console.info(
-    "[ripple-desktop] Phase 3.5: WhatsApp + Gmail + desktop + Notion + YouTube + LinkedIn + Instagram",
+    "[ripple-desktop] Phase 4 (active): desktop apps, aliases, file ops + Phase 3.5 web apps",
   );
   console.info(`[ripple-desktop] API base: ${API_BASE}`);
   console.info(`[ripple-desktop] Socket URL: ${getSocketUrl()}`);
@@ -469,6 +487,7 @@ app.on("will-quit", () => {
   stopWhatsAppExtensionBridge();
   unregisterGlobalShortcuts();
   destroyTray();
+  closeRippleDb();
 });
 
 app.on("window-all-closed", () => {

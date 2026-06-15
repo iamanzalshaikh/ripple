@@ -29,7 +29,9 @@ export function createMainWindow(): BrowserWindow {
 
   mainWindow.on("ready-to-show", () => {
     mainWindow?.show();
-    if (process.env.ELECTRON_RENDERER_URL) {
+    // DevTools auto-open triggers harmless Autofill.enable Chromium console noise.
+    // Opt in: RIPPLE_DEVTOOLS=1 npm run dev
+    if (process.env.ELECTRON_RENDERER_URL && process.env.RIPPLE_DEVTOOLS === "1") {
       mainWindow?.webContents.openDevTools({ mode: "detach" });
     }
   });

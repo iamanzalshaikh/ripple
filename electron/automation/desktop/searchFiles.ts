@@ -1,11 +1,11 @@
 import { existsSync, readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { resolveFolderPath } from "./openFolder.js";
 
 const SEARCH_ROOTS = ["downloads", "documents", "desktop"] as const;
-const MAX_DEPTH = 2;
+const MAX_DEPTH = 3;
 
-function listFilesRecursive(dir: string, depth: number, out: string[]): void {
+function listItemsRecursive(dir: string, depth: number, out: string[]): void {
   if (depth > MAX_DEPTH || !existsSync(dir)) return;
   let entries: string[];
   try {
@@ -22,42 +22,45 @@ function listFilesRecursive(dir: string, depth: number, out: string[]): void {
     } catch {
       continue;
     }
-    if (st.isFile()) {
+    if (st.isFile() || st.isDirectory()) {
       out.push(full);
-    } else if (st.isDirectory() && depth < MAX_DEPTH) {
-      listFilesRecursive(full, depth + 1, out);
+    }
+    if (st.isDirectory() && depth < MAX_DEPTH) {
+      listItemsRecursive(full, depth + 1, out);
     }
   }
 }
 
-/**
- * Find a file by name under Downloads, Documents, Desktop (shallow search).
- */
-export function searchFileByName(filename: string): string | null {
-  const target = filename.trim().toLowerCase();
-  if (!target) return null;
+function rankMatches(target: string, paths: string[]): string[] {
+  const exact = paths.filter((p) => basename(p).toLowerCase() === target);
+  if (exact.length > 0) {
+    return exact.sort((a, b) => a.length - b.length);
+  }
 
-  const matches: string[] = [];
+  const partial = paths.filter((p) =>
+    basename(p).toLowerCase().includes(target),
+  );
+  return partial.sort((a, b) => a.length - b.length);
+}
+
+/**
+ * Find files or folders by name under Downloads, Documents, Desktop.
+ */
+export function searchItemsByName(spoken: string): string[] {
+  const target = spoken.trim().toLowerCase();
+  if (!target) return [];
+
+  const all: string[] = [];
   for (const rootKey of SEARCH_ROOTS) {
     const root = resolveFolderPath(rootKey);
-    listFilesRecursive(root, 0, matches);
+    listItemsRecursive(root, 0, all);
   }
 
-  const exact = matches.filter((p) => {
-    const base = p.split(/[/\\]/).pop()?.toLowerCase();
-    return base === target;
-  });
+  return rankMatches(target, all);
+}
 
-  if (exact.length === 1) return exact[0]!;
-  if (exact.length > 1) {
-    exact.sort((a, b) => a.length - b.length);
-    return exact[0]!;
-  }
-
-  const partial = matches.filter((p) =>
-    p.split(/[/\\]/).pop()?.toLowerCase().includes(target),
-  );
-  if (partial.length === 0) return null;
-  partial.sort((a, b) => a.length - b.length);
-  return partial[0]!;
+/** @deprecated use searchItemsByName */
+export function searchFileByName(filename: string): string | null {
+  const items = searchItemsByName(filename);
+  return items[0] ?? null;
 }

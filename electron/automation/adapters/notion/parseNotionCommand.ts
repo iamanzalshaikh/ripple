@@ -1,4 +1,5 @@
 import { isNotionFocused } from "../../../focus/focusContext.js";
+import { isRememberWorkflowPhrase } from "../../desktop/spokenName.js";
 import { normalizeTranscript } from "../../voice/normalizeTranscript.js";
 
 export type NotionIntent =
@@ -148,6 +149,9 @@ export function parseNotionCommand(command?: string | null): NotionIntent | null
   const cmd = normalizeTranscript(command ?? "");
   if (!cmd) return null;
 
+  // "Remember study mode, open notion..." is a desktop workflow — not Notion open
+  if (isRememberWorkflowPhrase(cmd)) return null;
+
   const onNotion = isNotionFocused();
   const saidNotion = mentionsNotion(cmd);
 
@@ -188,7 +192,7 @@ export function parseNotionCommand(command?: string | null): NotionIntent | null
     return { kind: "open", workspace };
   }
 
-  return { kind: "open", workspace };
+  return null;
 }
 
 export function isNotionCommand(command?: string | null): boolean {

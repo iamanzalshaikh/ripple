@@ -4,7 +4,8 @@ export type WellKnownFolder = "downloads" | "documents" | "desktop";
 
 export type DesktopOpenIntent =
   | { kind: "folder"; folder: WellKnownFolder }
-  | { kind: "file"; filename: string };
+  | { kind: "file"; filename: string }
+  | { kind: "item"; name: string; parent?: WellKnownFolder };
 
 /** Web/app opens — never treat as desktop folder/file. */
 const WEB_OR_APP_OPEN =
@@ -23,10 +24,14 @@ function normalizeFolderKey(raw: string): WellKnownFolder | null {
   return FOLDER_ALIASES[key] ?? null;
 }
 
+const ITEM_IN_FOLDER =
+  /^\s*open\s+(?:my\s+)?(.+?)\s+(?:in|on)\s+(?:my\s+)?(downloads?|documents?|desktop)\s*\.?\s*$/i;
+
 /**
  * Parse desktop-only voice commands:
  * - "Open Downloads" / "Open my Documents"
- * - "Open Resume.pdf" / "Open file Report.docx"
+ * - "Open Flow in desktop" / "Open AQC on downloads"
+ * - "Open Resume.pdf" / "Open Eric" (local search)
  */
 export function parseDesktopCommand(command?: string | null): DesktopOpenIntent | null {
   const cmd = normalizeTranscript(command ?? "");
@@ -38,6 +43,18 @@ export function parseDesktopCommand(command?: string | null): DesktopOpenIntent 
   if (folderOnly?.[1]) {
     const folder = normalizeFolderKey(folderOnly[1]);
     if (folder) return { kind: "folder", folder };
+  }
+
+  const itemInFolder = cmd.match(ITEM_IN_FOLDER);
+  if (itemInFolder?.[1] && itemInFolder[2]) {
+    const folder = normalizeFolderKey(itemInFolder[2]);
+    if (folder) {
+      return {
+        kind: "item",
+        name: itemInFolder[1].trim(),
+        parent: folder,
+      };
+    }
   }
 
   const fileExplicit = cmd.match(
@@ -52,6 +69,15 @@ export function parseDesktopCommand(command?: string | null): DesktopOpenIntent 
   );
   if (fileWithExt?.[1]?.trim()) {
     return { kind: "file", filename: fileWithExt[1].trim() };
+  }
+
+  // "Open Eric" / "Open Flow" — local file/folder search (not backend browser)
+  const openItem = cmd.match(/^\s*open\s+(?:my\s+)?(.+?)\s*\.?\s*$/i);
+  if (openItem?.[1]?.trim()) {
+    const name = openItem[1].trim();
+    if (!normalizeFolderKey(name)) {
+      return { kind: "item", name };
+    }
   }
 
   return null;

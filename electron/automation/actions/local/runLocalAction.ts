@@ -20,6 +20,27 @@ export async function runLocalAction(action: LocalAction): Promise<string> {
 
     case "OPEN_FOLDER":
     case "OPEN_FILE":
+    case "LAUNCH_APP":
+    case "FOCUS_APP":
+    case "CLOSE_APP":
+    case "MINIMIZE_ALL":
+    case "SYSTEM_ACTION":
+    case "RECALL_MEMORY":
+    case "OPEN_ALIAS":
+    case "REMEMBER_ALIAS":
+    case "LIST_ALIASES":
+    case "REMOVE_ALIAS":
+    case "CREATE_FOLDER":
+    case "CREATE_FILE":
+    case "RENAME_FILE":
+    case "MOVE_FILE":
+    case "DELETE_FILE":
+    case "OPEN_WORKSPACE":
+    case "REMEMBER_WORKSPACE":
+    case "RUN_WORKFLOW":
+    case "REMEMBER_WORKFLOW":
+    case "LIST_WORKFLOWS":
+    case "REMOVE_WORKFLOW":
       return "Handled by desktop batch";
 
     default:
