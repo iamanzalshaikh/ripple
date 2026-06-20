@@ -8,6 +8,7 @@ import {
   isWhatsAppMessagingCommand,
   resolveWhatsAppMessageText,
 } from "../adapters/whatsapp/parseContact.js";
+import { parseReferentialWhatsApp } from "../voice/nlu/parseReferentialWhatsApp.js";
 import {
   isContextualNotionVoiceCommand,
   isNotionCommand,
@@ -23,6 +24,7 @@ import {
 } from "../adapters/instagram/parseInstagramCommand.js";
 import { isGmailVoiceCommand } from "../commandIntent.js";
 import { parseNativeCommand } from "../desktop/parseNativeCommand.js";
+import { desktopBatchPayload } from "../desktop/desktopCommand.js";
 
 function isWhatsAppTarget(target: string | undefined): boolean {
   if (!target) return false;
@@ -64,6 +66,16 @@ export function isWhatsAppMessageWorkflow(steps: RippleAction[]): boolean {
     (s) => s.type === "OPEN_APP" && isWhatsAppTarget(getOpenAppTarget(s)),
   );
   if (openWa) return true;
+
+  const insert = steps.find((s) => s.type === "INSERT_TEXT");
+  if (
+    insert?.data?.recipient &&
+    insert.data._whatsappBatch === true
+  ) {
+    return true;
+  }
+
+  if (parseReferentialWhatsApp(cmd)) return true;
 
   if (!isWhatsAppMessagingCommand(cmd)) return false;
 
@@ -127,6 +139,19 @@ function expandDesktopWorkflow(cmd: string): WorkflowStep[] | null {
   const desktop = parseNativeCommand(cmd);
   if (!desktop) return null;
 
+  if (desktop.kind === "compound") {
+    console.info(
+      `[ripple-desktop] WORKFLOW expand → Desktop compound (${desktop.steps.length} steps)`,
+    );
+    return desktop.steps.map((step) => ({
+      kind: "local" as const,
+      action: {
+        type: "NOOP" as const,
+        data: desktopBatchPayload(step, cmd),
+      },
+    }));
+  }
+
   let localType: LocalAction["type"] = "OPEN_FOLDER";
   const data: Record<string, unknown> = {
     _desktopBatch: true,
@@ -157,6 +182,15 @@ function expandDesktopWorkflow(cmd: string): WorkflowStep[] | null {
       if (desktop.parent) data.parentFolder = desktop.parent;
       console.info(
         `[ripple-desktop] WORKFLOW expand → Desktop (item=${desktop.name}${desktop.parent ? `@${desktop.parent}` : ""})`,
+      );
+      break;
+    case "smart_search":
+      localType = "OPEN_FILE";
+      data.desktopKind = "smart_search";
+      data.smartLabel = desktop.label;
+      data.smartQuery = desktop.query;
+      console.info(
+        `[ripple-desktop] WORKFLOW expand → Desktop (smart=${desktop.label})`,
       );
       break;
     case "launch_app":
@@ -283,6 +317,15 @@ function expandDesktopWorkflow(cmd: string): WorkflowStep[] | null {
         `[ripple-desktop] WORKFLOW expand → Desktop (delete_file=${desktop.sourceName})`,
       );
       break;
+    case "referential_send":
+      localType = "OPEN_FILE";
+      data.desktopKind = "referential_send";
+      data.contact = desktop.contact;
+      data.sendMode = desktop.mode;
+      console.info(
+        `[ripple-desktop] WORKFLOW expand → Desktop (referential_send=${desktop.contact})`,
+      );
+      break;
     case "open_workspace":
       localType = "OPEN_WORKSPACE";
       data.desktopKind = "open_workspace";
@@ -315,6 +358,7 @@ function expandDesktopWorkflow(cmd: string): WorkflowStep[] | null {
       data.desktopKind = "remember_workflow";
       data.workflowName = desktop.name;
       data.workflowStepsRaw = desktop.stepsRaw;
+      data.workflowReplace = desktop.replace === true;
       console.info(
         `[ripple-desktop] WORKFLOW expand → Desktop (remember_workflow=${desktop.name})`,
       );
@@ -337,8 +381,54 @@ function expandDesktopWorkflow(cmd: string): WorkflowStep[] | null {
   return [{ kind: "local", action: { type: localType, data } }];
 }
 
+/** WhatsApp NOOP batch (message / replace_composer) — always local extension path. */
+function expandWhatsAppBatchWorkflow(
+  steps: RippleAction[],
+): WorkflowStep[] | null {
+  const batch = steps.find(
+    (s) => s.type === "NOOP" && s.data?._whatsappBatch === true,
+  );
+  if (!batch?.data) return null;
+  return [
+    {
+      kind: "local",
+      action: { type: "NOOP", data: batch.data as Record<string, unknown> },
+    },
+  ];
+}
+
+/** Use desktop batch steps already embedded in WORKFLOW payload (planner compound). */
+function expandPrebuiltDesktopBatches(
+  steps: RippleAction[],
+): WorkflowStep[] | null {
+  const batches = steps.filter(
+    (s) => s.type === "NOOP" && s.data?._desktopBatch === true,
+  );
+  if (batches.length === 0) return null;
+
+  if (batches.length > 1) {
+    console.info(
+      `[ripple-desktop] WORKFLOW expand → ${batches.length} prebuilt desktop steps`,
+    );
+  }
+
+  return batches.map((s) => ({
+    kind: "local" as const,
+    action: {
+      type: "OPEN_FILE" as const,
+      data: s.data as Record<string, unknown>,
+    },
+  }));
+}
+
 export function expandWorkflowSteps(steps: RippleAction[]): WorkflowStep[] {
   if (steps.length === 0) return [];
+
+  const prebuilt = expandPrebuiltDesktopBatches(steps);
+  if (prebuilt) return prebuilt;
+
+  const whatsappBatch = expandWhatsAppBatchWorkflow(steps);
+  if (whatsappBatch) return whatsappBatch;
 
   const cmd = getLastVoiceCommand() ?? "";
   const desktopSteps = expandDesktopWorkflow(cmd);
@@ -350,11 +440,17 @@ export function expandWorkflowSteps(steps: RippleAction[]): WorkflowStep[] {
   if (isWhatsAppMessageWorkflow(steps)) {
     const cmd = getLastVoiceCommand() ?? "";
     const insert = steps.find((s) => s.type === "INSERT_TEXT");
-    const text = resolveWhatsAppMessageText(cmd, insert ? getInsertText(insert) : "");
-    const contact = extractContactName(
-      cmd,
-      insert?.data?.recipient ?? extractContactName(cmd),
-    );
+    const batchData = insert?.data as Record<string, unknown> | undefined;
+    const text =
+      typeof batchData?.text === "string"
+        ? batchData.text
+        : resolveWhatsAppMessageText(cmd, insert ? getInsertText(insert) : "");
+    const contact =
+      (typeof batchData?.recipient === "string" ? batchData.recipient : null) ??
+      extractContactName(cmd, insert?.data?.recipient ?? extractContactName(cmd));
+    const send =
+      batchData?.send === true ||
+      (batchData?.send !== false && commandImpliesSend(cmd));
 
     if (!contact?.trim()) {
       throw new Error(
@@ -374,7 +470,7 @@ export function expandWorkflowSteps(steps: RippleAction[]): WorkflowStep[] {
           data: {
             text,
             recipient: contact,
-            send: commandImpliesSend(cmd),
+            send,
             command: cmd,
             _whatsappBatch: true,
           },

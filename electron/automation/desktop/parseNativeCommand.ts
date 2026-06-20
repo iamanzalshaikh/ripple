@@ -27,6 +27,17 @@ import {
   parseWorkflowRunCommand,
   type WorkflowIntent,
 } from "./parseWorkflowCommand.js";
+import {
+  parseSmartSearchCommand,
+  type SmartSearchIntent,
+} from "./parseSmartSearchCommand.js";
+import { parseUndoCommand, type UndoCommandIntent } from "./parseUndoCommand.js";
+import type { CompoundIntent } from "../voice/nlu/compoundParse.js";
+import type { ReferentialSendIntent } from "../voice/nlu/parseReferentialWhatsApp.js";
+import { parseReferentialSend } from "../voice/nlu/parseReferentialWhatsApp.js";
+import { parseDesktopIntent } from "../voice/nlu/pipeline.js";
+
+export type OpenResolvedIntent = { kind: "open_resolved"; path: string };
 
 export type NativeCommandIntent =
   | DesktopOpenIntent
@@ -36,16 +47,22 @@ export type NativeCommandIntent =
   | AliasIntent
   | FileOpIntent
   | WorkspaceIntent
-  | WorkflowIntent;
+  | WorkflowIntent
+  | SmartSearchIntent
+  | UndoCommandIntent
+  | OpenResolvedIntent
+  | ReferentialSendIntent
+  | CompoundIntent;
 
 /**
- * Unified local desktop parser.
- * Order: workflow meta -> alias meta -> workspace meta -> workflow run ->
- *        alias open -> workspace open -> file ops -> apps -> folders/files.
+ * Strict regex parsers only — no NLU fallback.
  */
-export function parseNativeCommand(
+export function parseNativeCommandStrict(
   command?: string | null,
 ): NativeCommandIntent | null {
+  const undo = parseUndoCommand(command);
+  if (undo) return undo;
+
   const workflowMeta = parseWorkflowMetaCommand(command);
   if (workflowMeta) return workflowMeta;
 
@@ -64,8 +81,8 @@ export function parseNativeCommand(
   const aliasOpen = parseAliasOpenCommand(command);
   if (aliasOpen) return aliasOpen;
 
-  const workspaceOpen = parseWorkspaceOpenCommand(command);
-  if (workspaceOpen) return workspaceOpen;
+  const referentialSend = parseReferentialSend(command);
+  if (referentialSend) return referentialSend;
 
   const fileOp = parseFileOperationCommand(command);
   if (fileOp) return fileOp;
@@ -76,7 +93,28 @@ export function parseNativeCommand(
   const app = parseNativeAppCommand(command);
   if (app) return app;
 
-  return parseDesktopCommand(command);
+  const smartSearch = parseSmartSearchCommand(command);
+  if (smartSearch) return smartSearch;
+
+  const desktopOpen = parseDesktopCommand(command);
+  if (desktopOpen) return desktopOpen;
+
+  // Keep alias/workspace open late so they do not shadow canonical desktop folders
+  // (e.g. "open downloads") or smart_search intents (e.g. "open my resume").
+  const workspaceOpen = parseWorkspaceOpenCommand(command);
+  if (workspaceOpen) return workspaceOpen;
+
+  return null;
+}
+
+/**
+ * Unified local desktop parser (Phase 4.6).
+ * Same entry as pipeline — includes compound + NLU fallback.
+ */
+export function parseNativeCommand(
+  command?: string | null,
+): NativeCommandIntent | null {
+  return parseDesktopIntent(command)?.intent ?? null;
 }
 
 export function isNativeCommand(command?: string | null): boolean {

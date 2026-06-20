@@ -2285,9 +2285,28 @@ function getEditableText(el) {
 
 function clearEditable(el) {
   el.focus();
+  el.click();
   if (el instanceof HTMLInputElement) {
     el.value = "";
+    el.dispatchEvent(new Event("input", { bubbles: true }));
     return;
+  }
+  const clearKeys = [
+    { key: "a", code: "KeyA", ctrlKey: true },
+    { key: "Backspace", code: "Backspace" },
+    { key: "Delete", code: "Delete" },
+  ];
+  for (const spec of clearKeys) {
+    try {
+      el.dispatchEvent(
+        new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...spec }),
+      );
+      el.dispatchEvent(
+        new KeyboardEvent("keyup", { bubbles: true, cancelable: true, ...spec }),
+      );
+    } catch (_) {
+      /* ignore */
+    }
   }
   try {
     const sel = window.getSelection();
@@ -2296,11 +2315,16 @@ function clearEditable(el) {
     sel?.removeAllRanges();
     sel?.addRange(range);
     document.execCommand("delete", false, null);
+    document.execCommand("selectAll", false, null);
+    document.execCommand("delete", false, null);
   } catch (_) {
     /* ignore */
   }
   if ((el.textContent ?? "").length > 0) {
     el.textContent = "";
+  }
+  if (el.innerHTML && el.innerHTML.length > 0) {
+    el.innerHTML = '<p class="selectable-text copyable-text" data-lexical-text="true"><br></p>';
   }
 }
 
@@ -2381,6 +2405,106 @@ async function openSearchPanel() {
   return findSearchInput();
 }
 
+function normalizeComposerCompare(text) {
+  return String(text ?? "")
+    .replace(/\u200b/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function writtenMatchesComposer(written, target) {
+  const w = normalizeComposerCompare(written);
+  const t = normalizeComposerCompare(target);
+  if (!t) return false;
+  if (w === t) return true;
+  if (countLeadingRepeats(w, t) > 1) return false;
+  if (w.length > t.length * 1.08) return false;
+  return false;
+}
+
+function countLeadingRepeats(written, target) {
+  const w = String(written ?? "");
+  const t = String(target ?? "").trim();
+  if (!t) return 0;
+  let count = 0;
+  let pos = 0;
+  while (w.slice(pos).startsWith(t)) {
+    count++;
+    pos += t.length;
+  }
+  return count;
+}
+
+function forceComposerToSingleCopy(el, msg) {
+  const target = String(msg ?? "").trim();
+  if (!target) return;
+
+  clearEditable(el);
+  setEditableText(el, target);
+  try {
+    el.dispatchEvent(
+      new InputEvent("input", {
+        bubbles: true,
+        cancelable: true,
+        inputType: "insertText",
+        data: target,
+      }),
+    );
+  } catch (_) {
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+}
+
+/** Replace all composer text — select-all + one insert; never stack multiple strategies. */
+async function replaceComposerText(el, text) {
+  const msg = String(text ?? "").trim();
+  if (!msg) throw new Error("Empty message");
+
+  el.scrollIntoView({ block: "nearest", inline: "nearest" });
+  el.focus({ preventScroll: true });
+  el.click();
+  await sleep(200);
+
+  clearEditable(el);
+  await sleep(120);
+  el.focus({ preventScroll: true });
+
+  try {
+    document.execCommand("selectAll", false, null);
+  } catch (_) {
+    /* ignore */
+  }
+  await sleep(60);
+
+  try {
+    document.execCommand("insertText", false, msg);
+  } catch (_) {
+    /* ignore */
+  }
+
+  let written = getEditableText(el);
+  if (
+    countLeadingRepeats(written, msg) > 1 ||
+    written.length > msg.length * 1.08 ||
+    !writtenMatchesComposer(written, msg)
+  ) {
+    waLog("replace force single copy", {
+      repeats: countLeadingRepeats(written, msg),
+      len: written.length,
+      targetLen: msg.length,
+    });
+    forceComposerToSingleCopy(el, msg);
+    written = getEditableText(el);
+  }
+
+  dedupeEditableText(el, msg);
+  written = getEditableText(el);
+
+  if (!writtenMatchesComposer(written, msg)) {
+    throw new Error(`Could not replace composer text (${labelOf(el) || "unknown"})`);
+  }
+}
+
 async function focusAndType(el, text, options = {}) {
   const { click = true } = options;
   el.scrollIntoView({ block: "nearest", inline: "nearest" });
@@ -2397,11 +2521,13 @@ async function focusAndType(el, text, options = {}) {
 }
 
 function setEditableText(el, msg) {
+  const target = String(msg ?? "");
   if (el instanceof HTMLInputElement) {
-    el.value = msg;
-  } else {
-    el.textContent = msg;
+    el.value = target;
+    return;
   }
+  el.innerHTML = "";
+  el.textContent = target;
 }
 
 /** If field already contains duplicated text, collapse to a single copy. */
@@ -2412,9 +2538,23 @@ function dedupeEditableText(el, msg) {
   let written = getEditableText(el);
   if (written === target) return;
 
+  const repeats = countLeadingRepeats(written, target);
+  if (repeats > 1) {
+    waLog("dedupe message", `${repeats}x repeat`);
+    setEditableText(el, target);
+    return;
+  }
+
   const doubled = target + target;
   if (written === doubled || written.startsWith(doubled)) {
     waLog("dedupe message", written.slice(0, 60));
+    setEditableText(el, target);
+    return;
+  }
+
+  const tripled = target + target + target;
+  if (written === tripled || written.startsWith(tripled)) {
+    waLog("dedupe message triple", written.slice(0, 60));
     setEditableText(el, target);
     return;
   }
@@ -2434,6 +2574,7 @@ function escapeRegExp(s) {
 async function insertText(el, text) {
   const msg = String(text ?? "").trim();
   clearEditable(el);
+  await sleep(80);
   el.focus();
 
   try {
@@ -2443,9 +2584,22 @@ async function insertText(el, text) {
   }
 
   let written = getEditableText(el);
-  if (written !== msg) {
-    setEditableText(el, msg);
+  if (countLeadingRepeats(written, msg) > 1) {
+    clearEditable(el);
+    await sleep(80);
+    try {
+      document.execCommand("insertText", false, msg);
+    } catch (_) {
+      /* ignore */
+    }
     written = getEditableText(el);
+  }
+
+  if (written !== msg && countLeadingRepeats(written, msg) <= 1) {
+    const needle = msg.slice(0, Math.min(8, msg.length));
+    if (!needle || !written.toLowerCase().includes(needle.toLowerCase())) {
+      setEditableText(el, msg);
+    }
   }
 
   dedupeEditableText(el, msg);
@@ -2787,9 +2941,84 @@ async function searchAndOpen(contact) {
   waLog("chat ready (search flow complete)");
 }
 
+function base64ToBytes(base64) {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+function findAttachButton() {
+  const selectors = [
+    '#main footer [data-icon="plus"]',
+    '#main footer [data-icon="clip"]',
+    '#main [data-icon="plus"]',
+    '#main [data-icon="clip"]',
+    '#main [aria-label="Attach"]',
+    '#main span[data-icon="clip"]',
+  ];
+  for (const sel of selectors) {
+    const icon = document.querySelector(sel);
+    const btn = icon?.closest("button, [role='button']");
+    if (btn && isVisible(btn)) return btn;
+  }
+  return null;
+}
+
+async function attachFileFromPayload(attachment) {
+  const fileName = attachment?.fileName;
+  const mimeType = attachment?.mimeType || "application/octet-stream";
+  const base64 = attachment?.base64;
+  if (!fileName || !base64) return false;
+
+  await dismissBlockingModals();
+  const attachBtn = await waitUntil(() => findAttachButton(), 8000, 200);
+  if (!attachBtn) throw new Error("WhatsApp attach button not found");
+  attachBtn.click();
+  await sleep(600);
+
+  const input = await waitUntil(
+    () => document.querySelector('input[type="file"]'),
+    8000,
+    200,
+  );
+  if (!input) throw new Error("WhatsApp file picker not found");
+
+  const bytes = base64ToBytes(base64);
+  const blob = new Blob([bytes], { type: mimeType });
+  const file = new File([blob], fileName, { type: mimeType });
+  const dt = new DataTransfer();
+  dt.items.add(file);
+  input.files = dt.files;
+  input.dispatchEvent(new Event("change", { bubbles: true }));
+  await sleep(1500);
+  waLog("file attached", fileName);
+  return true;
+}
+
+async function sendAttachmentPreview() {
+  const sendBtn = document
+    .querySelector('[data-icon="send"], span[data-icon="send"]')
+    ?.closest("button, [role='button']");
+  if (sendBtn && isVisible(sendBtn)) {
+    sendBtn.click();
+    await sleep(500);
+    waLog("attachment sent");
+    return;
+  }
+  document.dispatchEvent(
+    new KeyboardEvent("keydown", {
+      key: "Enter",
+      code: "Enter",
+      keyCode: 13,
+      bubbles: true,
+    }),
+  );
+  waLog("attachment send via Enter");
+}
+
 async function insertMessage(text, send) {
   await dismissBlockingModals();
-
   const message = sanitizeMessageText(text);
   if (!message) {
     waLog("no message text — chat open only");
@@ -2846,6 +3075,46 @@ async function insertMessage(text, send) {
   let runInProgress = false;
 
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+    if (msg.type === "WHATSAPP_READ_COMPOSER") {
+      (async () => {
+        try {
+          const input =
+            findMessageInput() ??
+            (await waitUntil(() => findMessageInput(), 5000, 200));
+          if (!input) {
+            sendResponse({ ok: false, error: "Message box not found — open a chat first" });
+            return;
+          }
+          sendResponse({ ok: true, text: getEditableText(input) });
+        } catch (e) {
+          sendResponse({ ok: false, error: e?.message ?? String(e) });
+        }
+      })();
+      return true;
+    }
+
+    if (msg.type === "WHATSAPP_REPLACE_COMPOSER") {
+      (async () => {
+        try {
+          const input =
+            findMessageInput() ??
+            (await waitUntil(() => findMessageInput(), 8000, 200));
+          if (!input) {
+            sendResponse({ ok: false, error: "Message box not found — open a chat first" });
+            return;
+          }
+          await replaceComposerText(input, String(msg.text ?? ""));
+          sendResponse({
+            ok: true,
+            detail: `Replaced WhatsApp message (${String(msg.text ?? "").length} chars)`,
+          });
+        } catch (e) {
+          sendResponse({ ok: false, error: e?.message ?? String(e) });
+        }
+      })();
+      return true;
+    }
+
     if (msg.type !== "WHATSAPP_RUN") return;
 
     if (runInProgress) {
@@ -2860,15 +3129,34 @@ async function insertMessage(text, send) {
       try {
         waLog("run start", { contact: msg.contact, send: !!msg.send });
         await searchAndOpen(msg.contact);
-        await insertMessage(msg.text, msg.send);
+        const hasAttachment = !!msg.attachment?.base64;
+        if (hasAttachment) {
+          await attachFileFromPayload(msg.attachment);
+          const caption = sanitizeMessageText(msg.text ?? "");
+          if (caption) {
+            const captionBox =
+              findMessageInput() ??
+              (await waitUntil(() => findMessageInput(), 5000, 200));
+            if (captionBox) {
+              await focusAndType(captionBox, caption, { click: false });
+            }
+          }
+          if (msg.send) await sendAttachmentPreview();
+        } else {
+          await insertMessage(msg.text, msg.send);
+        }
         const hasText = String(msg.text ?? "").trim().length > 0;
         sendResponse({
           ok: true,
-          detail: msg.send && hasText
-            ? `Sent to ${msg.contact}`
-            : hasText
-              ? `Draft for ${msg.contact}`
-              : `Opened chat with ${msg.contact}`,
+          detail: hasAttachment && msg.send
+            ? `Sent file to ${msg.contact}`
+            : msg.send && hasText
+              ? `Sent to ${msg.contact}`
+              : hasText
+                ? `Draft for ${msg.contact}`
+                : hasAttachment
+                  ? `Attached file for ${msg.contact}`
+                  : `Opened chat with ${msg.contact}`,
         });
       } catch (e) {
         waLog("run failed", e?.message ?? String(e));

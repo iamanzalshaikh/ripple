@@ -3,8 +3,17 @@ export function isEditOrRephraseCommand(command: string): boolean {
   const c = command.trim().toLowerCase();
   if (!c) return false;
 
+  if (
+    /(?:بہتر|بہترین|جذباتی|اعتماد|واضح|تبدیل|دوبارہ|لکھ|ضرورت|ای\s*میل|طریقہ)/u.test(
+      command,
+    )
+  ) {
+    return true;
+  }
+
   return (
     /\b(rephrase|rewrite|reword|revise|edit|modify|adjust|improve|fix|refresh)\b/i.test(c) ||
+    /\b(behtar|behtareen|jazbati|wazeh|dubara|tabdeel|zarurat)\b/i.test(c) ||
     /\bmake\s+(it|this|that)(\s+\w+){0,3}\s+(more\s+)?/i.test(c) ||
     /\bmake\s+(?:this|that)\s+text\s+(more\s+)?(emotional|confident|sad|angry|mad|formal|casual|professional|friendly|short|long)\b/i.test(c) ||
     /\bmake\s+it\s+(more\s+)?(emotional|confident|sad|angry|mad|formal|casual|professional|friendly|short|long)\b/i.test(c) ||

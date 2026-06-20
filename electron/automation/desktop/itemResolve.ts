@@ -1,46 +1,27 @@
 import { existsSync } from "node:fs";
-import { basename, join } from "node:path";
-import { dialog } from "electron";
+import { join } from "node:path";
+import { pickItemFromMatches } from "./disambiguation.js";
 import { resolveFolderPath } from "./openFolder.js";
-import { searchItemsByName } from "./searchFiles.js";
+import { retrieveFileCandidates } from "../retriever/retriever.js";
+import { setCapabilityCacheEntry } from "../../storage/capabilityCache.js";
 
 function resolveParentPath(name?: string): string {
   if (!name?.trim()) return resolveFolderPath("desktop");
-  const key = name.trim().toLowerCase();
+  const raw = name.trim();
+  const key = raw.toLowerCase();
   if (key.startsWith("download")) return resolveFolderPath("downloads");
   if (key.startsWith("document")) return resolveFolderPath("documents");
   if (key === "desktop") return resolveFolderPath("desktop");
-  return name;
-}
 
-function formatChoiceLabel(path: string): string {
-  const name = basename(path);
-  const parent = path.replace(/[/\\][^/\\]+$/, "");
-  return `${name} — ${parent}`;
-}
+  const embedded = key.match(/\b(?:in\s+)?(downloads?|documents?|desktop)\b/);
+  if (embedded?.[1]) {
+    const k = embedded[1];
+    if (k.startsWith("download")) return resolveFolderPath("downloads");
+    if (k.startsWith("document")) return resolveFolderPath("documents");
+    return resolveFolderPath("desktop");
+  }
 
-async function pickItemWhenAmbiguous(
-  spoken: string,
-  matches: string[],
-): Promise<string | null> {
-  const labels = matches.slice(0, 5).map(formatChoiceLabel);
-  const buttons = [...labels, "Cancel"];
-
-  const { response } = await dialog.showMessageBox({
-    type: "question",
-    title: "Ripple — which file or folder?",
-    message: `Multiple matches for "${spoken}"`,
-    detail: matches
-      .slice(0, 5)
-      .map((p, i) => `${i + 1}. ${p}`)
-      .join("\n"),
-    buttons,
-    defaultId: 0,
-    cancelId: buttons.length - 1,
-  });
-
-  if (response < 0 || response >= labels.length) return null;
-  return matches[response] ?? null;
+  return resolveFolderPath("desktop");
 }
 
 /**
@@ -66,7 +47,13 @@ export async function resolveItemBySpokenName(
     if (existsSync(direct)) return direct;
   }
 
-  const matches = searchItemsByName(trimmed);
+  const candidates = await retrieveFileCandidates({
+    phrase: trimmed,
+    token: trimmed,
+    parentFolder: parent,
+  });
+  const matches = candidates.map((c) => c.path);
+
   if (matches.length === 0) {
     const hint = parent ? ` in ${parent}` : "";
     throw new Error(
@@ -76,14 +63,16 @@ export async function resolveItemBySpokenName(
 
   if (matches.length === 1) {
     console.info(`[ripple-desktop] Resolved "${trimmed}" → ${matches[0]}`);
+    setCapabilityCacheEntry(trimmed, matches[0]!, 0.92);
     return matches[0]!;
   }
 
-  const picked = await pickItemWhenAmbiguous(trimmed, matches);
+  const picked = await pickItemFromMatches(trimmed, matches);
   if (!picked) {
     throw new Error("Cancelled — pick which file or folder you meant");
   }
 
   console.info(`[ripple-desktop] Resolved "${trimmed}" → ${picked} (user picked)`);
+  setCapabilityCacheEntry(trimmed, picked, 0.95);
   return picked;
 }

@@ -1,6 +1,15 @@
 import { normalizeTranscript } from "../voice/normalizeTranscript.js";
+import { parseReferentialRecall } from "../voice/nlu/referentialParse.js";
 
-export type RecallTarget = "auto" | "file" | "folder" | "workspace" | "app";
+export type RecallTarget =
+  | "auto"
+  | "file"
+  | "pdf"
+  | "folder"
+  | "workspace"
+  | "app"
+  | "parent"
+  | "prior";
 
 export type SessionMemoryIntent = {
   kind: "recall_memory";
@@ -16,12 +25,34 @@ export function parseSessionMemoryCommand(
   const cmd = normalizeTranscript(command ?? "");
   if (!cmd) return null;
 
+  const referential = parseReferentialRecall(cmd);
+  if (referential) return referential;
+
   if (
     /^\s*(?:open\s+)?(?:it|that)\s+again\s*\.?\s*$/i.test(cmd) ||
     /^\s*reopen\s+(?:it|that)\s*\.?\s*$/i.test(cmd) ||
     /^\s*open\s+(?:the\s+)?last\s+(?:thing|item)\s*\.?\s*$/i.test(cmd)
   ) {
     return { kind: "recall_memory", target: "auto" };
+  }
+
+  if (
+    /^\s*open\s+(?:the\s+)?last\s+pdf(?:\s+(?:I\s+)?(?:had\s+)?open(?:ed)?)?\s*\.?\s*$/i.test(
+      cmd,
+    ) ||
+    /^\s*open\s+(?:the\s+)?pdf\s+I\s+(?:had\s+)?open(?:ed)?\s*\.?\s*$/i.test(cmd) ||
+    /^\s*open\s+(?:my\s+)?last\s+pdf\s*\.?\s*$/i.test(cmd) ||
+    /^\s*open\s+(?:the\s+)?pdf\s+I\s+(?:just\s+)?opened\s*\.?\s*$/i.test(cmd)
+  ) {
+    return { kind: "recall_memory", target: "pdf" };
+  }
+
+  if (/^\s*open\s+(?:the\s+)?last\s+file\s*\.?\s*$/i.test(cmd)) {
+    return { kind: "recall_memory", target: "file" };
+  }
+
+  if (/^\s*open\s+(?:the\s+)?last\s+folder\s*\.?\s*$/i.test(cmd)) {
+    return { kind: "recall_memory", target: "folder" };
   }
 
   if (

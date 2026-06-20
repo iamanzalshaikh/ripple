@@ -67,6 +67,11 @@ interface RippleApi {
     message: string;
     latencyMs?: number;
   }>;
+  runPreflightHealth: () => Promise<{
+    ok: boolean;
+    ready: boolean;
+    checks: Array<{ id: string; ok: boolean; detail: string }>;
+  }>;
   getSocketStatus: () => Promise<{
     status: string;
     connected: boolean;
@@ -89,6 +94,37 @@ interface RippleApi {
     sessionId?: string;
     contextMetadata?: Record<string, unknown>;
   }) => Promise<{ ok: boolean; message?: string; data?: unknown }>;
+  getTelemetrySummary: () => Promise<{
+    ok: boolean;
+    message?: string;
+    summary?: {
+      total: number;
+      byOutcome: Record<string, number>;
+      byPlannerSource: Record<string, number>;
+      recentFailures: Array<{
+        command: string;
+        outcome?: string;
+        planner_source?: string;
+        detail?: string;
+        at: number;
+      }>;
+      successRatePercent: number;
+      rolling7DaySuccessRate: number;
+      topFailedCommands: Array<{ command: string; count: number }>;
+      topClarifications: Array<{ command: string; count: number }>;
+      topSearchMisses: Array<{ command: string; count: number }>;
+      plannerMix: { offline: number; gpt: number; fast: number; graph: number };
+      blockedPermissionCount: number;
+      topWorkflows: Array<{ name: string; version: number; runCount: number }>;
+      topApps: Array<{ appId: string; openCount: number; score: number }>;
+      avgLatencyMs: number;
+    };
+  }>;
+  exportTelemetryCsv: () => Promise<{
+    ok: boolean;
+    message?: string;
+    csv?: string;
+  }>;
   getCommandHistory: (args?: {
     page?: number;
     limit?: number;
@@ -122,6 +158,14 @@ interface RippleApi {
   onVoiceToggle: (
     cb: (payload: { action: "start" | "stop" | "cancel" }) => void,
   ) => () => void;
+  pickDisambiguation?: (path: string | null) => Promise<{ ok: boolean }>;
+  onDisambiguationShow?: (
+    cb: (payload: {
+      spoken: string;
+      items: Array<{ path: string; label: string }>;
+    }) => void,
+  ) => () => void;
+  onDisambiguationHide?: (cb: () => void) => () => void;
   isOverlay: () => boolean;
 }
 

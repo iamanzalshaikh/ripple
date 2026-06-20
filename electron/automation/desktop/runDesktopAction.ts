@@ -1,3 +1,5 @@
+import { existsSync, statSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import {
   addAlias,
   listUserAliases,
@@ -6,16 +8,19 @@ import {
 import {
   createFile,
   createFolder,
-  deleteFile,
+  confirmDeletePath,
   moveFile,
   openAliasTarget,
   renameFile,
+  resolveFileBySpokenName,
 } from "./fileOperations.js";
+import { guidedMissingParent } from "../planner/guidedResponses.js";
 import { openUrlInBrowser } from "../openUrl.js";
 import {
   listWorkflows,
   parseWorkflowStepList,
   removeWorkflow,
+  resolveWorkflowExact,
   runUserWorkflow,
   saveWorkflow,
   type WorkflowStepDef,
@@ -24,7 +29,7 @@ import { saveUserWorkspace } from "./workspaceRegistry.js";
 import { findNativeAppById } from "./nativeAppRegistry.js";
 import { launchNativeApp } from "./launchApp.js";
 import { openFile, openFolder, resolveFolderPath } from "./openFolder.js";
-import { searchFileByName } from "./searchFiles.js";
+import { searchFileByNameAsync } from "./searchFiles.js";
 import {
   closeAppWindow,
   focusAppWindow,
@@ -33,18 +38,85 @@ import {
 import { runSystemAction, type SystemActionId } from "./systemActions.js";
 import { runRecallMemoryAction } from "./runSessionMemoryAction.js";
 import { openDesktopItem } from "./openDesktopItem.js";
+import {
+  openSmartSearchResult,
+  resolveSmartSearch,
+} from "./intelligentSearch.js";
+import { applyAppStateBeforeExecute } from "./appStateResolver.js";
+import type { SmartSearchQuery } from "./parseSmartSearchCommand.js";
 import { recordDesktopActionOutcome } from "../../storage/recordDesktopAction.js";
+import { executeReferentialSend } from "../adapters/whatsapp/executeReferentialSend.js";
+import {
+  resolveReferentialContact,
+} from "../voice/nlu/parseReferentialWhatsApp.js";
+import { getLastCommandContext } from "../../storage/lastCommandState.js";
 import type { RecallTarget } from "./parseSessionMemoryCommand.js";
+import { confirmIfNeeded } from "../safety/executionGuard.js";
+import { recordCommandEvent } from "../../telemetry/commandTelemetry.js";
+import { recordTrustSignal } from "../../storage/actionTrust.js";
+import { upsertFileIndexPath } from "../../storage/fileIndex.js";
+import { popUndoAction, pushUndoAction } from "../safety/undoStack.js";
+import {
+  reverseUndoAction,
+  undoCreatePath,
+  undoDeletePaths,
+  undoMovePaths,
+  undoRenamePaths,
+} from "../safety/undoRunner.js";
+import { stageDeleteBackup } from "../safety/undoTrash.js";
+
+async function requireDestructiveConfirm(
+  kind: string,
+  data: Record<string, unknown> | undefined,
+  slots: {
+    sourceName?: string;
+    newName?: string;
+    destinationFolder?: string;
+    parentFolder?: string;
+    fileName?: string;
+  },
+): Promise<void> {
+  await confirmIfNeeded(kind, slots, data);
+}
 
 async function executeDesktopOpenBatch(
   data?: Record<string, unknown>,
 ): Promise<string> {
   const kind = data?.desktopKind;
 
+  if (kind === "undo_last") {
+    const action = popUndoAction();
+    if (!action) {
+      throw new Error("Nothing to undo — no recent file action");
+    }
+    const result = await reverseUndoAction(action);
+    recordCommandEvent({
+      command: String(data?.command ?? "undo"),
+      outcome: "undo",
+    });
+    recordTrustSignal(String(data?.command ?? "undo"), "undo");
+    return result;
+  }
+
+  if (kind === "open_resolved") {
+    const path =
+      typeof data?.resolvedPath === "string" ? data.resolvedPath : "";
+    if (!path || !existsSync(path)) {
+      throw new Error("Resolved path missing or not found");
+    }
+    if (data) data.resolvedPath = path;
+    if (statSync(path).isDirectory()) {
+      return openFolder(path);
+    }
+    return openFile(path);
+  }
+
   if (kind === "folder") {
     const folder =
       typeof data?.folder === "string" ? data.folder : "downloads";
-    return openFolder(resolveFolderPath(folder));
+    const resolved = resolveFolderPath(folder);
+    if (data) data.resolvedPath = resolved;
+    return openFolder(resolved);
   }
 
   if (kind === "file") {
@@ -52,7 +124,7 @@ async function executeDesktopOpenBatch(
     if (!filename.trim()) {
       throw new Error("No filename in desktop command");
     }
-    const found = searchFileByName(filename);
+    const found = await searchFileByNameAsync(filename);
     if (!found) {
       throw new Error(
         `File not found: "${filename}" (searched Downloads, Documents, Desktop)`,
@@ -82,14 +154,28 @@ async function executeDesktopOpenBatch(
     return result;
   }
 
+  if (kind === "smart_search") {
+    const label = typeof data?.smartLabel === "string" ? data.smartLabel : "search";
+    const query = data?.smartQuery as SmartSearchQuery | undefined;
+    if (!query || typeof query !== "object" || !("type" in query)) {
+      throw new Error("Smart search query missing");
+    }
+    const path = await resolveSmartSearch(query, label);
+    const result = await openSmartSearchResult(path);
+    if (data) data.resolvedPath = path;
+    return result;
+  }
+
   if (kind === "recall_memory") {
     const target = data?.recallTarget;
     const valid: RecallTarget[] = [
       "auto",
       "file",
+      "pdf",
       "folder",
       "workspace",
       "app",
+      "parent",
     ];
     if (
       typeof target !== "string" ||
@@ -97,10 +183,24 @@ async function executeDesktopOpenBatch(
     ) {
       throw new Error("Recall target missing or invalid");
     }
-    return runRecallMemoryAction(target as RecallTarget);
+    const result = await runRecallMemoryAction(target as RecallTarget);
+    const pathMatch = result.match(/Opened (?:file|folder):\s*(.+)$/i);
+    if (pathMatch?.[1] && data) {
+      data.resolvedPath = pathMatch[1].trim();
+    }
+    return result;
   }
 
   if (kind === "launch_app") {
+    if (!data) throw new Error("Launch app data missing");
+    await applyAppStateBeforeExecute("launch_app", data);
+    const effectiveKind = data?.desktopKind;
+    if (effectiveKind === "switch_app") {
+      const appId = typeof data?.appId === "string" ? data.appId : "";
+      const app = findNativeAppById(appId);
+      if (!app) throw new Error(`Unknown app: ${appId}`);
+      return focusAppWindow(app);
+    }
     const appId = typeof data?.appId === "string" ? data.appId : "";
     const app = findNativeAppById(appId);
     if (!app) throw new Error(`Unknown app: ${appId}`);
@@ -190,7 +290,12 @@ async function executeDesktopOpenBatch(
     const parent =
       typeof data?.parentFolder === "string" ? data.parentFolder : undefined;
     if (!folderName.trim()) throw new Error("Folder name required");
-    return createFolder(folderName, parent);
+    if (!parent?.trim()) throw new Error(guidedMissingParent("folder"));
+    const parentPath = resolveFolderPath(parent);
+    const folderPath = join(parentPath, folderName.trim());
+    const result = await createFolder(folderName, parent);
+    pushUndoAction(undoCreatePath(folderPath));
+    return result;
   }
 
   if (kind === "create_file") {
@@ -198,7 +303,18 @@ async function executeDesktopOpenBatch(
     const parent =
       typeof data?.parentFolder === "string" ? data.parentFolder : undefined;
     if (!fileName.trim()) throw new Error("File name required");
-    return createFile(fileName, parent);
+    if (!parent?.trim()) throw new Error(guidedMissingParent("file"));
+    await requireDestructiveConfirm("create_file", data, {
+      fileName,
+      parentFolder: parent,
+    });
+    const parentPath = resolveFolderPath(parent);
+    let filename = fileName.trim();
+    if (!/\.[a-z0-9]{2,8}$/i.test(filename)) filename = `${filename}.txt`;
+    const filePath = join(parentPath, filename);
+    const result = await createFile(fileName, parent);
+    pushUndoAction(undoCreatePath(filePath));
+    return result;
   }
 
   if (kind === "rename_file") {
@@ -210,7 +326,16 @@ async function executeDesktopOpenBatch(
     if (!sourceName.trim() || !newName.trim()) {
       throw new Error("Source and new filename required");
     }
-    return renameFile(sourceName, newName, parent);
+    await requireDestructiveConfirm("rename_file", data, {
+      sourceName,
+      newName,
+      parentFolder: parent,
+    });
+    const from = await resolveFileBySpokenName(sourceName, parent);
+    const to = join(dirname(from), basename(newName.trim()));
+    const result = await renameFile(sourceName, newName, parent);
+    pushUndoAction(undoRenamePaths(from, to));
+    return result;
   }
 
   if (kind === "move_file") {
@@ -225,7 +350,17 @@ async function executeDesktopOpenBatch(
     if (!sourceName.trim() || !destination.trim()) {
       throw new Error("Source file and destination required");
     }
-    return moveFile(sourceName, destination, parent);
+    await requireDestructiveConfirm("move_file", data, {
+      sourceName,
+      destinationFolder: destination,
+      parentFolder: parent,
+    });
+    const from = await resolveFileBySpokenName(sourceName, parent);
+    const destDir = resolveFolderPath(destination);
+    const to = join(destDir, basename(from));
+    const result = await moveFile(sourceName, destination, parent);
+    pushUndoAction(undoMovePaths(from, to));
+    return result;
   }
 
   if (kind === "delete_file") {
@@ -234,7 +369,20 @@ async function executeDesktopOpenBatch(
     const parent =
       typeof data?.parentFolder === "string" ? data.parentFolder : undefined;
     if (!sourceName.trim()) throw new Error("File name required");
-    return deleteFile(sourceName, parent);
+    await requireDestructiveConfirm("delete_file", data, {
+      sourceName,
+      parentFolder: parent,
+    });
+    const sourcePath = await resolveFileBySpokenName(sourceName, parent);
+    if (data?._safetyConfirmed !== true) {
+      const ok = await confirmDeletePath(sourcePath);
+      if (!ok) throw new Error("Delete cancelled");
+    }
+    const backupPath = stageDeleteBackup(sourcePath);
+    pushUndoAction(undoDeletePaths(sourcePath, backupPath));
+    upsertFileIndexPath(sourcePath);
+    console.info(`[ripple-desktop] Deleted → ${sourcePath} (backup: ${backupPath})`);
+    return `Deleted ${basename(sourcePath)}`;
   }
 
   if (kind === "open_workspace") {
@@ -268,6 +416,10 @@ async function executeDesktopOpenBatch(
       id: workflowId,
       name: workflowId,
       steps: steps as WorkflowStepDef[],
+      version:
+        typeof data?.workflowVersion === "number"
+          ? data.workflowVersion
+          : undefined,
     });
   }
 
@@ -278,9 +430,13 @@ async function executeDesktopOpenBatch(
       typeof data?.workflowStepsRaw === "string" ? data.workflowStepsRaw : "";
     if (!name || !raw) throw new Error("Workflow name and steps required");
     const steps = parseWorkflowStepList(raw);
-    const entry = saveWorkflow(name, steps);
+    const replace = data?.workflowReplace === true;
+    const existing = resolveWorkflowExact(name);
+    const entry = saveWorkflow(name, steps, {
+      replace: replace || Boolean(existing),
+    });
     const stepLabels = steps.map((s) => `${s.type}:${s.target}`).join(" -> ");
-    return `Remembered workflow "${entry.name}" [${stepLabels}]`;
+    return `Remembered workflow "${entry.name}" v${entry.version ?? 1} [${stepLabels}]`;
   }
 
   if (kind === "list_workflows") {
@@ -289,7 +445,7 @@ async function executeDesktopOpenBatch(
       return 'No workflows yet. Say e.g. "Remember work mode opens VS Code, GitHub, and Render"';
     }
     const lines = workflows.map(
-      (w) => `${w.name} (${w.steps.length} steps)`,
+      (w) => `${w.name} v${w.version ?? 1} (${w.steps.length} steps)`,
     );
     return `Workflows:\n${lines.join("\n")}`;
   }
@@ -301,6 +457,29 @@ async function executeDesktopOpenBatch(
     const removed = removeWorkflow(name);
     if (!removed) throw new Error(`No workflow found for "${name}"`);
     return `Removed workflow "${name}"`;
+  }
+
+  if (kind === "referential_send") {
+    const contactRaw =
+      typeof data?.contact === "string" ? data.contact : "";
+    const mode =
+      data?.sendMode === "message_again" ? "message_again" : "send_file";
+    const contact = resolveReferentialContact(
+      contactRaw,
+      getLastCommandContext().last_contact,
+    );
+    if (!contact) {
+      throw new Error(
+        'No contact in session — say e.g. "Send it to Noor" or message someone first',
+      );
+    }
+    const sourcePath =
+      typeof data?.sourcePath === "string" ? data.sourcePath : undefined;
+    return executeReferentialSend(
+      { kind: "referential_send", contact, mode },
+      typeof data?.command === "string" ? data.command : "",
+      sourcePath ? { sourcePath } : undefined,
+    );
   }
 
   throw new Error(`Unknown desktop command kind: ${String(kind)}`);

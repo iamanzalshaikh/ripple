@@ -88,6 +88,8 @@ function connectNative() {
       msg?.type !== "INSTAGRAM_MESSAGE" &&
       msg?.type !== "INSTAGRAM_READ_COMPOSER" &&
       msg?.type !== "INSTAGRAM_FOCUS_COMPOSER" &&
+      msg?.type !== "WHATSAPP_READ_COMPOSER" &&
+      msg?.type !== "WHATSAPP_REPLACE_COMPOSER" &&
       msg?.type !== "GET_ACTIVE_TAB_INFO"
     ) {
       return;
@@ -139,6 +141,43 @@ function connectNative() {
             error: err,
           });
         }
+      }
+      return;
+    }
+
+    if (msg?.type === "WHATSAPP_READ_COMPOSER" || msg?.type === "WHATSAPP_REPLACE_COMPOSER") {
+      const id = msg.id;
+      const replace = msg?.type === "WHATSAPP_REPLACE_COMPOSER";
+      try {
+        let tab = await pickTab("https://web.whatsapp.com/*");
+        if (!tab?.id) {
+          throw new Error("WhatsApp tab not found — open web.whatsapp.com in Chrome");
+        }
+        await focusTab(tab);
+        await new Promise((r) => setTimeout(r, 350));
+        const result = await runOnTab(
+          tab.id,
+          {
+            type: replace ? "WHATSAPP_REPLACE_COMPOSER" : "WHATSAPP_READ_COMPOSER",
+            text: msg.text ?? "",
+          },
+          "content.js",
+        );
+        nativePort.postMessage({
+          type: "WHATSAPP_COMPOSER_RESULT",
+          id,
+          ok: !!result?.ok,
+          text: result?.text ?? "",
+          error: result?.error,
+          detail: result?.detail ?? result?.text ?? "",
+        });
+      } catch (e) {
+        nativePort.postMessage({
+          type: "WHATSAPP_COMPOSER_RESULT",
+          id,
+          ok: false,
+          error: String(e?.message ?? e),
+        });
       }
       return;
     }
@@ -345,7 +384,7 @@ function connectNative() {
         // Navigate to results first (stable).
         const url = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`;
         await chrome.tabs.update(tab.id, { url });
-        await new Promise((r) => setTimeout(r, 2800));
+        await new Promise((r) => setTimeout(r, 4500));
 
         // Ensure content script is present (MV3 can unload).
         let result;
@@ -415,6 +454,7 @@ function connectNative() {
         contact: msg.contact,
         text: msg.text,
         send: !!msg.send,
+        attachment: msg.attachment,
       });
       nativePort.postMessage({
         type: "WHATSAPP_RESULT",

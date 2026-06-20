@@ -1,5 +1,11 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { getWorkflowsFilePath } from "../../config/ripplePaths.js";
+import {
+  getWorkflowGraph,
+  listWorkflowGraph,
+  recordWorkflowRun,
+  removeWorkflowGraph,
+  saveWorkflowGraph,
+  type SaveWorkflowOptions,
+} from "../../storage/workflowGraph.js";
 import { normalizeRegistryKey, sanitizeSpokenName } from "./spokenName.js";
 import { resolveAlias } from "./aliasRegistry.js";
 import { findNativeAppById, resolveNativeApp } from "./nativeAppRegistry.js";
@@ -7,6 +13,7 @@ import { launchNativeApp } from "./launchApp.js";
 import { openFile, openFolder, resolveFolderPath } from "./openFolder.js";
 import { openUrlInBrowser } from "../openUrl.js";
 import { findWorkspaceById, resolveWorkspace } from "./workspaceRegistry.js";
+import { rememberWorkflowEntity } from "../../storage/knowledgeGraph.js";
 
 export type WorkflowStepDef =
   | { type: "app"; target: string }
@@ -18,71 +25,44 @@ export interface UserWorkflow {
   id: string;
   name: string;
   steps: WorkflowStepDef[];
+  version?: number;
 }
-
-interface WorkflowStore {
-  workflows: Record<string, UserWorkflow>;
-}
-
-let cache: WorkflowStore | null = null;
 
 function normalizeKey(name: string): string {
   return normalizeRegistryKey(name);
 }
 
-function migrateWorkflowKeys(store: WorkflowStore): WorkflowStore {
-  const next: Record<string, UserWorkflow> = {};
-  for (const [key, wf] of Object.entries(store.workflows)) {
-    const nk = normalizeKey(key);
-    next[nk] = { ...wf, id: nk, name: nk };
-  }
-  return { workflows: next };
-}
-
-function emptyStore(): WorkflowStore {
-  return { workflows: {} };
-}
-
-export function loadWorkflows(): WorkflowStore {
-  if (cache) return cache;
-
-  const file = getWorkflowsFilePath();
-  if (!existsSync(file)) {
-    cache = emptyStore();
-    return cache;
-  }
-
-  try {
-    const parsed = JSON.parse(readFileSync(file, "utf8")) as WorkflowStore;
-    cache = parsed?.workflows ? migrateWorkflowKeys(parsed) : emptyStore();
-  } catch {
-    cache = emptyStore();
-  }
-
-  return cache;
-}
-
-export function saveWorkflows(store: WorkflowStore): void {
-  writeFileSync(getWorkflowsFilePath(), JSON.stringify(store, null, 2), "utf8");
-  cache = store;
+function graphToUserWorkflow(entry: {
+  name: string;
+  version: number;
+  steps: WorkflowStepDef[];
+}): UserWorkflow {
+  return {
+    id: entry.name,
+    name: entry.name,
+    steps: entry.steps,
+    version: entry.version,
+  };
 }
 
 export function listWorkflows(): UserWorkflow[] {
-  return Object.values(loadWorkflows().workflows).sort((a, b) =>
-    a.name.localeCompare(b.name),
-  );
+  return listWorkflowGraph().map(graphToUserWorkflow);
 }
 
-export function resolveWorkflowExact(spoken: string): UserWorkflow | null {
-  const store = loadWorkflows();
+export function resolveWorkflowExact(
+  spoken: string,
+  version?: number,
+): UserWorkflow | null {
   const raw = normalizeKey(spoken);
+  const entry = getWorkflowGraph(raw, version);
+  if (entry) return graphToUserWorkflow(entry);
 
-  if (store.workflows[raw]) return store.workflows[raw];
-  if (raw.startsWith("my ") && store.workflows[raw.slice(3)]) {
-    return store.workflows[raw.slice(3)];
+  if (raw.startsWith("my ")) {
+    const stripped = getWorkflowGraph(raw.slice(3), version);
+    if (stripped) return graphToUserWorkflow(stripped);
   }
-  const withMy = `my ${raw}`;
-  if (store.workflows[withMy]) return store.workflows[withMy];
+  const withMy = getWorkflowGraph(`my ${raw}`, version);
+  if (withMy) return graphToUserWorkflow(withMy);
 
   return null;
 }
@@ -92,13 +72,12 @@ export function resolveWorkflow(spoken: string): UserWorkflow | null {
   const exact = resolveWorkflowExact(spoken);
   if (exact) return exact;
 
-  const store = loadWorkflows();
   const raw = normalizeKey(spoken);
-  const keys = Object.keys(store.workflows).sort((a, b) => b.length - a.length);
+  const keys = listWorkflows().map((w) => w.name).sort((a, b) => b.length - a.length);
 
   for (const key of keys) {
     if (raw === key || raw.endsWith(` ${key}`)) {
-      return store.workflows[key];
+      return resolveWorkflowExact(key) ?? null;
     }
   }
 
@@ -135,28 +114,28 @@ export function parseWorkflowStepList(raw: string): WorkflowStepDef[] {
     .map((part) => resolveStepTarget(part));
 }
 
-export function saveWorkflow(name: string, steps: WorkflowStepDef[]): UserWorkflow {
-  const key = normalizeKey(name);
-  const store = loadWorkflows();
-  const existed = Boolean(store.workflows[key]);
-  const entry: UserWorkflow = { id: key, name: key, steps };
-  store.workflows[key] = entry;
-  saveWorkflows(store);
+export function saveWorkflow(
+  name: string,
+  steps: WorkflowStepDef[],
+  options?: SaveWorkflowOptions,
+): UserWorkflow {
+  const key = sanitizeSpokenName(name);
+  const entry = saveWorkflowGraph(key, steps, options);
+  rememberWorkflowEntity(key, steps.length);
   const stepLabels = steps.map((s) => `${s.type}:${s.target}`).join(" -> ");
   console.info(
-    `[ripple-desktop] ${existed ? "Updated" : "Created"} workflow "${key}" [${stepLabels}]`,
+    `[ripple-desktop] Workflow "${entry.name}" v${entry.version} [${stepLabels}]`,
   );
-  return entry;
+  return graphToUserWorkflow(entry);
 }
 
 export function removeWorkflow(name: string): boolean {
   const key = normalizeKey(name);
-  const store = loadWorkflows();
-  if (!store.workflows[key]) return false;
-  delete store.workflows[key];
-  saveWorkflows(store);
-  console.info(`[ripple-desktop] Workflow removed: "${key}"`);
-  return true;
+  const removed = removeWorkflowGraph(key);
+  if (removed) {
+    console.info(`[ripple-desktop] Workflow removed: "${key}"`);
+  }
+  return removed;
 }
 
 function delay(ms: number): Promise<void> {
@@ -197,6 +176,7 @@ async function runStep(step: WorkflowStepDef): Promise<string> {
 }
 
 export async function runUserWorkflow(workflow: UserWorkflow): Promise<string> {
+  recordWorkflowRun(workflow.name, workflow.version);
   const results: string[] = [];
   const errors: string[] = [];
 
@@ -207,7 +187,9 @@ export async function runUserWorkflow(workflow: UserWorkflow): Promise<string> {
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       errors.push(msg);
-      console.warn(`[ripple-desktop] Workflow step failed (${step.type}:${step.target}): ${msg}`);
+      console.warn(
+        `[ripple-desktop] Workflow step failed (${step.type}:${step.target}): ${msg}`,
+      );
     }
 
     if (i < workflow.steps.length - 1) {
@@ -219,9 +201,23 @@ export async function runUserWorkflow(workflow: UserWorkflow): Promise<string> {
     throw new Error(errors.join("; ") || "Workflow failed");
   }
 
-  const summary = `Started ${workflow.name}: ${results.join(", ")}`;
+  const ver = workflow.version ? ` v${workflow.version}` : "";
+  const summary = `Started ${workflow.name}${ver}: ${results.join(", ")}`;
   if (errors.length > 0) {
     return `${summary} (some steps failed: ${errors.join("; ")})`;
   }
   return summary;
+}
+
+/** @deprecated JSON store removed — kept for tests that imported loadWorkflows */
+export function loadWorkflows(): { workflows: Record<string, UserWorkflow> } {
+  const map: Record<string, UserWorkflow> = {};
+  for (const wf of listWorkflows()) {
+    map[wf.id] = wf;
+  }
+  return { workflows: map };
+}
+
+export function saveWorkflows(): void {
+  /* no-op — workflows persist in workflow_graph SQLite */
 }

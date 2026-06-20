@@ -28,6 +28,12 @@ const api = {
       message: string;
       latencyMs?: number;
     }>,
+  runPreflightHealth: () =>
+    ipcRenderer.invoke("preflight:health") as Promise<{
+      ok: boolean;
+      ready: boolean;
+      checks: Array<{ id: string; ok: boolean; detail: string }>;
+    }>,
   getSocketStatus: () =>
     ipcRenderer.invoke("socket:status") as Promise<{
       status: string;
@@ -50,6 +56,39 @@ const api = {
     sessionId?: string;
     contextMetadata?: Record<string, unknown>;
   }) => ipcRenderer.invoke("command:execute", args),
+  getTelemetrySummary: () =>
+    ipcRenderer.invoke("telemetry:summary") as Promise<{
+      ok: boolean;
+      message?: string;
+      summary?: {
+        total: number;
+        byOutcome: Record<string, number>;
+        byPlannerSource: Record<string, number>;
+        recentFailures: Array<{
+          command: string;
+          outcome?: string;
+          planner_source?: string;
+          detail?: string;
+          at: number;
+        }>;
+        successRatePercent: number;
+        rolling7DaySuccessRate: number;
+        topFailedCommands: Array<{ command: string; count: number }>;
+        topClarifications: Array<{ command: string; count: number }>;
+        topSearchMisses: Array<{ command: string; count: number }>;
+        plannerMix: { offline: number; gpt: number; fast: number; graph: number };
+        blockedPermissionCount: number;
+        topWorkflows: Array<{ name: string; version: number; runCount: number }>;
+        topApps: Array<{ appId: string; openCount: number; score: number }>;
+        avgLatencyMs: number;
+      };
+    }>,
+  exportTelemetryCsv: () =>
+    ipcRenderer.invoke("telemetry:export") as Promise<{
+      ok: boolean;
+      message?: string;
+      csv?: string;
+    }>,
   getCommandHistory: (args?: {
     page?: number;
     limit?: number;
@@ -96,6 +135,23 @@ const api = {
     ) => cb(payload);
     ipcRenderer.on("overlay:voice-toggle", handler);
     return () => ipcRenderer.removeListener("overlay:voice-toggle", handler);
+  },
+  pickDisambiguation: (path: string | null) =>
+    ipcRenderer.invoke("disambiguation:pick", { path }) as Promise<{ ok: boolean }>,
+  onDisambiguationShow: (
+    cb: (payload: {
+      spoken: string;
+      items: Array<{ path: string; label: string }>;
+    }) => void,
+  ): Unsubscribe => {
+    const handler = (_: unknown, payload: unknown) => cb(payload as never);
+    ipcRenderer.on("disambiguation:show", handler);
+    return () => ipcRenderer.removeListener("disambiguation:show", handler);
+  },
+  onDisambiguationHide: (cb: () => void): Unsubscribe => {
+    const handler = () => cb();
+    ipcRenderer.on("disambiguation:hide", handler);
+    return () => ipcRenderer.removeListener("disambiguation:hide", handler);
   },
   isOverlay: () =>
     new URLSearchParams(window.location.search).get("overlay") === "1",

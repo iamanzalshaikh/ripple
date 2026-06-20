@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
 import type { CommandResultPayload } from "../types.js";
-import { parseNativeCommand } from "./parseNativeCommand.js";
+import { parseDesktopIntent } from "../voice/nlu/pipeline.js";
+import type { CompoundIntent } from "../voice/nlu/compoundParse.js";
 import type { NativeCommandIntent } from "./parseNativeCommand.js";
+import { resolveKnownItemPath } from "./openDesktopItem.js";
 
 function intentLabel(intent: NativeCommandIntent): string {
   switch (intent.kind) {
@@ -55,11 +57,22 @@ function intentLabel(intent: NativeCommandIntent): string {
       return "list_workflows";
     case "remove_workflow":
       return `remove_workflow:${intent.name}`;
+    case "smart_search":
+      return `smart:${intent.label}`;
+    case "undo_last":
+      return "undo_last";
+    case "open_resolved":
+      return `resolved:${intent.path}`;
+    case "referential_send":
+      return `referential_send:${intent.contact}`;
+    case "compound":
+      return `compound:${intent.label}`;
   }
 }
 
-function batchPayload(
-  intent: NativeCommandIntent,
+/** Batch payload for runDesktopOpenBatch — shared with actionExpander compound steps. */
+export function desktopBatchPayload(
+  intent: Exclude<NativeCommandIntent, CompoundIntent>,
   command: string,
 ): Record<string, unknown> {
   const base = { _desktopBatch: true, command };
@@ -181,6 +194,7 @@ function batchPayload(
         desktopKind: "run_workflow",
         workflowId: intent.workflow.id,
         workflowSteps: intent.workflow.steps,
+        workflowVersion: intent.workflow.version,
       };
     case "remember_workflow":
       return {
@@ -188,6 +202,7 @@ function batchPayload(
         desktopKind: "remember_workflow",
         workflowName: intent.name,
         workflowStepsRaw: intent.stepsRaw,
+        workflowReplace: intent.replace === true,
       };
     case "list_workflows":
       return { ...base, desktopKind: "list_workflows" };
@@ -197,6 +212,28 @@ function batchPayload(
         desktopKind: "remove_workflow",
         workflowName: intent.name,
       };
+    case "smart_search":
+      return {
+        ...base,
+        desktopKind: "smart_search",
+        smartLabel: intent.label,
+        smartQuery: intent.query,
+      };
+    case "undo_last":
+      return { ...base, desktopKind: "undo_last" };
+    case "open_resolved":
+      return {
+        ...base,
+        desktopKind: "open_resolved",
+        resolvedPath: intent.path,
+      };
+    case "referential_send":
+      return {
+        ...base,
+        desktopKind: "referential_send",
+        contact: intent.contact,
+        sendMode: intent.mode,
+      };
   }
 }
 
@@ -204,11 +241,104 @@ function batchPayload(
 export function buildDesktopCommandResult(
   command: string,
 ): CommandResultPayload | null {
-  const intent = parseNativeCommand(command);
-  if (!intent) return null;
+  const parsed = parseDesktopIntent(command);
+  if (!parsed) return null;
+  return payloadFromIntent(parsed.intent, command, parsed.viaNlu ? " (NLU)" : "");
+}
 
+/**
+ * Phase 4.6 — local parse first, then planner cost ladder when desktop-shaped.
+ */
+export async function buildDesktopCommandResultAsync(
+  command: string,
+  getAccessToken: () => Promise<string | null>,
+): Promise<CommandResultPayload | null> {
+  const { planDesktopCommand } = await import("../planner/planExecute.js");
+  const result = await planDesktopCommand(command, getAccessToken);
+  if (result?.kind === "payload") return result.payload;
+  return null;
+}
+
+/** Build workflow payload from a resolved native intent (used by planExecute). */
+export function commandPayloadFromIntent(
+  intent: NativeCommandIntent,
+  command: string,
+  tag: string,
+): CommandResultPayload {
+  return payloadFromIntent(intent, command, tag);
+}
+
+/** Build workflow payload from a grounded file/folder path (retriever / cache). */
+export function commandPayloadFromResolvedPath(
+  command: string,
+  path: string,
+  tag: string,
+): CommandResultPayload {
+  return commandPayloadFromIntent(
+    { kind: "open_resolved", path },
+    command,
+    tag,
+  );
+}
+
+/** Build compound WORKFLOW steps; chain resolved paths into referential send batches. */
+function compoundStepsToWorkflowPayload(
+  steps: NativeCommandIntent[],
+  command: string,
+): Array<{ type: "NOOP"; status: "pending"; data: Record<string, unknown> }> {
+  let chainedPath: string | undefined;
+
+  return steps.map((step, i) => {
+    const batch = desktopBatchPayload(
+      step as Exclude<NativeCommandIntent, CompoundIntent>,
+      `${command.trim()} [${i + 1}/${steps.length}]`,
+    );
+
+    if (step.kind === "item" && step.parent) {
+      chainedPath =
+        resolveKnownItemPath(step.name, step.parent) ?? chainedPath;
+    } else if (step.kind === "open_resolved") {
+      chainedPath = step.path;
+    } else if (step.kind === "smart_search") {
+      chainedPath = undefined;
+    }
+
+    if (step.kind === "referential_send" && chainedPath) {
+      batch.sourcePath = chainedPath;
+    }
+
+    return {
+      type: "NOOP" as const,
+      status: "pending" as const,
+      data: batch,
+    };
+  });
+}
+
+function payloadFromIntent(
+  intent: NativeCommandIntent,
+  command: string,
+  tag: string,
+): CommandResultPayload {
   console.info(`[ripple-desktop] you said: "${command.trim()}"`);
-  console.info(`[ripple-desktop] desktop intent: ${intentLabel(intent)}`);
+  console.info(`[ripple-desktop] desktop intent: ${intentLabel(intent)}${tag}`);
+
+  if (intent.kind === "compound") {
+    return {
+      command_id: randomUUID(),
+      intent: "workflow",
+      output_type: "workflow",
+      actions: [
+        {
+          type: "WORKFLOW",
+          status: "pending",
+          data: {
+            steps: compoundStepsToWorkflowPayload(intent.steps, command),
+          },
+        },
+      ],
+    };
+  }
 
   return {
     command_id: randomUUID(),
@@ -223,7 +353,7 @@ export function buildDesktopCommandResult(
             {
               type: "NOOP",
               status: "pending",
-              data: batchPayload(intent, command),
+              data: desktopBatchPayload(intent, command),
             },
           ],
         },

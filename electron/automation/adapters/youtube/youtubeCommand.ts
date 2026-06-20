@@ -2,16 +2,34 @@ import { randomUUID } from "node:crypto";
 import type { CommandResultPayload } from "../../types.js";
 import { parseYouTubeCommand } from "./parseYouTubeCommand.js";
 
-/** Local WORKFLOW for YouTube (no backend LLM required). */
+/** Local WORKFLOW for YouTube (regex fallback). */
 export function buildYouTubeCommandResult(
   command: string,
 ): CommandResultPayload | null {
   const intent = parseYouTubeCommand(command);
   if (!intent) return null;
+  return youtubePayloadFromIntent(intent, command);
+}
 
+export function buildYouTubeCommandFromPlan(
+  plan: { query: string; kind: "search" | "play" },
+  command: string,
+): CommandResultPayload {
+  return youtubePayloadFromIntent(
+    { kind: plan.kind, query: plan.query },
+    command,
+    "LLM",
+  );
+}
+
+function youtubePayloadFromIntent(
+  intent: { kind: "open" | "search" | "play"; query?: string },
+  command: string,
+  source = "regex",
+): CommandResultPayload {
   let label = intent.kind;
-  if (intent.kind === "search" || intent.kind === "play") {
-    label = `${intent.kind} q=${intent.query.slice(0, 50)}`;
+  if ((intent.kind === "search" || intent.kind === "play") && intent.query) {
+    label = `${intent.kind} q=${intent.query.slice(0, 50)} (${source})`;
   }
 
   console.info(`[ripple-desktop] YouTube command — ${label}`);
@@ -22,7 +40,7 @@ export function buildYouTubeCommandResult(
     command,
   };
 
-  if (intent.kind === "search" || intent.kind === "play") {
+  if ((intent.kind === "search" || intent.kind === "play") && intent.query) {
     batchData.query = intent.query;
   }
 

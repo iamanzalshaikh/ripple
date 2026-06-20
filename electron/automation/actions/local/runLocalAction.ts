@@ -48,15 +48,25 @@ export async function runLocalAction(action: LocalAction): Promise<string> {
   }
 }
 
+import type { WhatsAppAttachmentPayload } from "../adapters/whatsapp/whatsappAttachment.js";
+
 /** WhatsApp CDP batch triggered after OPEN_APP + context. */
 export async function runWhatsAppLocalBatch(data?: Record<string, unknown>): Promise<string> {
   const text = typeof data?.text === "string" ? data.text : "";
   const recipient = data?.recipient;
   const send = data?.send === true;
+  const sourcePath =
+    typeof data?.sourcePath === "string" ? data.sourcePath : undefined;
+  const sourceKind =
+    typeof data?.sourceKind === "string" ? data.sourceKind : undefined;
+  const attachment = data?.attachment as WhatsAppAttachmentPayload | undefined;
   return runWhatsAppMessageFlow({
     text,
     recipient: typeof recipient === "string" ? recipient : undefined,
     send,
+    sourcePath,
+    sourceKind,
+    attachment,
     command:
       typeof data?.command === "string"
         ? data.command

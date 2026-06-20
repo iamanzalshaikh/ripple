@@ -2,11 +2,25 @@ import { getRippleDb } from "./rippleDb.js";
 
 export type MemoryKey =
   | "last_file"
+  | "last_pdf"
   | "last_folder"
   | "last_project"
   | "last_contact"
   | "last_app"
-  | "last_workspace";
+  | "last_workspace"
+  | "last_opened_path"
+  | "last_opened_kind"
+  | "last_parent_folder"
+  | "last_prior_opened_path"
+  | "last_web_surface"
+  | "last_web_surface_at";
+
+export type LastOpenedKind =
+  | "file"
+  | "folder"
+  | "project"
+  | "workspace"
+  | "app";
 
 export function setMemory(key: MemoryKey, value: string): void {
   const db = getRippleDb();

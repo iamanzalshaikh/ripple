@@ -2,6 +2,7 @@ import { clipboard } from "electron";
 import { getFocusContext, restoreFocusContext } from "../focus/focusContext.js";
 import { getLastVoiceCommand, isEditIntent } from "../state/lastCommand.js";
 import { isWhatsAppMessagingCommand } from "./adapters/whatsapp/parseContact.js";
+import { isContextualWhatsAppComposeCommand } from "./adapters/whatsapp/parseWhatsAppCommand.js";
 import { resolveTextWithClipboard } from "./clipboard/clipboardService.js";
 import { delay } from "./delay.js";
 import { formatMessageBody } from "./emailFormat.js";
@@ -27,7 +28,8 @@ import {
   isLinkedInCommand,
   isLinkedInTypingBlocked,
 } from "./adapters/linkedin/parseLinkedInCommand.js";
-import { isInstagramTabActive, isLinkedInTabActive } from "../focus/focusContext.js";
+import { isInstagramTabActive, isLinkedInTabActive, isWhatsAppTabActive } from "../focus/focusContext.js";
+import { replaceWhatsAppComposerViaExtension } from "../bridge/nativeMessagingBridge.js";
 import {
   isContextualInstagramComposeCommand,
   isInstagramTypingBlocked,
@@ -64,9 +66,8 @@ function hintsFromData(data?: Record<string, unknown>): Partial<ParsedEmail> {
 }
 
 function isWhatsAppContext(): boolean {
-  const focus = getFocusContext();
   const cmd = getLastVoiceCommand() ?? "";
-  return focus?.isWhatsApp === true || isWhatsAppMessagingCommand(cmd);
+  return isWhatsAppTabActive() || isWhatsAppMessagingCommand(cmd);
 }
 
 
@@ -181,6 +182,9 @@ export async function smartInsertText(
   const instagramCompose =
     isInstagramTabActive() && isContextualInstagramComposeCommand(cmd);
 
+  const whatsappCompose =
+    isWhatsAppTabActive() && isContextualWhatsAppComposeCommand(cmd);
+
   if ((instagramCompose || isInstagramTypingBlocked(cmd)) && !isEditOrRephraseCommand(cmd)) {
     throw new Error(
       "Instagram DMs use the open chat composer — on an Instagram DM thread say your message directly",
@@ -193,6 +197,14 @@ export async function smartInsertText(
     );
   }
 
+  if (whatsappCompose && !isEditOrRephraseCommand(cmd)) {
+    console.info("[ripple-desktop] WA compose — type into open chat via extension");
+    await restoreFocusContext();
+    await new Promise((r) => setTimeout(r, 400));
+    const body = formatMessageBody(parsed, text.trim() || cmd.trim());
+    return replaceWhatsAppComposerViaExtension(body);
+  }
+
   if (
     (isEditOrRephraseCommand(cmd) || isEditIntent()) &&
     !instagramCompose
@@ -201,6 +213,12 @@ export async function smartInsertText(
     if (isInstagramTabActive()) {
       console.info("[ripple-desktop] DM rephrase — replace in composer via extension");
       return composeInstagramMessage({ text: formatted, send: false });
+    }
+    if (isWhatsAppTabActive()) {
+      console.info("[ripple-desktop] WA rephrase — replace in composer via extension");
+      await restoreFocusContext();
+      await new Promise((r) => setTimeout(r, 400));
+      return replaceWhatsAppComposerViaExtension(formatted);
     }
     console.info("[ripple-desktop] edit/rephrase — replace in place (no new Gmail window)");
     return replaceTextInPlace(formatted);

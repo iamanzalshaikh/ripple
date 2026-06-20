@@ -10,7 +10,18 @@ const OTHER_APPS =
   /\b(gmail|google\s*mail|whatsapp|notion|youtube|instagram|slack|discord|spotify)\b/i;
 
 function mentionsLinkedIn(cmd: string): boolean {
-  return /\blinkedin\b/i.test(cmd);
+  return (
+    /\blinkedin\b/i.test(cmd) ||
+    /(?:لنکڈن|لنگڈین|لنک\s*ڈن)/u.test(cmd)
+  );
+}
+
+function sanitizePeopleQuery(raw: string): string {
+  return raw
+    .replace(/^(?:سرچ|تلاش|ڈھونڈ|کھوج)\s+/u, "")
+    .replace(/\s+(?:لنکڈن|لنگڈین|لنک\s*ڈن|linkedin)\s*$/iu, "")
+    .replace(/\s+(?:ہون|پر|on)\s*$/iu, "")
+    .trim();
 }
 
 function mentionsOtherApps(cmd: string): boolean {
@@ -68,7 +79,10 @@ export function wantsCreatePost(cmd: string): boolean {
 }
 
 function wantsSearch(cmd: string): boolean {
-  return /\b(search|find|look\s+up)\b/i.test(cmd);
+  return (
+    /\b(search|find|look\s+up)\b/i.test(cmd) ||
+    /(?:سرچ|تلاش|ڈھونڈ|کھوج)/u.test(cmd)
+  );
 }
 
 function wantsSearchPeople(cmd: string): boolean {
@@ -80,13 +94,16 @@ function extractPeopleQuery(cmd: string): string | undefined {
     /\bsearch\s+(?:for\s+)?(?:people\s+)?(?:named\s+)?(.+?)\s+on\s+linkedin/i,
     /\bfind\s+(.+?)\s+on\s+linkedin/i,
     /\bsearch\s+linkedin\s+(?:for\s+)?(?:people\s+)?(.+)$/i,
+    /(?:سرچ|تلاش)\s+(?:کے\s+لیے\s+)?(.+?)\s+(?:پر\s+)?(?:لنکڈن|لنگڈین|لنک\s*ڈن)/u,
+    /(?:سرچ|تلاش)\s+(.+?)\s+(?:لنکڈن|لنگڈین|لنک\s*ڈن|ہون)/u,
     /\bsearch\s+(?:for\s+)?(?:people\s+)?(?:named\s+)?(.+)$/i,
     /\bfind\s+(.+)$/i,
     /\blook\s+up\s+(.+)$/i,
+    /(?:سرچ|تلاش)\s+(.+)$/u,
   ];
   for (const re of patterns) {
     const m = cmd.match(re);
-    const q = m?.[1]?.trim().replace(/[.,;]+$/, "");
+    const q = sanitizePeopleQuery(m?.[1]?.trim().replace(/[.,;]+$/, "") ?? "");
     if (q && q.length >= 2) return q.slice(0, 120);
   }
   return undefined;

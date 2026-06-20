@@ -100,6 +100,24 @@ function onSocketData(chunk: Buffer): void {
       continue;
     }
 
+    if (msg.type === "WHATSAPP_COMPOSER_RESULT" && msg.id) {
+      const p = pending.get(msg.id);
+      if (!p) continue;
+      clearTimeout(p.timer);
+      pending.delete(msg.id);
+      const compMsg = msg as { text?: string; detail?: string };
+      const detail =
+        (typeof compMsg.detail === "string" && compMsg.detail.trim()) ||
+        (typeof compMsg.text === "string" && compMsg.text.trim()) ||
+        "";
+      p.resolve({
+        ok: !!msg.ok,
+        error: msg.error,
+        detail,
+      });
+      continue;
+    }
+
     if (msg.type === "ACTIVE_TAB_RESULT" && msg.id) {
       const p = pending.get(msg.id);
       if (!p) continue;
@@ -283,10 +301,84 @@ export function queryInstagramComposerFromExtension(): Promise<string | null> {
   });
 }
 
+/** Read text currently in the WhatsApp message composer (for rephrase/tone). */
+export function queryWhatsAppComposerFromExtension(): Promise<string | null> {
+  return new Promise((resolve) => {
+    if (!isNativeMessagingConnected()) {
+      resolve(null);
+      return;
+    }
+
+    const id = randomUUID();
+    const timer = setTimeout(() => {
+      pending.delete(id);
+      resolve(null);
+    }, 5000);
+
+    pending.set(id, {
+      resolve: (r) => {
+        if (!r.ok || !r.detail?.trim()) {
+          resolve(null);
+          return;
+        }
+        resolve(r.detail.trim());
+      },
+      reject: () => resolve(null),
+      timer,
+    });
+
+    sendFrame(nativeSocket!, { type: "WHATSAPP_READ_COMPOSER", id });
+  });
+}
+
+/** Replace all text in the open WhatsApp composer (rephrase/tone). */
+export function replaceWhatsAppComposerViaExtension(text: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    if (!isNativeMessagingConnected()) {
+      reject(new Error("Native Messaging not connected"));
+      return;
+    }
+
+    const body = text.trim();
+    if (!body) {
+      reject(new Error("WhatsApp rephrase text is empty"));
+      return;
+    }
+
+    const id = randomUUID();
+    const timer = setTimeout(() => {
+      pending.delete(id);
+      reject(new Error("WhatsApp composer replace timed out (15s)"));
+    }, 15_000);
+
+    pending.set(id, {
+      resolve: (r) => {
+        if (!r.ok) {
+          reject(new Error(r.error ?? "WhatsApp composer replace failed"));
+          return;
+        }
+        const detail = r.detail?.trim();
+        resolve(
+          detail || `Updated WhatsApp message (${body.length} chars)`,
+        );
+      },
+      reject,
+      timer,
+    });
+
+    sendFrame(nativeSocket!, { type: "WHATSAPP_REPLACE_COMPOSER", id, text: body });
+  });
+}
+
 export function runWhatsAppViaNativeMessaging(args: {
   contact: string;
   text: string;
   send: boolean;
+  attachment?: {
+    fileName: string;
+    mimeType: string;
+    base64: string;
+  };
 }): Promise<string> {
   return new Promise((resolve, reject) => {
     if (!isNativeMessagingConnected()) {
@@ -322,6 +414,7 @@ export function runWhatsAppViaNativeMessaging(args: {
       contact: args.contact,
       text: args.text,
       send: args.send,
+      attachment: args.attachment,
     });
   });
 }

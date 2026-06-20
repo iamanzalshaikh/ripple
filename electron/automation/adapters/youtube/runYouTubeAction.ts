@@ -1,11 +1,12 @@
 import { openYouTubeInBrowser } from "./openYouTube.js";
-import { playYouTubeBySearch } from "./playVideo.js";
 import { searchYouTube } from "./searchVideo.js";
 import {
   isExtensionBridgeConnected,
   runYouTubeViaExtension,
 } from "../../../bridge/whatsappExtensionBridge.js";
-import { delay } from "../../delay.js";
+
+const EXTENSION_SETUP_HINT =
+  "Ripple Chrome extension not connected — reload it at chrome://extensions and run native-host/install-windows.ps1 (see WHATSAPP_SETUP.md).";
 
 export async function runYouTubeBatch(
   data?: Record<string, unknown>,
@@ -24,22 +25,14 @@ export async function runYouTubeBatch(
 
   if (kind === "play") {
     if (!query) throw new Error("YouTube play query missing");
-    const detail = await playYouTubeBySearch(query);
-    await delay(3500);
     if (!isExtensionBridgeConnected()) {
-      console.warn(
-        "[ripple-desktop] YouTube auto-play skipped — extension bridge offline (see WHATSAPP_SETUP.md)",
-      );
-      return `${detail} (extension not connected — showing results)`;
+      throw new Error(EXTENSION_SETUP_HINT);
     }
-    try {
-      const clicked = await runYouTubeViaExtension({ query });
-      return `${detail} → ${clicked}`;
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      console.warn(`[ripple-desktop] YouTube auto-play unavailable: ${msg}`);
-      return `${detail} (couldn't auto-play — showing results)`;
-    }
+    console.info(
+      `[ripple-desktop] YouTube play via extension — q="${query.slice(0, 80)}"`,
+    );
+    const clicked = await runYouTubeViaExtension({ query });
+    return `YouTube play — ${clicked}`;
   }
 
   throw new Error(`Unknown YouTube action: ${String(kind)}`);

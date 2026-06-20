@@ -12,9 +12,27 @@ import {
 
 export type WorkflowIntent =
   | { kind: "run_workflow"; workflow: UserWorkflow; spokenName: string }
-  | { kind: "remember_workflow"; name: string; stepsRaw: string }
+  | {
+      kind: "remember_workflow";
+      name: string;
+      stepsRaw: string;
+      replace?: boolean;
+    }
   | { kind: "list_workflows" }
   | { kind: "remove_workflow"; name: string };
+
+function parseWorkflowVersion(
+  spoken: string,
+): { name: string; version?: number } {
+  const match = spoken.match(/^(.+?)\s+v(\d+)\s*$/i);
+  if (!match?.[1] || !match[2]) {
+    return { name: sanitizeSpokenName(spoken) };
+  }
+  return {
+    name: sanitizeSpokenName(match[1]),
+    version: Number.parseInt(match[2], 10),
+  };
+}
 
 /** Folder/file paths — not multi-app workflow step lists. */
 function looksLikeFolderPath(rest: string): boolean {
@@ -31,14 +49,20 @@ function looksLikeFolderPath(rest: string): boolean {
 function rememberWorkflowIntent(
   name: string,
   stepsRaw: string,
+  replace = false,
 ): WorkflowIntent {
   const cleanName = sanitizeSpokenName(name);
   const steps = parseWorkflowStepList(stepsRaw);
   const stepLabels = steps.map((s) => `${s.type}:${s.target}`).join(" -> ");
   console.info(
-    `[ripple-desktop] you said: remember workflow "${cleanName}" with [${stepLabels}]`,
+    `[ripple-desktop] you said: remember workflow "${cleanName}" with [${stepLabels}]${replace ? " (replace)" : ""}`,
   );
-  return { kind: "remember_workflow", name: cleanName, stepsRaw: stepsRaw.trim() };
+  return {
+    kind: "remember_workflow",
+    name: cleanName,
+    stepsRaw: stepsRaw.trim(),
+    replace,
+  };
 }
 
 export function parseWorkflowMetaCommand(
@@ -47,7 +71,7 @@ export function parseWorkflowMetaCommand(
   const cmd = normalizeTranscript(command ?? "");
   if (!cmd) return null;
 
-  if (/(?:^|\s)(?:list|show)\s+(?:my\s+)?workflows\s*\.?\s*$/i.test(cmd)) {
+  if (/(?:^|\s)(?:list|show)\s+(?:my\s+)?workflows?\s*\.?\s*$/i.test(cmd)) {
     return { kind: "list_workflows" };
   }
 
@@ -56,6 +80,27 @@ export function parseWorkflowMetaCommand(
   );
   if (forgetWorkflow?.[1]) {
     return { kind: "remove_workflow", name: sanitizeSpokenName(forgetWorkflow[1]) };
+  }
+
+  const replaceOpens = cmd.match(
+    /^\s*replace\s+(?:my\s+)?(.+?)\s+opens?\s+(.+?)\s*\.?\s*$/i,
+  );
+  if (replaceOpens?.[1] && replaceOpens[2]) {
+    return rememberWorkflowIntent(replaceOpens[1], replaceOpens[2], true);
+  }
+
+  const replaceOpen = cmd.match(
+    /^\s*replace\s+(?:my\s+)?(.+?)\s+open\s+(.+?)\s*\.?\s*$/i,
+  );
+  if (replaceOpen?.[1] && replaceOpen[2]) {
+    return rememberWorkflowIntent(replaceOpen[1], replaceOpen[2], true);
+  }
+
+  const replaceWith = cmd.match(
+    /^\s*replace\s+(?:my\s+)?(.+?)\s+with\s+(.+?)\s*\.?\s*$/i,
+  );
+  if (replaceWith?.[1] && replaceWith[2]) {
+    return rememberWorkflowIntent(replaceWith[1], replaceWith[2], true);
   }
 
   // "Remember work mode opens VS Code, GitHub, and Render"
@@ -110,17 +155,18 @@ export function parseWorkflowRunCommand(
   const spoken = extractLastRunPhrase(cmd);
   if (!spoken) return null;
 
-  const workflow = resolveWorkflowExact(spoken);
+  const { name, version } = parseWorkflowVersion(spoken);
+  const workflow = resolveWorkflowExact(name, version);
   if (!workflow) {
     console.info(
-      `[ripple-desktop] you said: "${cmd}" → no workflow named "${spoken}" (say List my workflows)`,
+      `[ripple-desktop] you said: "${cmd}" → no workflow named "${name}"${version ? ` v${version}` : ""} (say List my workflows)`,
     );
     return null;
   }
 
   console.info(
-    `[ripple-desktop] you said: "${cmd}" → run workflow "${workflow.name}"`,
+    `[ripple-desktop] you said: "${cmd}" → run workflow "${workflow.name}" v${workflow.version ?? 1}`,
   );
 
-  return { kind: "run_workflow", workflow, spokenName: spoken };
+  return { kind: "run_workflow", workflow, spokenName: name };
 }

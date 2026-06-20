@@ -46,6 +46,11 @@ export function runWhatsAppViaExtension(args: {
   contact: string;
   text: string;
   send: boolean;
+  attachment?: {
+    fileName: string;
+    mimeType: string;
+    base64: string;
+  };
 }): Promise<string> {
   if (isNativeMessagingConnected()) {
     return runWhatsAppViaNativeMessaging(args);

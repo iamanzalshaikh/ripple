@@ -9,6 +9,12 @@ export interface NativeAppEntry {
   titleKeywords?: string[];
 }
 
+import {
+  loadDiscoveredApps,
+  discoveredAppToNativeEntry,
+  type DiscoveredApp,
+} from "./appDiscovery.js";
+
 /** Web apps handled by extension/backend — never native-launch here. */
 export const WEB_ONLY_TARGETS = new Set([
   "gmail",
@@ -154,9 +160,35 @@ const ALL_NATIVE_APPS: NativeAppEntry[] = [
   ...COMMON_NATIVE_APPS,
 ];
 
-const ALIAS_INDEX: { alias: string; entry: NativeAppEntry }[] = ALL_NATIVE_APPS.flatMap(
-  (entry) => entry.aliases.map((alias) => ({ alias: alias.toLowerCase(), entry })),
-).sort((a, b) => b.alias.length - a.alias.length);
+let aliasIndex: { alias: string; entry: NativeAppEntry }[] = buildAliasIndex(
+  ALL_NATIVE_APPS,
+);
+
+function buildAliasIndex(
+  apps: NativeAppEntry[],
+): { alias: string; entry: NativeAppEntry }[] {
+  return apps
+    .flatMap((entry) =>
+      entry.aliases.map((alias) => ({ alias: alias.toLowerCase(), entry })),
+    )
+    .sort((a, b) => b.alias.length - a.alias.length);
+}
+
+/** Merge Start Menu scan results into resolver (Phase 4.5). */
+export function mergeDiscoveredApps(apps: DiscoveredApp[]): void {
+  const existingIds = new Set(ALL_NATIVE_APPS.map((a) => a.id));
+  for (const app of apps) {
+    const entry = discoveredAppToNativeEntry(app);
+    if (existingIds.has(entry.id)) continue;
+    ALL_NATIVE_APPS.push(entry);
+    existingIds.add(entry.id);
+  }
+  aliasIndex = buildAliasIndex(ALL_NATIVE_APPS);
+}
+
+export function initNativeAppRegistry(): void {
+  mergeDiscoveredApps(loadDiscoveredApps());
+}
 
 export function isWebOnlyAppTarget(name: string): boolean {
   return WEB_ONLY_TARGETS.has(name.trim().toLowerCase());
@@ -166,11 +198,11 @@ export function resolveNativeApp(spoken: string): NativeAppEntry | null {
   const key = spoken.trim().toLowerCase().replace(/\s+/g, " ");
   if (!key || isWebOnlyAppTarget(key)) return null;
 
-  for (const { alias, entry } of ALIAS_INDEX) {
+  for (const { alias, entry } of aliasIndex) {
     if (key === alias) return entry;
   }
 
-  for (const { alias, entry } of ALIAS_INDEX) {
+  for (const { alias, entry } of aliasIndex) {
     if (key.startsWith(`${alias} `) || key.endsWith(` ${alias}`)) return entry;
   }
 

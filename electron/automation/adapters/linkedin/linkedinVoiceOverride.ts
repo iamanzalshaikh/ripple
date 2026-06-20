@@ -8,6 +8,7 @@ import {
   wantsCreatePost,
 } from "./parseLinkedInCommand.js";
 import { normalizeTranscript } from "../../voice/normalizeTranscript.js";
+import { repairCorruptedTranscript } from "../../voice/i18n/repairEncoding.js";
 
 function isLocalLinkedInWorkflow(result: CommandResultPayload): boolean {
   const action = result.actions?.[0];
@@ -34,15 +35,32 @@ export function applyLinkedInVoiceOverride(
 ): CommandResultPayload | null {
   if (isLocalLinkedInWorkflow(result)) return null;
 
-  const intent = parseLinkedInCommand(command);
-  const contextual = isContextualLinkedInVoiceCommand(command);
-  const generation = isLinkedInPostGenerationCommand(command);
-
   const cmd = normalizeTranscript(command);
+  const repaired = repairCorruptedTranscript(cmd);
+  const intent =
+    parseLinkedInCommand(command) ?? parseLinkedInCommand(repaired);
+  const contextual =
+    isContextualLinkedInVoiceCommand(command) ||
+    isContextualLinkedInVoiceCommand(repaired);
+  const generation =
+    isLinkedInPostGenerationCommand(command) ||
+    isLinkedInPostGenerationCommand(repaired);
+
   const onLinkedIn = isLinkedInTabActive();
   const createOnLinkedIn = onLinkedIn && wantsCreatePost(cmd);
 
   if (!intent && !contextual && !generation && !createOnLinkedIn) return null;
+
+  if (intent?.kind === "search_people" || intent?.kind === "open") {
+    const local =
+      buildLinkedInCommandResult(command) ?? buildLinkedInCommandResult(repaired);
+    if (local) {
+      console.info(
+        `[ripple-desktop] LinkedIn voice override — local ${intent.kind}`,
+      );
+      return local;
+    }
+  }
 
   const backendText = extractBackendText(result);
   const shouldOverride =
@@ -98,7 +116,7 @@ export function applyLinkedInVoiceOverride(
     };
   }
 
-  const local = buildLinkedInCommandResult(command);
+  const local = buildLinkedInCommandResult(command) ?? buildLinkedInCommandResult(repaired);
   if (!local) return null;
 
   console.info(

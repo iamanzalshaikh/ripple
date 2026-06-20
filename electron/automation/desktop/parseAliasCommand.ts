@@ -16,23 +16,11 @@ export function parseAliasMetaCommand(
   const cmd = normalizeTranscript(command ?? "");
   if (!cmd) return null;
 
-  if (/(?:^|\s)(?:list|show)\s+(?:my\s+)?aliases\s*\.?\s*$/i.test(cmd)) {
+  if (/(?:^|\s)(?:list|show)\s+(?:my\s+)?aliases?\s*\.?\s*$/i.test(cmd)) {
     return { kind: "list_aliases" };
   }
 
   // "Remember test in Downloads"
-  const rememberIn = cmd.match(
-    /^\s*remember\s+(?:my\s+)?(?:that\s+)?(.+?)\s+in\s+(downloads?|documents?|desktop)\s*\.?\s*$/i,
-  );
-  if (rememberIn?.[1] && rememberIn[2]) {
-    return {
-      kind: "remember_alias",
-      name: rememberIn[1].trim(),
-      path: normalizeSpokenPath(`in ${rememberIn[2]} ${rememberIn[1].trim()}`),
-    };
-  }
-
-  // "Remember my test 1 is in download, test 1"
   const rememberIsIn = cmd.match(
     /^\s*remember\s+(?:my\s+)?(.+?)\s+is\s+in\s+(downloads?|documents?|desktop)(?:,?\s*)?(.+)?\s*\.?\s*$/i,
   );
@@ -46,10 +34,28 @@ export function parseAliasMetaCommand(
     };
   }
 
+  const rememberIn = cmd.match(
+    /^\s*remember\s+(?:my\s+)?(?:that\s+)?(.+?)\s+in\s+(downloads?|documents?|desktop)\s*\.?\s*$/i,
+  );
+  if (rememberIn?.[1] && rememberIn[2]) {
+    if (/\bis\s+in\s+(?:downloads?|documents?|desktop)\b/i.test(cmd)) {
+      return null;
+    }
+    return {
+      kind: "remember_alias",
+      name: rememberIn[1].trim(),
+      path: normalizeSpokenPath(`in ${rememberIn[2]} ${rememberIn[1].trim()}`),
+    };
+  }
+
+  // "Remember my test 1 is in download, test 1"
   const rememberIs = cmd.match(
     /^\s*remember\s+(?:my\s+)?(?:that\s+)?(.+?)\s+is\s+(.+?)\s*\.?\s*$/i,
   );
   if (rememberIs?.[1] && rememberIs[2]) {
+    if (/\bis\s+in\s+(?:downloads?|documents?|desktop)\b/i.test(cmd)) {
+      return null;
+    }
     const path = rememberIs[2].trim();
     const pathLike =
       /\b(in\s+)?(downloads?|documents?|desktop)\b/i.test(path) ||

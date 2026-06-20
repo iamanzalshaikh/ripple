@@ -11,14 +11,21 @@ import {
   extractContactName,
   resolveWhatsAppMessageText,
 } from "./parseContact.js";
+import { rememberContact } from "./buildReferentialWhatsApp.js";
 import { runWhatsAppCdpPipeline } from "./whatsappCdpPipeline.js";
 import { WhatsAppPipelineError } from "./whatsappSteps.js";
+
+import type { WhatsAppAttachmentPayload } from "./whatsappAttachment.js";
 
 export interface WhatsAppMessageInput {
   text: string;
   recipient?: string;
   command?: string;
   send?: boolean;
+  /** Resolved disk path when sending a file/folder from desktop session */
+  sourcePath?: string;
+  sourceKind?: string;
+  attachment?: WhatsAppAttachmentPayload;
 }
 
 const USE_CDP = process.env.RIPPLE_USE_CDP === "1";
@@ -34,10 +41,13 @@ export async function runWhatsAppMessageFlow(
   }
 
   const command = input.command ?? getLastVoiceCommand() ?? "";
-  const text = resolveWhatsAppMessageText(command, input.text);
+  const text =
+    input.sourcePath?.trim() && input.text?.trim()
+      ? input.text.trim()
+      : resolveWhatsAppMessageText(command, input.text);
   const shouldSend = input.send ?? commandImpliesSend(command);
 
-  if (!text.trim() && shouldSend) {
+  if (!text.trim() && shouldSend && !input.attachment) {
     throw new Error(
       'No message to send — say e.g. "send Noor good night" or "search Noor and say hello"',
     );
@@ -51,18 +61,35 @@ export async function runWhatsAppMessageFlow(
     throw new Error("Contact not confirmed — cancelled");
   }
 
+  rememberContact(contact);
+
+  if (input.sourcePath) {
+    console.info(
+      `[ripple-desktop] WhatsApp send source: ${input.sourceKind ?? "item"} at ${input.sourcePath}`,
+    );
+  }
+  if (input.attachment) {
+    console.info(
+      `[ripple-desktop] WhatsApp attachment: ${input.attachment.fileName} (${input.attachment.mimeType})`,
+    );
+  }
+
   const extensionOk = await isExtensionBridgeConnectedAsync();
   if (!USE_CDP && extensionOk) {
     console.info(
       `[ripple-desktop] WhatsApp via Native Messaging contact="${contact}"`,
     );
+    const preview = input.attachment
+      ? `file=${input.attachment.fileName}`
+      : text.slice(0, 60) + (text.length > 60 ? "…" : "");
     console.info(
-      `[ripple-desktop] WhatsApp payload contact="${contact}" send=${shouldSend} text="${text.slice(0, 60)}${text.length > 60 ? "…" : ""}"`,
+      `[ripple-desktop] WhatsApp payload contact="${contact}" send=${shouldSend} text="${preview}"`,
     );
     return runWhatsAppViaExtension({
       contact,
       text,
       send: shouldSend,
+      attachment: input.attachment,
     });
   }
 

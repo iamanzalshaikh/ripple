@@ -1,7 +1,95 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { getForegroundWindow, focusWindowByHwnd } from "../native/win32Bridge.js";
+import { getMemory, setMemory } from "../storage/sessionMemory.js";
 
-const execFileAsync = promisify(execFile);
+const STICKY_WEB_MS = 15 * 60 * 1000;
+
+export type StickyWebSurface =
+  | "whatsapp"
+  | "gmail"
+  | "instagram"
+  | "linkedin"
+  | "youtube"
+  | "notion"
+  | "slack";
+
+function surfaceFromContext(ctx: FocusContext): StickyWebSurface | null {
+  if (ctx.isWhatsApp) return "whatsapp";
+  if (ctx.isGmail) return "gmail";
+  if (ctx.isInstagram) return "instagram";
+  if (ctx.isLinkedIn) return "linkedin";
+  if (ctx.isYouTube) return "youtube";
+  if (ctx.isNotion) return "notion";
+  if (ctx.isSlack) return "slack";
+  return null;
+}
+
+function rememberWebSurface(ctx: FocusContext): void {
+  const surface = surfaceFromContext(ctx);
+  if (!surface) {
+    // Left Chrome/web — don't let stale WhatsApp sticky steal desktop commands.
+    if (!ctx.isBrowser) {
+      setMemory("last_web_surface_at", "0");
+    }
+    return;
+  }
+  setMemory("last_web_surface", surface);
+  setMemory("last_web_surface_at", String(Date.now()));
+}
+
+function isClearlyDesktopForeground(ctx: FocusContext): boolean {
+  if (ctx.isBrowser) return false;
+  const p = ctx.processName.toLowerCase();
+  return (
+    p === "explorer" ||
+    p.includes("calculator") ||
+    p.includes("applicationframehost") ||
+    p.includes("systemsettings") ||
+    p.includes("searchhost") ||
+    p.includes("shellexperiencehost") ||
+    (!ctx.isWhatsApp &&
+      !ctx.isGmail &&
+      !ctx.isYouTube &&
+      !ctx.isLinkedIn &&
+      !ctx.isInstagram &&
+      !ctx.isNotion)
+  );
+}
+
+export function getStickyWebSurface(): StickyWebSurface | null {
+  const at = Number(getMemory("last_web_surface_at") ?? "0");
+  if (!at || Date.now() - at > STICKY_WEB_MS) return null;
+  const surface = getMemory("last_web_surface");
+  return surface ? (surface as StickyWebSurface) : null;
+}
+
+function isRippleOwnWindow(processName: string, windowTitle: string): boolean {
+  const p = processName.toLowerCase();
+  const t = windowTitle.toLowerCase();
+  return (
+    p.includes("ripple") ||
+    t.includes("ripple") ||
+    (p.includes("electron") && /ripple|voice|assistant/i.test(t))
+  );
+}
+
+/** Keep web-app flags from captured window title when extension reports a different active tab. */
+function preserveCapturedWebFlags(prev: FocusContext, next: FocusContext): FocusContext {
+  const merged = { ...next };
+  const title = prev.windowTitle;
+  const proc = prev.processName;
+  if (prev.isWhatsApp || detectWhatsApp(title, proc)) merged.isWhatsApp = true;
+  if (prev.isGmail || detectGmail(title, proc)) merged.isGmail = true;
+  if (prev.isInstagram || detectInstagram(title, proc, prev.activeTabUrl)) {
+    merged.isInstagram = true;
+  }
+  if (prev.isLinkedIn || detectLinkedIn(title, proc, prev.activeTabUrl)) {
+    merged.isLinkedIn = true;
+  }
+  if (prev.isYouTube || detectYouTube(title, proc)) merged.isYouTube = true;
+  if (prev.isNotion || detectNotion(title, proc)) merged.isNotion = true;
+  if (prev.isSlack || detectSlack(title, proc)) merged.isSlack = true;
+  return merged;
+}
 
 export interface FocusContext {
   hwnd: number;
@@ -20,75 +108,6 @@ export interface FocusContext {
 }
 
 let saved: FocusContext | null = null;
-
-const WIN_CAPTURE_SCRIPT = `
-Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-using System.Text;
-public class RippleFocus {
-  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
-  [DllImport("user32.dll", CharSet=CharSet.Unicode)]
-  public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
-  [DllImport("user32.dll")]
-  public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
-}
-"@
-$hwnd = [RippleFocus]::GetForegroundWindow()
-$windowPid = [uint32]0
-[void][RippleFocus]::GetWindowThreadProcessId($hwnd, [ref]$windowPid)
-$proc = Get-Process -Id $windowPid -ErrorAction SilentlyContinue
-$sb = New-Object System.Text.StringBuilder 512
-[void][RippleFocus]::GetWindowText($hwnd, $sb, 512)
-$title = -join ($sb.ToString().ToCharArray() | ForEach-Object {
-  if ([int][char]$_ -lt 32 -or [int][char]$_ -eq 127) { ' ' } else { $_ }
-}).Trim()
-$name = if ($proc) { $proc.ProcessName } else { "" }
-@{
-  hwnd = [int64]$hwnd
-  processName = $name
-  windowTitle = $title
-} | ConvertTo-Json -Compress
-`.trim();
-
-function parseFocusCaptureJson(stdout: string): {
-  hwnd: number;
-  processName: string;
-  windowTitle: string;
-} {
-  const trimmed = stdout.trim();
-  try {
-    return JSON.parse(trimmed) as {
-      hwnd: number;
-      processName: string;
-      windowTitle: string;
-    };
-  } catch {
-    const sanitized = trimmed.replace(/[\u0001-\u001F\u007F]/g, " ").replace(/\u0000/g, " ");
-    return JSON.parse(sanitized) as {
-      hwnd: number;
-      processName: string;
-      windowTitle: string;
-    };
-  }
-}
-
-const WIN_RESTORE_SCRIPT = (hwnd: number) => `
-Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-public class RippleFocus {
-  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
-  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
-  [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd);
-  [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr hWnd);
-}
-"@
-$hwnd = [IntPtr]${hwnd}
-if ([RippleFocus]::IsIconic($hwnd)) { [void][RippleFocus]::ShowWindow($hwnd, 9) }
-[void][RippleFocus]::BringWindowToTop($hwnd)
-[void][RippleFocus]::SetForegroundWindow($hwnd)
-`.trim();
 
 function detectGmail(title: string, processName: string): boolean {
   const t = title.toLowerCase();
@@ -222,7 +241,7 @@ async function enrichContextFromExtension(ctx: FocusContext): Promise<FocusConte
     );
     const tab = await queryActiveTabFromExtension();
     if (!tab?.url) return ctx;
-    return detectFromUrl(ctx, tab.url, tab.title);
+    return preserveCapturedWebFlags(ctx, detectFromUrl(ctx, tab.url, tab.title));
   } catch {
     return ctx;
   }
@@ -240,6 +259,33 @@ export function isInstagramTabActive(): boolean {
   if (!ctx) return false;
   if (ctx.activeTabUrl && /instagram\.com/i.test(ctx.activeTabUrl)) return true;
   return isInstagramWindowTitle(ctx.windowTitle);
+}
+
+/** True when WhatsApp Web is the focused context. */
+export function isWhatsAppTabActive(): boolean {
+  const ctx = saved;
+  if (ctx) {
+    if (isClearlyDesktopForeground(ctx)) return false;
+    if (ctx.isWhatsApp) return true;
+    if (ctx.activeTabUrl && /web\.whatsapp\.com/i.test(ctx.activeTabUrl)) return true;
+    if (detectWhatsApp(ctx.windowTitle, ctx.processName)) return true;
+    return false;
+  }
+  // Overlay stole focus — short sticky fallback only when we have no hwnd context.
+  return getStickyWebSurface() === "whatsapp";
+}
+
+/** Gmail compose window (not inbox) — in-place edit / Urdu voice. */
+export function isGmailComposeFocused(): boolean {
+  const ctx = saved;
+  if (!ctx?.isGmail) return false;
+  const url = (ctx.activeTabUrl ?? "").toLowerCase();
+  const title = ctx.windowTitle.toLowerCase();
+  return (
+    url.includes("tf=cm") ||
+    title.includes("compose") ||
+    title.includes("draft")
+  );
 }
 
 export function getFocusContext(): FocusContext | null {
@@ -301,12 +347,17 @@ export async function captureFocusContext(): Promise<FocusContext | null> {
   }
 
   try {
-    const { stdout } = await execFileAsync(
-      "powershell",
-      ["-NoProfile", "-Command", WIN_CAPTURE_SCRIPT],
-      { windowsHide: true, maxBuffer: 1024 * 64 },
-    );
-    const raw = parseFocusCaptureJson(stdout);
+    const raw = await getForegroundWindow();
+    if (!raw) {
+      saved = null;
+      return null;
+    }
+    if (isRippleOwnWindow(raw.processName ?? "", raw.windowTitle ?? "")) {
+      if (saved) {
+        console.info("[ripple-desktop] focus skip Ripple window — keeping prior context");
+        return saved;
+      }
+    }
     const ctx: FocusContext = {
       hwnd: Number(raw.hwnd) || 0,
       processName: raw.processName ?? "",
@@ -323,6 +374,7 @@ export async function captureFocusContext(): Promise<FocusContext | null> {
     };
     const enriched = await enrichContextFromExtension(ctx);
     saved = enriched;
+    rememberWebSurface(enriched);
     console.info(
       `[ripple-desktop] focus captured: ${enriched.processName} | "${enriched.windowTitle.slice(0, 60)}" | gmail=${enriched.isGmail} whatsapp=${enriched.isWhatsApp} notion=${enriched.isNotion} youtube=${enriched.isYouTube} linkedin=${enriched.isLinkedIn} instagram=${enriched.isInstagram}${enriched.activeTabUrl ? ` url=${enriched.activeTabUrl.slice(0, 50)}` : ""}`,
     );
@@ -343,6 +395,7 @@ export async function refreshFocusFromExtension(): Promise<FocusContext | null> 
   if (!ctx) return null;
   const enriched = await enrichContextFromExtension(ctx);
   saved = enriched;
+  rememberWebSurface(enriched);
   return enriched;
 }
 
@@ -354,11 +407,7 @@ export async function restoreFocusContext(): Promise<boolean> {
   }
 
   try {
-    await execFileAsync(
-      "powershell",
-      ["-NoProfile", "-Command", WIN_RESTORE_SCRIPT(saved.hwnd)],
-      { windowsHide: true },
-    );
+    await focusWindowByHwnd(saved.hwnd, saved.windowTitle);
     await new Promise((r) => setTimeout(r, 350));
     console.info(
       `[ripple-desktop] focus restored → ${saved.processName} | "${saved.windowTitle.slice(0, 60)}"`,

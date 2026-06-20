@@ -7,7 +7,8 @@ type OverlayPhase =
   | "listening"
   | "processing"
   | "result"
-  | "error";
+  | "error"
+  | "clarify";
 
 const LABELS: Record<OverlayPhase, string> = {
   idle: "Ready",
@@ -15,11 +16,16 @@ const LABELS: Record<OverlayPhase, string> = {
   processing: "Processing…",
   result: "Done",
   error: "Error",
+  clarify: "Pick one",
 };
 
 export function OverlayPage() {
   const [phase, setPhase] = useState<OverlayPhase>("idle");
   const [error, setError] = useState<string | null>(null);
+  const [clarifyItems, setClarifyItems] = useState<
+    Array<{ path: string; label: string }>
+  >([]);
+  const [clarifySpoken, setClarifySpoken] = useState("");
 
   const sessionIdRef = useRef<string | undefined>(undefined);
   const streamIdRef = useRef<string>("");
@@ -44,6 +50,25 @@ export function OverlayPage() {
         sessionIdRef.current = s.sessionId;
       })
       .catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    const api = getRippleApi();
+    const unsubShow = api.onDisambiguationShow?.(({ spoken, items }) => {
+      setClarifySpoken(spoken);
+      setClarifyItems(items);
+      setPhase("clarify");
+      setError(null);
+    });
+    const unsubHide = api.onDisambiguationHide?.(() => {
+      setClarifyItems([]);
+      setClarifySpoken("");
+      setPhase("idle");
+    });
+    return () => {
+      unsubShow?.();
+      unsubHide?.();
+    };
   }, []);
 
   const runCommand = useCallback(async (text: string) => {
@@ -114,7 +139,7 @@ export function OverlayPage() {
         return;
       }
 
-      console.info("[ripple-overlay] transcript:", text);
+      console.info("[ripple-overlay] transcript raw:", text);
       await runCommand(text);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Command failed");
@@ -178,6 +203,45 @@ export function OverlayPage() {
   }, [voice]);
 
   const label = error && phase === "error" ? error.slice(0, 40) : LABELS[phase];
+
+  const pickClarify = useCallback(async (path: string) => {
+    await getRippleApi().pickDisambiguation?.(path);
+    setClarifyItems([]);
+    setPhase("processing");
+  }, []);
+
+  const dismissClarify = useCallback(async () => {
+    await getRippleApi().pickDisambiguation?.(null);
+    setClarifyItems([]);
+    setPhase("idle");
+  }, []);
+
+  if (phase === "clarify" && clarifyItems.length > 0) {
+    return (
+      <div className="flex h-full w-full flex-col gap-1.5 p-2">
+        <p className="truncate text-[10px] font-medium text-violet-200/90">
+          {clarifySpoken || "Which one?"}
+        </p>
+        {clarifyItems.map((item) => (
+          <button
+            key={item.path}
+            type="button"
+            className="no-drag truncate rounded-md border border-violet-500/30 bg-zinc-900/95 px-2 py-1.5 text-left text-[11px] text-zinc-100 hover:border-violet-400/60"
+            onClick={() => void pickClarify(item.path)}
+          >
+            {item.label}
+          </button>
+        ))}
+        <button
+          type="button"
+          className="no-drag text-[10px] text-zinc-500 hover:text-zinc-300"
+          onClick={() => void dismissClarify()}
+        >
+          Cancel
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div

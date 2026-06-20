@@ -1,10 +1,11 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import { hideOverlay } from "../../windows/overlay.js";
 import type { NativeAppEntry } from "./nativeAppRegistry.js";
 import { listVisibleWindows, type VisibleWindow } from "./windowEnum.js";
-
-const execFileAsync = promisify(execFile);
+import {
+  closeWindowByHwnd,
+  focusWindowByHwnd,
+  minimizeAllWindowsNative,
+} from "../../native/win32Bridge.js";
 
 function scoreWindow(win: VisibleWindow, app: NativeAppEntry): number {
   const proc = win.processName.toLowerCase();
@@ -45,49 +46,10 @@ async function findBestWindowAsync(
   return bestScore >= 25 ? best : null;
 }
 
-const FOCUS_HWND_SCRIPT = (hwnd: number) => `
-Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-public class RippleWin {
-  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
-  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
-  [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr hWnd);
+export async function isAppRunning(app: NativeAppEntry): Promise<boolean> {
+  const win = await findBestWindowAsync(app);
+  return win !== null;
 }
-"@
-$h = [IntPtr]${hwnd}
-[void][RippleWin]::ShowWindow($h, 9)
-[void][RippleWin]::BringWindowToTop($h)
-[void][RippleWin]::SetForegroundWindow($h)
-"ok"
-`.trim();
-
-const CLOSE_HWND_SCRIPT = (hwnd: number) => `
-Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-public class RippleWin {
-  [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
-}
-"@
-[void][RippleWin]::SendMessage([IntPtr]${hwnd}, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero)
-"ok"
-`.trim();
-
-const MINIMIZE_ALL_SCRIPT = `
-Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-public class RippleWin {
-  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
-}
-"@
-$count = 0
-Get-Process | Where-Object { $_.MainWindowHandle -ne 0 } | ForEach-Object {
-  if ([RippleWin]::ShowWindow($_.MainWindowHandle, 6)) { $count++ }
-}
-$count
-`.trim();
 
 export async function focusAppWindow(app: NativeAppEntry): Promise<string> {
   hideOverlay();
@@ -103,11 +65,7 @@ export async function focusAppWindow(app: NativeAppEntry): Promise<string> {
     );
   }
 
-  await execFileAsync(
-    "powershell",
-    ["-NoProfile", "-Command", FOCUS_HWND_SCRIPT(win.hwnd)],
-    { windowsHide: true },
-  );
+  await focusWindowByHwnd(win.hwnd, win.windowTitle);
 
   console.info(
     `[ripple-desktop] Focused ${app.id} hwnd=${win.hwnd} title="${win.windowTitle}"`,
@@ -127,11 +85,7 @@ export async function closeAppWindow(app: NativeAppEntry): Promise<string> {
     throw new Error(`No window found for ${app.aliases[0] ?? app.id}`);
   }
 
-  await execFileAsync(
-    "powershell",
-    ["-NoProfile", "-Command", CLOSE_HWND_SCRIPT(win.hwnd)],
-    { windowsHide: true },
-  );
+  await closeWindowByHwnd(win.hwnd);
 
   console.info(
     `[ripple-desktop] Closed ${app.id} hwnd=${win.hwnd} title="${win.windowTitle}"`,
@@ -146,13 +100,7 @@ export async function minimizeAllWindows(): Promise<string> {
     throw new Error("Minimize all is only supported on Windows");
   }
 
-  const { stdout } = await execFileAsync(
-    "powershell",
-    ["-NoProfile", "-Command", MINIMIZE_ALL_SCRIPT],
-    { windowsHide: true },
-  );
-
-  const count = parseInt(stdout.trim(), 10) || 0;
+  const count = await minimizeAllWindowsNative();
   console.info(`[ripple-desktop] Minimized ${count} windows`);
   return `Minimized ${count} windows`;
 }

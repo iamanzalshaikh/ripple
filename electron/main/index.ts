@@ -3,12 +3,27 @@ import { loadDesktopEnv, getSocketUrl } from "../config/env.js";
 import { API_BASE } from "../services/api.js";
 import { rippleSocket } from "../socket/rippleSocket.js";
 import { runDesktopCommand } from "../services/commandOrchestrator.js";
+import {
+  scanInstalledApps,
+  startAppDiscoveryBackground,
+} from "../automation/desktop/appDiscovery.js";
+import { mergeDiscoveredApps, initNativeAppRegistry } from "../automation/desktop/nativeAppRegistry.js";
+import { startFileIndexWatcher } from "../storage/fileIndexWatcher.js";
+import { clearPreprocessCache } from "../automation/voice/nlu/preprocess.js";
 import { buildContextMetadata } from "../automation/appDetector/contextBuilder.js";
 import { readInstagramComposerText } from "../automation/adapters/instagram/readComposer.js";
+import { readWhatsAppComposerText } from "../automation/adapters/whatsapp/readComposer.js";
+import { readFocusedFieldText } from "../automation/desktop/readFocusedField.js";
 import { isEditOrRephraseCommand } from "../automation/commandIntent.js";
-import { isInstagramTabActive } from "../focus/focusContext.js";
+import { isGmailComposeFocused, isInstagramTabActive, isWhatsAppTabActive, restoreFocusContext } from "../focus/focusContext.js";
 import { extractRephraseSourceText } from "../automation/rephraseParse.js";
 import { normalizeTranscript } from "../automation/voice/normalizeTranscript.js";
+import {
+  commandTextFromTranscript,
+  logTranscriptStage,
+  processTranscriptFromStt,
+  transcriptDebugLabel,
+} from "../automation/voice/transcriptPipeline.js";
 import { setLastVoiceCommand } from "../state/lastCommand.js";
 import {
   setVoiceSessionActive,
@@ -39,12 +54,22 @@ import { registerGlobalShortcuts, unregisterGlobalShortcuts } from "../shortcuts
 import { createTray, destroyTray } from "../tray/index.js";
 import { createMainWindow, showMainWindow } from "../windows/mainWindow.js";
 import { createOverlayWindow } from "../windows/overlay.js";
+import { registerDisambiguationPickIpc } from "../windows/disambiguationPick.js";
 import {
   startWhatsAppExtensionBridge,
   stopWhatsAppExtensionBridge,
 } from "../bridge/whatsappExtensionBridge.js";
 import { initRippleDb, closeRippleDb } from "../storage/rippleDb.js";
 import { listDesktopHistory } from "../storage/desktopHistory.js";
+import {
+  getFileIndexCount,
+  rebuildFileIndex,
+  startFileIndexBackground,
+} from "../storage/fileIndex.js";
+import { buildObservabilitySummary, exportTelemetryCsv } from "../telemetry/observabilityDashboard.js";
+import { getNativeCapabilities, initNativeHost } from "../native/nativeHost.js";
+import { bootstrapDemoSeeds } from "../storage/bootstrapSeeds.js";
+import { runPreflightHealth } from "../services/preflightHealth.js";
 
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
 if (!gotSingleInstanceLock) {
@@ -189,10 +214,20 @@ async function completeAuth(data: AuthPayload): Promise<{
 }
 
 function registerIpc(): void {
+  registerDisambiguationPickIpc();
+
   ipcMain.handle("api:health", async () => {
     const result = await apiHealthCheck();
     logApi("GET", "/health", result.ok, result.message);
     return result;
+  });
+
+  ipcMain.handle("preflight:health", async () => {
+    const report = await runPreflightHealth(async () => {
+      const h = await apiHealthCheck();
+      return h.ok;
+    });
+    return { ok: true, ...report };
   });
 
   ipcMain.handle(
@@ -318,9 +353,35 @@ function registerIpc(): void {
           args.streamId,
           args.sessionId ?? sessionId ?? undefined,
         );
-        const text = (data as { text?: string })?.text;
+        const payload = data as { text?: string; language?: string };
+        const text = payload?.text;
         if (text) {
-          console.info(`[ripple-desktop] voice transcript: "${text}"`);
+          const snapshot = processTranscriptFromStt(text, payload.language);
+          logTranscriptStage("stt_raw", { ...snapshot, text: snapshot.raw });
+          logTranscriptStage("after_utf_repair", {
+            ...snapshot,
+            text: snapshot.repaired,
+          });
+          logTranscriptStage("after_stt_correction", {
+            ...snapshot,
+            text: snapshot.corrected,
+          });
+          logTranscriptStage("after_normalize", {
+            ...snapshot,
+            text: snapshot.normalized,
+          });
+          logTranscriptStage("after_translation", {
+            ...snapshot,
+            text: snapshot.nlu,
+          });
+          console.info(
+            `[ripple-desktop] voice transcript: ${transcriptDebugLabel(text)}`,
+          );
+          if (snapshot.wasMojibake) {
+            console.info(
+              `[ripple-desktop] voice transcript repaired → ${transcriptDebugLabel(snapshot.normalized)}`,
+            );
+          }
         }
         return { ok: true, data };
       } catch (e: unknown) {
@@ -381,24 +442,51 @@ function registerIpc(): void {
   );
 
   ipcMain.handle("command:execute", async (_e, args) => {
-    const cmd = normalizeTranscript(args.command);
+    clearPreprocessCache();
+    const snapshot = processTranscriptFromStt(args.command ?? "");
+    const cmd = commandTextFromTranscript(snapshot);
     setLastVoiceCommand(cmd);
+    logTranscriptStage("command_execute", {
+      ...snapshot,
+      text: cmd,
+    });
     const preview = cmd.length > 200 ? `${cmd.slice(0, 200)}…` : cmd;
     console.info(
-      `[ripple-desktop] command:execute (${cmd.length} chars): "${preview}"`,
+      `[ripple-desktop] command:execute (${cmd.length} chars): ${transcriptDebugLabel(preview, 80)}`,
     );
     const contextMetadata = {
       ...(await buildContextMetadata()),
       ...args.contextMetadata,
     };
     let selectedText = extractRephraseSourceText(cmd) ?? undefined;
-    if (!selectedText && isInstagramTabActive() && isEditOrRephraseCommand(cmd)) {
-      const fromComposer = await readInstagramComposerText();
-      if (fromComposer?.trim()) {
-        selectedText = fromComposer.trim();
+    if (!selectedText && isGmailComposeFocused()) {
+      const fromCompose = await readFocusedFieldText();
+      if (fromCompose?.trim()) {
+        selectedText = fromCompose.trim();
         console.info(
-          `[ripple-desktop] DM rephrase — ${selectedText.length} chars from open composer`,
+          `[ripple-desktop] Gmail compose — ${selectedText.length} chars from open body`,
         );
+      }
+    }
+    if (!selectedText && isEditOrRephraseCommand(cmd)) {
+      if (isInstagramTabActive()) {
+        const fromComposer = await readInstagramComposerText();
+        if (fromComposer?.trim()) {
+          selectedText = fromComposer.trim();
+          console.info(
+            `[ripple-desktop] DM rephrase — ${selectedText.length} chars from open composer`,
+          );
+        }
+      } else if (isWhatsAppTabActive()) {
+        await restoreFocusContext();
+        await new Promise((r) => setTimeout(r, 350));
+        const fromComposer = await readWhatsAppComposerText();
+        if (fromComposer?.trim()) {
+          selectedText = fromComposer.trim();
+          console.info(
+            `[ripple-desktop] WA rephrase — ${selectedText.length} chars from open composer`,
+          );
+        }
       }
     }
     return runDesktopCommand({
@@ -425,6 +513,66 @@ function registerIpc(): void {
     },
   );
 
+  ipcMain.handle("file-index:status", async () => {
+    try {
+      return { ok: true, count: getFileIndexCount() };
+    } catch (e: unknown) {
+      return {
+        ok: false,
+        message: e instanceof Error ? e.message : "File index unavailable",
+      };
+    }
+  });
+
+  ipcMain.handle("file-index:rebuild", async () => {
+    try {
+      const count = rebuildFileIndex();
+      return { ok: true, count };
+    } catch (e: unknown) {
+      return {
+        ok: false,
+        message: e instanceof Error ? e.message : "File index rebuild failed",
+      };
+    }
+  });
+
+  ipcMain.handle("telemetry:summary", async () => {
+    try {
+      return { ok: true, summary: buildObservabilitySummary() };
+    } catch (e: unknown) {
+      return {
+        ok: false,
+        message: e instanceof Error ? e.message : "Telemetry unavailable",
+      };
+    }
+  });
+
+  ipcMain.handle("telemetry:export", async () => {
+    try {
+      return { ok: true, csv: exportTelemetryCsv(500) };
+    } catch (e: unknown) {
+      return {
+        ok: false,
+        message: e instanceof Error ? e.message : "Export failed",
+      };
+    }
+  });
+
+  ipcMain.handle("native:capabilities", async () => {
+    try {
+      return {
+        ok: true,
+        capabilities: getNativeCapabilities(),
+        hotkeys: listRegisteredHotkeys(),
+      };
+    } catch (e: unknown) {
+      return {
+        ok: false,
+        message: e instanceof Error ? e.message : "Native layer unavailable",
+      };
+    }
+  });
+
   ipcMain.handle("overlay:voice-active", (_e, active: boolean) => {
     setVoiceSessionActive(active);
     if (!active) setOverlayState("idle");
@@ -434,14 +582,35 @@ function registerIpc(): void {
 
 if (gotSingleInstanceLock) {
 app.whenReady().then(async () => {
-  console.info("[ripple-desktop] ===== build phase-4.0-desktop-intelligence-v1 =====");
+  console.info("[ripple-desktop] ===== build phase-p7-native =====");
+  if (!process.env.OPENAI_API_KEY && !process.env.VITE_OPENAI_HINT) {
+    console.warn(
+      "[ripple-desktop] Desktop LLM planner uses backend OPENAI_API_KEY — set it on ripple-backend for AI fallback",
+    );
+  }
   initRippleDb();
+  await initNativeHost();
+  initNativeAppRegistry();
+  startFileIndexBackground();
+  startFileIndexWatcher();
+  startAppDiscoveryBackground();
+  scanInstalledApps()
+    .then((apps) => {
+      mergeDiscoveredApps(apps);
+      bootstrapDemoSeeds();
+    })
+    .catch(() => {
+      bootstrapDemoSeeds();
+    });
+  console.info(
+    "[ripple-desktop] Phase 4.7: Hindi/Urdu/Sinhala/Tamil NLU + local WhatsApp + LLM fallback",
+  );
   console.info(
     "[ripple-desktop] WhatsApp: Chrome extension + Native Messaging - see WHATSAPP_SETUP.md",
   );
   startWhatsAppExtensionBridge();
   console.info(
-    "[ripple-desktop] Voice pipeline: Whisper -> normalize -> match -> confidence -> confirm -> act",
+    "[ripple-desktop] Voice pipeline: Whisper -> normalize -> match -> NLU -> act",
   );
   console.info(
     "[ripple-desktop] Phase 4 (active): desktop apps, aliases, file ops + Phase 3.5 web apps",

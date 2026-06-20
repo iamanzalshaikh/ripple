@@ -4,6 +4,8 @@ import {
   isContextualYouTubeVoiceCommand,
   parseYouTubeCommand,
 } from "./parseYouTubeCommand.js";
+import { normalizeTranscript } from "../../voice/normalizeTranscript.js";
+import { repairCorruptedTranscript } from "../../voice/i18n/repairEncoding.js";
 
 function isLocalYouTubeWorkflow(result: CommandResultPayload): boolean {
   const action = result.actions?.[0];
@@ -21,11 +23,26 @@ export function applyYouTubeVoiceOverride(
   command: string,
   result: CommandResultPayload,
 ): CommandResultPayload | null {
-  const intent = parseYouTubeCommand(command);
-  const contextual = isContextualYouTubeVoiceCommand(command);
+  const repaired = repairCorruptedTranscript(normalizeTranscript(command));
+  const intent =
+    parseYouTubeCommand(command) ?? parseYouTubeCommand(repaired);
+  const contextual =
+    isContextualYouTubeVoiceCommand(command) ||
+    isContextualYouTubeVoiceCommand(repaired);
 
   if (!intent && !contextual) return null;
   if (isLocalYouTubeWorkflow(result)) return null;
+
+  if (intent?.kind === "search" || intent?.kind === "play" || intent?.kind === "open") {
+    const local =
+      buildYouTubeCommandResult(command) ?? buildYouTubeCommandResult(repaired);
+    if (local) {
+      console.info(
+        `[ripple-desktop] YouTube voice override — local ${intent.kind}`,
+      );
+      return local;
+    }
+  }
 
   const shouldOverride =
     contextual ||
@@ -44,7 +61,8 @@ export function applyYouTubeVoiceOverride(
 
   if (!shouldOverride) return null;
 
-  const local = buildYouTubeCommandResult(command);
+  const local =
+    buildYouTubeCommandResult(command) ?? buildYouTubeCommandResult(repaired);
   if (!local) return null;
 
   console.info(

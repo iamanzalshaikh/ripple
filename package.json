@@ -9,6 +9,19 @@
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.node.json",
+    "test": "vitest run",
+    "test:all": "vitest run",
+    "test:watch": "vitest",
+    "test:phase4": "vitest run electron/automation/voice/nlu/__tests__",
+    "test:integration": "vitest run electron/automation/desktop/__tests__",
+    "test:e2e": "vitest run electron/automation/voice/nlu/__tests__/e2e-production.spec.ts electron/automation/desktop/__tests__/disk.integration.spec.ts electron/automation/voice/nlu/__tests__/phase4-voice-whisper.spec.ts",
+    "test:e2e:full": "vitest run electron/automation/voice/nlu/__tests__/e2e-production.spec.ts electron/automation/voice/nlu/__tests__/e2e-live-whisper.spec.ts electron/automation/voice/nlu/__tests__/phase4-live-smoke.spec.ts electron/automation/desktop/__tests__/disk.integration.spec.ts electron/automation/voice/nlu/__tests__/phase4-voice-whisper.spec.ts",
+    "test:e2e:local": "vitest run electron/automation/voice/nlu/__tests__/e2e-production.spec.ts electron/automation/voice/nlu/__tests__/phase4-voice-whisper.spec.ts electron/automation/desktop/__tests__/disk.integration.spec.ts",
+    "test:e2e:live": "node scripts/run-vitest-live.mjs run electron/automation/voice/nlu/__tests__/e2e-live-whisper.spec.ts electron/automation/voice/nlu/__tests__/phase4-live-smoke.spec.ts",
+    "test:ci:gate": "vitest run electron/telemetry/__tests__/ci-gate.spec.ts",
+    "test:ci": "vitest run electron/telemetry/__tests__/ci-gate.spec.ts electron/telemetry/__tests__/observabilityDashboard.spec.ts electron/native/__tests__/phase-p7-native.spec.ts electron/automation/retriever/__tests__/phase-p8-semantic.spec.ts electron/automation/safety electron/automation/retriever electron/storage/__tests__/workflowGraph.spec.ts electron/storage/__tests__/knowledgeGraph.spec.ts electron/automation/desktop/__tests__/phase-p55-workflow.spec.ts electron/automation/desktop/__tests__/phase-p47-undo.spec.ts electron/automation/voice/nlu/__tests__/phase4-ai-first-routing.spec.ts",
+    "test:fetch-token": "node scripts/fetch-test-token.mjs",
+    "test:live": "node scripts/run-vitest-live.mjs run electron/automation/voice/nlu/__tests__/phase4-live-smoke.spec.ts",
     "pack": "npm run build && electron-builder",
     "pack:win": "npm run build && electron-builder --win"
   },
@@ -34,6 +47,7 @@
     "electron-vite": "^3.1.0",
     "tailwindcss": "^4.3.0",
     "typescript": "^5.9.3",
-    "vite": "^6.3.5"
+    "vite": "^6.3.5",
+    "vitest": "^3.2.4"
   }
 }

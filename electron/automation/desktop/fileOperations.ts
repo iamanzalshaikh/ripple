@@ -1,9 +1,19 @@
-import { existsSync, mkdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  renameSync,
+  rmSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { dialog, shell } from "electron";
+import { guidedMissingParent } from "../planner/guidedResponses.js";
 import { openFile, openFolder } from "./openFolder.js";
 import { resolveItemBySpokenName } from "./itemResolve.js";
+import { upsertFileIndexPath } from "../../storage/fileIndex.js";
 
 const WELL_KNOWN_PARENTS: Record<string, () => string> = {
   downloads: () => join(homedir(), "Downloads"),
@@ -13,15 +23,35 @@ const WELL_KNOWN_PARENTS: Record<string, () => string> = {
 
 export function resolveParentPath(name?: string): string {
   if (!name?.trim()) return join(homedir(), "Desktop");
-  const key = name.trim().toLowerCase();
+  const raw = name.trim();
+  const key = raw.toLowerCase();
   if (WELL_KNOWN_PARENTS[key]) return WELL_KNOWN_PARENTS[key]();
-  return name;
+
+  const embedded = key.match(/\b(?:in\s+)?(downloads?|documents?|desktop)\b/);
+  if (embedded?.[1]) {
+    const k = embedded[1];
+    if (k.startsWith("download")) return WELL_KNOWN_PARENTS.downloads();
+    if (k.startsWith("document")) return WELL_KNOWN_PARENTS.documents();
+    return WELL_KNOWN_PARENTS.desktop();
+  }
+
+  if (key.startsWith("download")) return WELL_KNOWN_PARENTS.downloads();
+  if (key.startsWith("document")) return WELL_KNOWN_PARENTS.documents();
+  if (key === "desktop") return WELL_KNOWN_PARENTS.desktop();
+
+  console.warn(
+    `[ripple-desktop] Unknown parent folder "${raw}" — using Desktop`,
+  );
+  return join(homedir(), "Desktop");
 }
 
 export async function createFolder(
   name: string,
   parent?: string,
 ): Promise<string> {
+  if (!parent?.trim()) {
+    throw new Error(guidedMissingParent("folder"));
+  }
   const parentPath = resolveParentPath(parent);
   const folderPath = join(parentPath, name.trim());
 
@@ -30,6 +60,7 @@ export async function createFolder(
   if (err) throw new Error(err);
 
   console.info(`[ripple-desktop] Created folder → ${folderPath}`);
+  upsertFileIndexPath(folderPath);
   return `Created folder: ${folderPath}`;
 }
 
@@ -37,6 +68,9 @@ export async function createFile(
   name: string,
   parent?: string,
 ): Promise<string> {
+  if (!parent?.trim()) {
+    throw new Error(guidedMissingParent("file"));
+  }
   const parentPath = resolveParentPath(parent);
   mkdirSync(parentPath, { recursive: true });
 
@@ -49,6 +83,7 @@ export async function createFile(
   writeFileSync(filePath, "", { encoding: "utf8" });
 
   console.info(`[ripple-desktop] Created file → ${filePath}`);
+  upsertFileIndexPath(filePath);
   return openFile(filePath);
 }
 
@@ -93,6 +128,8 @@ export async function renameFile(
   }
 
   renameSync(sourcePath, targetPath);
+  upsertFileIndexPath(sourcePath);
+  upsertFileIndexPath(targetPath);
   console.info(`[ripple-desktop] Renamed → ${targetPath}`);
   return `Renamed to ${targetPath}`;
 }
@@ -108,19 +145,33 @@ export async function moveFile(
 
   const targetPath = join(destDir, basename(sourcePath));
   if (existsSync(targetPath)) {
-    throw new Error(`File already exists: ${targetPath}`);
+    throw new Error(
+      `Already exists at destination: ${targetPath}. Remove it first or use another name.`,
+    );
   }
 
-  renameSync(sourcePath, targetPath);
+  try {
+    renameSync(sourcePath, targetPath);
+  } catch (e: unknown) {
+    const code = (e as NodeJS.ErrnoException)?.code;
+    if (code === "EPERM" || code === "EBUSY" || code === "EACCES") {
+      throw new Error(
+        `Could not move "${basename(sourcePath)}". Close any app using it (e.g. File Explorer) and try again.`,
+      );
+    }
+    throw e;
+  }
+  upsertFileIndexPath(sourcePath);
+  upsertFileIndexPath(targetPath);
   console.info(`[ripple-desktop] Moved → ${targetPath}`);
   return `Moved to ${targetPath}`;
 }
 
-async function confirmDelete(filePath: string): Promise<boolean> {
+export async function confirmDeletePath(filePath: string): Promise<boolean> {
   const { response } = await dialog.showMessageBox({
     type: "warning",
     title: "Ripple — confirm delete",
-    message: "Delete this file?",
+    message: "Delete this item?",
     detail: filePath,
     buttons: ["Delete", "Cancel"],
     defaultId: 1,
@@ -132,15 +183,44 @@ async function confirmDelete(filePath: string): Promise<boolean> {
 export async function deleteFile(
   sourceName: string,
   parent?: string,
+  options?: { skipConfirm?: boolean },
 ): Promise<string> {
   const sourcePath = await resolveItemBySpokenName(sourceName, parent);
 
-  const ok = await confirmDelete(sourcePath);
-  if (!ok) {
-    throw new Error("Delete cancelled");
+  if (!options?.skipConfirm) {
+    const ok = await confirmDeletePath(sourcePath);
+    if (!ok) {
+      throw new Error("Delete cancelled");
+    }
   }
 
-  unlinkSync(sourcePath);
+  const stat = statSync(sourcePath);
+  if (stat.isDirectory()) {
+    try {
+      rmSync(sourcePath, { recursive: true, force: true });
+    } catch (e: unknown) {
+      const code = (e as NodeJS.ErrnoException)?.code;
+      if (code === "EPERM" || code === "EBUSY" || code === "EACCES") {
+        throw new Error(
+          `Could not delete folder "${basename(sourcePath)}". Close File Explorer or apps using it, then try again.`,
+        );
+      }
+      throw e;
+    }
+  } else {
+    try {
+      unlinkSync(sourcePath);
+    } catch (e: unknown) {
+      const code = (e as NodeJS.ErrnoException)?.code;
+      if (code === "EPERM" || code === "EBUSY" || code === "EACCES") {
+        throw new Error(
+          `Could not delete "${basename(sourcePath)}". Close the file if it is open, then try again.`,
+        );
+      }
+      throw e;
+    }
+  }
+  upsertFileIndexPath(sourcePath);
   console.info(`[ripple-desktop] Deleted → ${sourcePath}`);
   return `Deleted ${basename(sourcePath)}`;
 }

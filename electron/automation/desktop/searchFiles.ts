@@ -1,66 +1,43 @@
-import { existsSync, readdirSync, statSync } from "node:fs";
-import { basename, join } from "node:path";
-import { resolveFolderPath } from "./openFolder.js";
-
-const SEARCH_ROOTS = ["downloads", "documents", "desktop"] as const;
-const MAX_DEPTH = 3;
-
-function listItemsRecursive(dir: string, depth: number, out: string[]): void {
-  if (depth > MAX_DEPTH || !existsSync(dir)) return;
-  let entries: string[];
-  try {
-    entries = readdirSync(dir);
-  } catch {
-    return;
-  }
-
-  for (const name of entries) {
-    const full = join(dir, name);
-    let st;
-    try {
-      st = statSync(full);
-    } catch {
-      continue;
-    }
-    if (st.isFile() || st.isDirectory()) {
-      out.push(full);
-    }
-    if (st.isDirectory() && depth < MAX_DEPTH) {
-      listItemsRecursive(full, depth + 1, out);
-    }
-  }
-}
-
-function rankMatches(target: string, paths: string[]): string[] {
-  const exact = paths.filter((p) => basename(p).toLowerCase() === target);
-  if (exact.length > 0) {
-    return exact.sort((a, b) => a.length - b.length);
-  }
-
-  const partial = paths.filter((p) =>
-    basename(p).toLowerCase().includes(target),
-  );
-  return partial.sort((a, b) => a.length - b.length);
-}
+import { searchIndexByName, getFileIndexCount } from "../../storage/fileIndex.js";
+import { retrieveFileCandidates } from "../retriever/retriever.js";
+import { searchDiskByNameOnly } from "./diskSearch.js";
 
 /**
- * Find files or folders by name under Downloads, Documents, Desktop.
+ * Find files or folders by name — P5 canonical retriever chain.
  */
-export function searchItemsByName(spoken: string): string[] {
-  const target = spoken.trim().toLowerCase();
-  if (!target) return [];
-
-  const all: string[] = [];
-  for (const rootKey of SEARCH_ROOTS) {
-    const root = resolveFolderPath(rootKey);
-    listItemsRecursive(root, 0, all);
+export async function searchItemsByNameAsync(
+  spoken: string,
+): Promise<string[]> {
+  const candidates = await retrieveFileCandidates({
+    phrase: spoken,
+    token: spoken,
+  });
+  if (candidates.length > 0) {
+    console.info(
+      `[ripple-desktop] retriever → ${candidates.length} hit(s) for "${spoken}" (top: ${candidates[0]?.source})`,
+    );
+    return candidates.map((c) => c.path);
   }
-
-  return rankMatches(target, all);
+  return [];
 }
 
-/** @deprecated use searchItemsByName */
+/** Sync wrapper — index + disk only (legacy callers). */
+export function searchItemsByName(spoken: string): string[] {
+  const indexed = searchIndexByName(spoken);
+  if (indexed.length > 0) return indexed;
+  if (getFileIndexCount() > 0) return [];
+  return searchDiskByNameOnly(spoken);
+}
+
+/** @deprecated use searchItemsByNameAsync */
 export function searchFileByName(filename: string): string | null {
   const items = searchItemsByName(filename);
+  return items[0] ?? null;
+}
+
+export async function searchFileByNameAsync(
+  filename: string,
+): Promise<string | null> {
+  const items = await searchItemsByNameAsync(filename);
   return items[0] ?? null;
 }

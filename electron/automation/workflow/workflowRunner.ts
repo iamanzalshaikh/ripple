@@ -3,17 +3,24 @@ import { runNotionBatch } from "../adapters/notion/runNotionAction.js";
 import { runYouTubeBatch } from "../adapters/youtube/runYouTubeAction.js";
 import { runLinkedInBatch } from "../adapters/linkedin/runLinkedInAction.js";
 import { runInstagramBatch } from "../adapters/instagram/runInstagramAction.js";
+import { runWhatsAppBatch } from "../adapters/whatsapp/runWhatsAppAction.js";
 import { runDesktopOpenBatch } from "../desktop/runDesktopAction.js";
 import { runLocalAction, runWhatsAppLocalBatch } from "../actions/local/runLocalAction.js";
 import type { WorkflowStep } from "../localTypes.js";
 import type { RippleAction } from "../types.js";
 import { expandWorkflowSteps } from "./actionExpander.js";
+import { extractPathFromResult } from "../../storage/recordDesktopAction.js";
+import { reverseUndoAction } from "../safety/undoRunner.js";
+import { rollbackUndoTo, undoStackSize } from "../safety/undoStack.js";
 
 export async function runExpandedWorkflow(steps: RippleAction[]): Promise<string> {
   const expanded = expandWorkflowSteps(steps);
   const details: string[] = [];
+  let lastCompoundResolvedPath: string | undefined;
+  const undoBefore = undoStackSize();
 
-  for (const step of expanded) {
+  try {
+    for (const step of expanded) {
     if (step.kind === "backend") {
       // Notion local workflows encode a single NOOP step with `_notionBatch`.
       // In some codepaths the batch payload can be nested under `data.data`.
@@ -65,6 +72,18 @@ export async function runExpandedWorkflow(steps: RippleAction[]): Promise<string
               : null
           : null;
 
+      const whatsappBatchData =
+        step.action.type === "NOOP" && step.action.data
+          ? step.action.data?._whatsappBatch === true
+            ? step.action.data
+            : (step.action.data as Record<string, unknown>)?.data?._whatsappBatch === true
+              ? ((step.action.data as Record<string, unknown>).data as Record<
+                  string,
+                  unknown
+                >)
+              : null
+          : null;
+
       if (notionBatchData) {
         details.push(await runNotionBatch(notionBatchData));
       } else if (youtubeBatchData) {
@@ -73,6 +92,8 @@ export async function runExpandedWorkflow(steps: RippleAction[]): Promise<string
         details.push(await runLinkedInBatch(linkedinBatchData));
       } else if (instagramBatchData) {
         details.push(await runInstagramBatch(instagramBatchData));
+      } else if (whatsappBatchData) {
+        details.push(await runWhatsAppBatch(whatsappBatchData));
       } else {
         details.push(await executeBackendAction(step.action));
       }
@@ -89,7 +110,23 @@ export async function runExpandedWorkflow(steps: RippleAction[]): Promise<string
     }
 
     if (local.data?._desktopBatch === true) {
-      details.push(await runDesktopOpenBatch(local.data));
+      const batchData = local.data as Record<string, unknown>;
+      if (
+        batchData.desktopKind === "referential_send" &&
+        typeof batchData.sourcePath !== "string" &&
+        lastCompoundResolvedPath
+      ) {
+        batchData.sourcePath = lastCompoundResolvedPath;
+      }
+      const result = await runDesktopOpenBatch(batchData);
+      const resolved =
+        typeof batchData.resolvedPath === "string"
+          ? batchData.resolvedPath
+          : extractPathFromResult(result);
+      if (resolved) {
+        lastCompoundResolvedPath = resolved;
+      }
+      details.push(result);
       continue;
     }
 
@@ -113,7 +150,19 @@ export async function runExpandedWorkflow(steps: RippleAction[]): Promise<string
       continue;
     }
 
+    if (local.data?._whatsappBatch === true && local.type === "NOOP") {
+      details.push(await runWhatsAppBatch(local.data));
+      continue;
+    }
+
     details.push(await runLocalAction(local));
+    }
+  } catch (e: unknown) {
+    const rolled = await rollbackUndoTo(undoBefore, reverseUndoAction);
+    if (rolled.length > 0) {
+      details.push(`Workflow rolled back: ${rolled.join("; ")}`);
+    }
+    throw e;
   }
 
   return details.join(" → ");

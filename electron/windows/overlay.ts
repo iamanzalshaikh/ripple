@@ -39,7 +39,7 @@ function positionIndicator(win: BrowserWindow): void {
   });
 }
 
-function sendToOverlay(channel: string, payload: unknown): void {
+export function sendToOverlay(channel: string, payload: unknown): void {
   if (!overlayWindow || overlayWindow.isDestroyed()) return;
 
   const deliver = () => {
@@ -120,6 +120,24 @@ export function showOverlay(): void {
 
 export function hideOverlay(): void {
   overlayWindow?.hide();
+}
+
+export function expandOverlayForDisambiguation(itemCount: number): void {
+  if (!overlayWindow || overlayWindow.isDestroyed()) return;
+  const display = screen.getPrimaryDisplay();
+  const area = display.workArea;
+  const width = 380;
+  const height = Math.min(300, 72 + Math.max(1, itemCount) * 40);
+  const x = Math.round(area.x + (area.width - width) / 2);
+  const y = Math.round(area.y + area.height - height - BOTTOM_MARGIN);
+  overlayWindow.setBounds({ x, y, width, height });
+  overlayWindow.showInactive();
+  overlayWindow.setAlwaysOnTop(true, "screen-saver");
+}
+
+export function resetOverlaySize(): void {
+  if (!overlayWindow || overlayWindow.isDestroyed()) return;
+  positionIndicator(overlayWindow);
 }
 
 export function setOverlayState(state: string): void {
