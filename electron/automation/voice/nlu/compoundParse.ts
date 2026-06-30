@@ -1,5 +1,8 @@
 import type { NativeCommandIntent } from "../../desktop/parseNativeCommand.js";
 import { parseNativeCommandStrict } from "../../desktop/parseNativeCommand.js";
+import { parseSessionMemoryCommand } from "../../desktop/parseSessionMemoryCommand.js";
+import { parseSmartSearchCommand } from "../../desktop/parseSmartSearchCommand.js";
+import { isTemporalFileOpenQuery } from "../../retriever/timeRange.js";
 import { parseNluFallback } from "./intentExtract.js";
 import { preprocessForNlu } from "./preprocess.js";
 import { cleanContactName } from "../../adapters/whatsapp/parseContact.js";
@@ -14,14 +17,17 @@ export type CompoundIntent = {
 
 const COMPOUND_SPLIT =
   /\s+(?:and|aur|then|phir|plus|\+)\s+/i;
+const SENTENCE_SPLIT =
+  /[.!?]\s+(?=(?:please\s+|kindly\s+)?(?:open|show|find|search|send|launch|start|switch|go)\b)/i;
 
 /** "Downloads kholo aur latest PDF open karo" → two parseable steps. */
 export function splitCompoundParts(nlu: string): string[] | null {
   const trimmed = nlu.trim();
-  if (!COMPOUND_SPLIT.test(trimmed)) return null;
+  if (!COMPOUND_SPLIT.test(trimmed) && !SENTENCE_SPLIT.test(trimmed)) return null;
 
   const parts = trimmed
-    .split(COMPOUND_SPLIT)
+    .split(SENTENCE_SPLIT)
+    .flatMap((part) => part.split(COMPOUND_SPLIT))
     .map((p) => p.trim())
     .filter((p) => p.length >= 3);
 
@@ -46,6 +52,26 @@ function normalizeCompoundPart(part: string): string {
     p = p.replace(/\s+on\s+whatsapp\s*$/i, "").trim();
   }
   return p;
+}
+
+/** Parse one compound clause — recall/temporal before generic strict/fallback. */
+function parseCompoundPart(
+  part: string,
+  raw?: string,
+): NativeCommandIntent | null {
+  const recall = parseSessionMemoryCommand(part);
+  if (recall) return recall;
+
+  const temporal = parseSmartSearchCommand(part);
+  if (
+    temporal &&
+    (temporal.query.type === "time_ranged" ||
+      isTemporalFileOpenQuery(part))
+  ) {
+    return temporal;
+  }
+
+  return parseNativeCommandStrict(part) ?? parseNluFallback(part, raw ?? part);
 }
 
 /** "Send latest resume to Noor" → open resume + referential send. */
@@ -202,8 +228,7 @@ export function parseCompoundIntent(nlu: string, raw?: string): CompoundIntent |
       steps.push(referential);
       continue;
     }
-    const intent =
-      parseNativeCommandStrict(part) ?? parseNluFallback(part, raw ?? part);
+    const intent = parseCompoundPart(part, raw);
     if (!intent || intent.kind === "compound") return null;
     steps.push(intent);
   }

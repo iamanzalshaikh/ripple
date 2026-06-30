@@ -3,6 +3,15 @@ export function extractSearchToken(phrase: string): string | null {
   const text = phrase.trim();
   if (!text) return null;
 
+  if (
+    /^\s*(?:pdf|file|document)\s*,?\s*(?:which\s+)?(?:i|we)\s+(?:opened|edited|saved|used)\b/i.test(
+      text,
+    ) ||
+    /^\s*(?:the\s+)?(?:pdf|file)\s+(?:i|we)\s+(?:opened|edited|saved)\b/i.test(text)
+  ) {
+    return null;
+  }
+
   const patterns = [
     /^\s*open\s+(?:my\s+|the\s+|mera\s+)?(.+?)\s*$/i,
     /^\s*(?:mera|my)\s+(.+?)\s+(?:kholo|khol|open)\s*$/i,

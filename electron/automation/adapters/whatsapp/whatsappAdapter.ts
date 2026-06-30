@@ -12,6 +12,7 @@ import {
   resolveWhatsAppMessageText,
 } from "./parseContact.js";
 import { rememberContact } from "./buildReferentialWhatsApp.js";
+import { recordWhatsAppSendTouch } from "../../../storage/recordFileTouch.js";
 import { runWhatsAppCdpPipeline } from "./whatsappCdpPipeline.js";
 import { WhatsAppPipelineError } from "./whatsappSteps.js";
 
@@ -63,6 +64,17 @@ export async function runWhatsAppMessageFlow(
 
   rememberContact(contact);
 
+  const finishSend = (detail: string): string => {
+    if (input.sourcePath?.trim() && shouldSend) {
+      recordWhatsAppSendTouch({
+        path: input.sourcePath.trim(),
+        contact,
+        command,
+      });
+    }
+    return detail;
+  };
+
   if (input.sourcePath) {
     console.info(
       `[ripple-desktop] WhatsApp send source: ${input.sourceKind ?? "item"} at ${input.sourcePath}`,
@@ -85,12 +97,14 @@ export async function runWhatsAppMessageFlow(
     console.info(
       `[ripple-desktop] WhatsApp payload contact="${contact}" send=${shouldSend} text="${preview}"`,
     );
-    return runWhatsAppViaExtension({
-      contact,
-      text,
-      send: shouldSend,
-      attachment: input.attachment,
-    });
+    return finishSend(
+      await runWhatsAppViaExtension({
+        contact,
+        text,
+        send: shouldSend,
+        attachment: input.attachment,
+      }),
+    );
   }
 
   if (!USE_CDP) {
@@ -101,12 +115,14 @@ export async function runWhatsAppMessageFlow(
 
   console.info(`[ripple-desktop] WhatsApp via CDP (dev) contact="${contact}"`);
   try {
-    return await runWhatsAppCdpPipeline({
-      contact,
-      text,
-      send: shouldSend,
-      rawContact,
-    });
+    return finishSend(
+      await runWhatsAppCdpPipeline({
+        contact,
+        text,
+        send: shouldSend,
+        rawContact,
+      }),
+    );
   } catch (e: unknown) {
     if (e instanceof WhatsAppPipelineError) {
       throw new Error(`WhatsApp CDP failed at ${e.step}: ${e.message}`);

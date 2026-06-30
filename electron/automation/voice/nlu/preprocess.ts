@@ -39,13 +39,19 @@ export function preprocessForNlu(command?: string | null): NluPreprocessResult {
 
   const script = detectPrimaryScript(raw);
   const afterHindi = normalizeHindi(raw);
-  const afterUrdu = normalizeUrdu(afterHindi);
-  const afterSinhala = normalizeSinhala(afterUrdu);
+  const afterUrduRoman = normalizeUrdu(afterHindi);
+  const afterSinhala = normalizeSinhala(afterUrduRoman);
   const afterTamil = normalizeTamil(afterSinhala);
   const hinglish = normalizeHinglish(afterTamil);
   const slotted = normalizeHinglishSlots(hinglish);
   let nlu = normalizeForNlu(slotted);
   nlu = nlu
+    .replace(/^\s*open\s+open\s+/i, "open ")
+    // "lastpdf I opened" → recall; keep "lastpdf.io" as a filename/domain token
+    .replace(/\blast(pdf|file|video|folder)(?![a-z0-9.])/gi, "last $1")
+    .replace(/,\s*i\s+open\s*$/i, "")
+    .replace(/,\s*i\s*$/i, "")
+    .replace(/\s+i\s*$/i, "")
     .replace(/\bname\s+is\b/gi, "named")
     .replace(/\bcall\s+it\b/gi, "named")
     .replace(/\bdownloads?\s+mein\b/gi, "in downloads")

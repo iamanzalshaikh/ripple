@@ -17,6 +17,8 @@ import {
   isContextualYouTubeVoiceCommand,
   isYouTubeCommand,
 } from "../adapters/youtube/parseYouTubeCommand.js";
+import { isLinkedInCommand } from "../adapters/linkedin/parseLinkedInCommand.js";
+import { isWhatsAppTabActive } from "../../focus/focusContext.js";
 import {
   isInstagramCommand,
   parseInstagramCommand,
@@ -56,9 +58,14 @@ export function isWhatsAppMessageWorkflow(steps: RippleAction[]): boolean {
     isNotionCommand(cmd) ||
     isContextualNotionVoiceCommand(cmd) ||
     isYouTubeCommand(cmd) ||
-    isContextualYouTubeVoiceCommand(cmd) ||
-    isInstagramCommand(cmd)
+    isContextualYouTubeVoiceCommand(cmd)
   ) {
+    return false;
+  }
+  if (isWhatsAppMessagingCommand(cmd) || isWhatsAppTabActive()) {
+    return true;
+  }
+  if (isInstagramCommand(cmd)) {
     return false;
   }
 
@@ -93,6 +100,8 @@ function expandInstagramWorkflow(
   cmd: string,
   steps: RippleAction[],
 ): WorkflowStep[] | null {
+  if (isWhatsAppMessagingCommand(cmd) || isWhatsAppTabActive()) return null;
+  if (steps.some((s) => s.data?._whatsappBatch === true)) return null;
   if (!isInstagramCommand(cmd)) return null;
 
   const intent = parseInstagramCommand(cmd);
@@ -135,7 +144,48 @@ function expandInstagramWorkflow(
   ];
 }
 
+/** Pre-built app batches — must run before desktop NLU expand (P5 / Tier C). */
+function expandAppBatchWorkflow(steps: RippleAction[]): WorkflowStep[] | null {
+  const batch = steps.find((s) => {
+    if (s.type !== "NOOP" || !s.data) return false;
+    return (
+      s.data._linkedinBatch === true ||
+      s.data._instagramBatch === true ||
+      s.data._youtubeBatch === true ||
+      s.data._notionBatch === true
+    );
+  });
+  if (!batch?.data) return null;
+
+  const data = batch.data as Record<string, unknown>;
+  let label = "app";
+  if (data._linkedinBatch === true) label = "LinkedIn";
+  else if (data._instagramBatch === true) label = "Instagram";
+  else if (data._youtubeBatch === true) label = "YouTube";
+  else if (data._notionBatch === true) label = "Notion";
+
+  console.info(`[ripple-desktop] WORKFLOW expand → ${label} (prebuilt batch)`);
+
+  return [
+    {
+      kind: "local",
+      action: { type: "NOOP", data },
+    },
+  ];
+}
+
 function expandDesktopWorkflow(cmd: string): WorkflowStep[] | null {
+  if (
+    isLinkedInCommand(cmd) ||
+    isInstagramCommand(cmd) ||
+    isYouTubeCommand(cmd) ||
+    isContextualYouTubeVoiceCommand(cmd) ||
+    isNotionCommand(cmd) ||
+    isContextualNotionVoiceCommand(cmd)
+  ) {
+    return null;
+  }
+
   const desktop = parseNativeCommand(cmd);
   if (!desktop) return null;
 
@@ -191,6 +241,16 @@ function expandDesktopWorkflow(cmd: string): WorkflowStep[] | null {
       data.smartQuery = desktop.query;
       console.info(
         `[ripple-desktop] WORKFLOW expand → Desktop (smart=${desktop.label})`,
+      );
+      break;
+    case "remember_life_event":
+      localType = "NOOP";
+      data.desktopKind = "remember_life_event";
+      data.lifeEventLabel = desktop.label;
+      data.lifeEventTopic = desktop.topic;
+      data.lifeEventAt = desktop.eventAt;
+      console.info(
+        `[ripple-desktop] WORKFLOW expand → Desktop (remember_life_event=${desktop.label})`,
       );
       break;
     case "launch_app":
@@ -381,18 +441,52 @@ function expandDesktopWorkflow(cmd: string): WorkflowStep[] | null {
   return [{ kind: "local", action: { type: localType, data } }];
 }
 
-/** WhatsApp NOOP batch (message / replace_composer) — always local extension path. */
+/** WhatsApp batch — NOOP or INSERT_TEXT with _whatsappBatch (whatsapp-early path). */
 function expandWhatsAppBatchWorkflow(
   steps: RippleAction[],
 ): WorkflowStep[] | null {
-  const batch = steps.find(
+  const noop = steps.find(
     (s) => s.type === "NOOP" && s.data?._whatsappBatch === true,
   );
-  if (!batch?.data) return null;
+  if (noop?.data) {
+    return [
+      {
+        kind: "local",
+        action: { type: "NOOP", data: noop.data as Record<string, unknown> },
+      },
+    ];
+  }
+
+  const insert = steps.find(
+    (s) => s.type === "INSERT_TEXT" && s.data?._whatsappBatch === true,
+  );
+  if (!insert?.data) return null;
+
+  const data = insert.data as Record<string, unknown>;
+  const recipient = typeof data.recipient === "string" ? data.recipient : "";
+  const text = typeof data.text === "string" ? data.text : "";
+  const send = data.send === true;
+  const cmd = typeof data.command === "string" ? data.command : getLastVoiceCommand() ?? "";
+
+  if (!recipient.trim()) return null;
+
+  console.info(
+    `[ripple-desktop] WORKFLOW expand → WhatsApp (contact=${recipient}, insert batch)`,
+  );
+
   return [
     {
       kind: "local",
-      action: { type: "NOOP", data: batch.data as Record<string, unknown> },
+      action: {
+        type: "SEARCH_CONTACT",
+        data: {
+          text,
+          recipient,
+          send,
+          command: cmd,
+          _whatsappBatch: true,
+        },
+      },
     },
   ];
 }
@@ -429,6 +523,9 @@ export function expandWorkflowSteps(steps: RippleAction[]): WorkflowStep[] {
 
   const whatsappBatch = expandWhatsAppBatchWorkflow(steps);
   if (whatsappBatch) return whatsappBatch;
+
+  const appBatch = expandAppBatchWorkflow(steps);
+  if (appBatch) return appBatch;
 
   const cmd = getLastVoiceCommand() ?? "";
   const desktopSteps = expandDesktopWorkflow(cmd);

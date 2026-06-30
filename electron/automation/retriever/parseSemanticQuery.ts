@@ -1,7 +1,10 @@
+import { isLastOpenedRecallQuery } from "./timeRange.js";
+
 /** P8 — detect vague semantic references (people, events, topics). */
 export function isSemanticQuery(phrase: string): boolean {
   const p = phrase.trim().toLowerCase();
   if (!p) return false;
+  if (isLastOpenedRecallQuery(p)) return false;
 
   const patterns = [
     /\bdiscussed\s+with\b/,
@@ -21,7 +24,7 @@ export function isSemanticQuery(phrase: string): boolean {
     /\bresume\s+i\b/,
     /\bmera\s+.+\s+(jo|wali)\b/,
     /\bjo\s+maine\b/,
-    /\bahmed\b|\bsarah\b|\bnoor\b/,
+    /\bbefore\s+my\b/,
   ];
 
   return patterns.some((re) => re.test(p));

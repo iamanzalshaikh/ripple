@@ -2,6 +2,7 @@ import { describe, expect, it, beforeAll, beforeEach } from "vitest";
 import {
   existsSync,
   mkdtempSync,
+  mkdirSync,
   readFileSync,
   renameSync,
   writeFileSync,
@@ -20,6 +21,7 @@ import {
   reverseUndoAction,
   undoCreatePath,
   undoDeletePaths,
+  undoMovePaths,
   undoRenamePaths,
 } from "../undoRunner.js";
 import { stageDeleteBackup } from "../undoTrash.js";
@@ -87,6 +89,22 @@ describe("P4.7 undoRunner", () => {
     expect(undoStackSize()).toBe(sizeBefore);
     expect(existsSync(a)).toBe(false);
     expect(existsSync(b)).toBe(false);
+  });
+
+  it("restores moved file to original folder", async () => {
+    const fromDir = join(workDir, "src");
+    const toDir = join(workDir, "dest");
+    mkdirSync(fromDir, { recursive: true });
+    mkdirSync(toDir, { recursive: true });
+    const from = join(fromDir, "notes.txt");
+    const to = join(toDir, "notes.txt");
+    writeFileSync(from, "draft");
+    renameSync(from, to);
+
+    const msg = await reverseUndoAction(undoMovePaths(from, to));
+    expect(msg).toContain("Undid move");
+    expect(existsSync(from)).toBe(true);
+    expect(existsSync(to)).toBe(false);
   });
 
   it("popUndoAction returns most recent entry", () => {

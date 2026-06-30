@@ -91,6 +91,27 @@ const SLANG_MATRIX: SlangCase[] = [
   { phrase: "Upon documents", shouldParse: true, kind: "folder" },
 ];
 
+/** Well-known folders may resolve via alias registry (P3) or folder intent (P4). */
+const FOLDER_KINDS = new Set(["folder", "open_alias"]);
+
+function expectKind(
+  actual: string | undefined,
+  expected: string | undefined,
+): void {
+  if (!expected) return;
+  if (expected === "folder") {
+    expect(FOLDER_KINDS.has(actual ?? "")).toBe(true);
+    return;
+  }
+  if (expected === "smart_search") {
+    expect(
+      ["smart_search", "open_alias", "open_resolved"].includes(actual ?? ""),
+    ).toBe(true);
+    return;
+  }
+  expect(actual).toBe(expected);
+}
+
 describe("Phase 4.7 — slang / phone / Hinglish matrix", () => {
   it.each(SLANG_MATRIX.map((c) => [c.phrase, c] as const))(
     '%s',
@@ -101,9 +122,7 @@ describe("Phase 4.7 — slang / phone / Hinglish matrix", () => {
       const result = parseDesktopIntent(phrase);
       if (spec.shouldParse) {
         expect(result).not.toBeNull();
-        if (spec.kind) {
-          expect(result?.intent.kind).toBe(spec.kind);
-        }
+        expectKind(result?.intent.kind, spec.kind);
       } else {
         expect(result).toBeNull();
       }

@@ -1,4 +1,5 @@
 import {
+  cpSync,
   existsSync,
   mkdirSync,
   renameSync,
@@ -14,6 +15,27 @@ import { guidedMissingParent } from "../planner/guidedResponses.js";
 import { openFile, openFolder } from "./openFolder.js";
 import { resolveItemBySpokenName } from "./itemResolve.js";
 import { upsertFileIndexPath } from "../../storage/fileIndex.js";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
+
+async function movePathViaPowerShell(
+  sourcePath: string,
+  targetPath: string,
+): Promise<void> {
+  const src = sourcePath.replace(/'/g, "''");
+  const dest = targetPath.replace(/'/g, "''");
+  await execFileAsync(
+    "powershell",
+    [
+      "-NoProfile",
+      "-Command",
+      `Move-Item -LiteralPath '${src}' -Destination '${dest}' -Force`,
+    ],
+    { windowsHide: true },
+  );
+}
 
 const WELL_KNOWN_PARENTS: Record<string, () => string> = {
   downloads: () => join(homedir(), "Downloads"),
@@ -154,12 +176,31 @@ export async function moveFile(
     renameSync(sourcePath, targetPath);
   } catch (e: unknown) {
     const code = (e as NodeJS.ErrnoException)?.code;
-    if (code === "EPERM" || code === "EBUSY" || code === "EACCES") {
-      throw new Error(
-        `Could not move "${basename(sourcePath)}". Close any app using it (e.g. File Explorer) and try again.`,
-      );
+    const isDir = statSync(sourcePath).isDirectory();
+    if (isDir && (code === "EPERM" || code === "EBUSY" || code === "EACCES")) {
+      try {
+        await movePathViaPowerShell(sourcePath, targetPath);
+      } catch {
+        try {
+          cpSync(sourcePath, targetPath, { recursive: true });
+          rmSync(sourcePath, { recursive: true, force: true });
+        } catch {
+          throw new Error(
+            `Could not move folder "${basename(sourcePath)}". Close File Explorer windows showing it, then retry.`,
+          );
+        }
+      }
+    } else if (code === "EPERM" || code === "EBUSY" || code === "EACCES") {
+      try {
+        await movePathViaPowerShell(sourcePath, targetPath);
+      } catch {
+        throw new Error(
+          `Could not move "${basename(sourcePath)}". Close any app using it (e.g. File Explorer) and try again.`,
+        );
+      }
+    } else {
+      throw e;
     }
-    throw e;
   }
   upsertFileIndexPath(sourcePath);
   upsertFileIndexPath(targetPath);

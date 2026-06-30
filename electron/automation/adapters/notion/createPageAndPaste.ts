@@ -1,10 +1,9 @@
 import { clipboard } from "electron";
-import { getFocusContext } from "../../../focus/focusContext.js";
+import { getFocusContext, restoreFocusContext } from "../../../focus/focusContext.js";
 import { readClipboardText } from "../../clipboard/clipboardService.js";
 import { delay } from "../../delay.js";
 import {
   pasteFromClipboard,
-  selectAll,
   sendKeyChord,
   simulateTyping,
 } from "../../keyboard.js";
@@ -46,6 +45,9 @@ function resolveBody(options: CreateNotionPageOptions): string {
 }
 
 async function insertBody(text: string): Promise<void> {
+  await restoreFocusContext();
+  await delay(500);
+
   if (text.length <= TYPING_MAX) {
     try {
       await simulateTyping(text);
@@ -54,11 +56,14 @@ async function insertBody(text: string): Promise<void> {
       /* fall through to paste */
     }
   }
+
   clipboard.writeText(text);
-  await delay(150);
-  await selectAll();
-  await delay(60);
+  await delay(200);
+  // New Notion pages focus the title first — Enter moves to the body block.
+  await sendKeyChord("{ENTER}");
+  await delay(400);
   await pasteFromClipboard();
+  await delay(300);
 }
 
 /**

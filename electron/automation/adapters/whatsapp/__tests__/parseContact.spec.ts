@@ -22,4 +22,10 @@ describe("parseContact — titled names", () => {
     expect(extractContactName(cmd)).not.toBe("Dr");
     expect(extractMessageFromCommand(cmd)).not.toMatch(/^Fatima/i);
   });
+
+  it("maps Urdu Dr Fatima to WhatsApp search name", () => {
+    const cmd = "سرچ ڈاکٹر فاطمہ اور پوچھو سکتے ہیں کہ آپ کیسے ہیں";
+    expect(extractContactName(cmd)).toBe("Dr. Fatima");
+    expect(extractMessageFromCommand(cmd)?.length).toBeGreaterThan(0);
+  });
 });

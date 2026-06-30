@@ -3,6 +3,8 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
+import { ingestCrossAppReference } from "../storage/crossAppIngest.js";
+import type { CrossAppId } from "../storage/crossAppIngest.js";
 
 export interface ExtensionResult {
   ok: boolean;
@@ -70,6 +72,7 @@ function onSocketData(chunk: Buffer): void {
       ok?: boolean;
       error?: string;
       detail?: string;
+      logs?: string[];
     };
     try {
       msg = JSON.parse(body.toString("utf8"));
@@ -82,6 +85,40 @@ function onSocketData(chunk: Buffer): void {
       if (!readyLogged) {
         readyLogged = true;
         console.info("[ripple-desktop] Native Messaging host connected");
+      }
+      continue;
+    }
+
+    if (msg.type === "CROSS_APP_INGEST_PUSH") {
+      const ingest = msg as {
+        appId?: string;
+        summary?: string;
+        path?: string;
+        contact?: string;
+        command?: string;
+        externalUrl?: string;
+      };
+      const appId = ingest.appId?.trim().toLowerCase();
+      const summary = ingest.summary?.trim();
+      if (appId && summary) {
+        const allowed = new Set([
+          "gmail",
+          "slack",
+          "email",
+          "whatsapp",
+          "teams",
+          "outlook",
+        ]);
+        if (allowed.has(appId)) {
+          ingestCrossAppReference({
+            appId: appId as CrossAppId,
+            summary,
+            path: ingest.path ?? null,
+            contact: ingest.contact ?? null,
+            command: ingest.command ?? null,
+            externalUrl: ingest.externalUrl ?? null,
+          });
+        }
       }
       continue;
     }
@@ -146,6 +183,11 @@ function onSocketData(chunk: Buffer): void {
       if (!p) continue;
       clearTimeout(p.timer);
       pending.delete(msg.id);
+      if (msg.type === "WHATSAPP_RESULT" && Array.isArray(msg.logs)) {
+        for (const line of msg.logs) {
+          console.info(`[ripple-wa] ${line}`);
+        }
+      }
       p.resolve({
         ok: !!msg.ok,
         error: msg.error,

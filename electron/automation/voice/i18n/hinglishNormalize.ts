@@ -70,12 +70,27 @@ const POSSESSIVE_MAP: [RegExp, string][] = [
 ];
 
 const TIME_MAP: [RegExp, string][] = [
+  // Months-before possessive — must run before kal wali (avoid "teen mahine pehle wali" → yesterday's).
+  [
+    /\b(?:teen|3|three)\s+mahine?\s+(?:pehle|pahle)\s+(?:wali|wala|ki|ka)\b/gi,
+    "3 months ago",
+  ],
+  [
+    /\b(?:do|2|two)\s+mahine?\s+(?:pehle|pahle)\s+(?:wali|wala|ki|ka)\b/gi,
+    "2 months ago",
+  ],
+  [
+    /\b(?:ek|1|one)\s+mahine?\s+(?:pehle|pahle)\s+(?:wali|wala|ki|ka)\b/gi,
+    "1 month ago",
+  ],
   [/\bkal\s+ki\b/gi, "yesterday's"],
   [/\bkal\s+wali\b/gi, "yesterday's"],
+  [/\bkal\s+wala\b/gi, "yesterday's"],
   [/\bkal\s+ka\b/gi, "yesterday's"],
   [/\bkal\b/gi, "yesterday"],
   [/\baaj\s+ki\b/gi, "today's"],
   [/\baaj\s+wali\b/gi, "today's"],
+  [/\baaj\s+wala\b/gi, "today's"],
   [/\baaj\b/gi, "today"],
   [/\bparso\b/gi, "day before yesterday"],
 ];

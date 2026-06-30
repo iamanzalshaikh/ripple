@@ -55,7 +55,7 @@ import { confirmIfNeeded } from "../safety/executionGuard.js";
 import { recordCommandEvent } from "../../telemetry/commandTelemetry.js";
 import { recordTrustSignal } from "../../storage/actionTrust.js";
 import { upsertFileIndexPath } from "../../storage/fileIndex.js";
-import { popUndoAction, pushUndoAction } from "../safety/undoStack.js";
+import { popUndoAction, peekUndoAction, pushUndoAction } from "../safety/undoStack.js";
 import {
   reverseUndoAction,
   undoCreatePath,
@@ -63,7 +63,9 @@ import {
   undoMovePaths,
   undoRenamePaths,
 } from "../safety/undoRunner.js";
-import { stageDeleteBackup } from "../safety/undoTrash.js";
+import { describeUndoAction } from "../safety/undoDescribe.js";
+import { upsertLifeEvent } from "../../storage/lifeEvents.js";
+import { openGmailEmailFromSender } from "../gmail/openGmailEmail.js";
 
 async function requireDestructiveConfirm(
   kind: string,
@@ -85,17 +87,23 @@ async function executeDesktopOpenBatch(
   const kind = data?.desktopKind;
 
   if (kind === "undo_last") {
+    const pending = peekUndoAction();
+    if (!pending) {
+      throw new Error("Nothing to undo — no recent file action");
+    }
     const action = popUndoAction();
     if (!action) {
       throw new Error("Nothing to undo — no recent file action");
     }
     const result = await reverseUndoAction(action);
+    const label = describeUndoAction(action);
     recordCommandEvent({
       command: String(data?.command ?? "undo"),
       outcome: "undo",
+      detail: label,
     });
     recordTrustSignal(String(data?.command ?? "undo"), "undo");
-    return result;
+    return `${result} (${label})`;
   }
 
   if (kind === "open_resolved") {
@@ -166,12 +174,37 @@ async function executeDesktopOpenBatch(
     return result;
   }
 
+  if (kind === "remember_life_event") {
+    const label =
+      typeof data?.lifeEventLabel === "string" ? data.lifeEventLabel : "";
+    const topic =
+      typeof data?.lifeEventTopic === "string" ? data.lifeEventTopic : "";
+    const eventAt =
+      typeof data?.lifeEventAt === "string" ? data.lifeEventAt : "";
+    if (!label || !topic || !eventAt) {
+      throw new Error("Life event label, topic, or date missing");
+    }
+    upsertLifeEvent({ label, topic, eventAt });
+    return `Remembered life event: ${label}`;
+  }
+
+  if (kind === "open_gmail_email") {
+    const senderQuery =
+      typeof data?.gmailSenderQuery === "string" ? data.gmailSenderQuery : "";
+    if (!senderQuery.trim()) {
+      throw new Error("Gmail sender query missing");
+    }
+    return openGmailEmailFromSender(senderQuery.trim());
+  }
+
   if (kind === "recall_memory") {
     const target = data?.recallTarget;
     const valid: RecallTarget[] = [
       "auto",
       "file",
       "pdf",
+      "video",
+      "image",
       "folder",
       "workspace",
       "app",
@@ -475,11 +508,19 @@ async function executeDesktopOpenBatch(
     }
     const sourcePath =
       typeof data?.sourcePath === "string" ? data.sourcePath : undefined;
-    return executeReferentialSend(
+    const ctx = getLastCommandContext();
+    const result = await executeReferentialSend(
       { kind: "referential_send", contact, mode },
       typeof data?.command === "string" ? data.command : "",
       sourcePath ? { sourcePath } : undefined,
     );
+    if (data) {
+      data.contact = contact;
+      const sentPath =
+        sourcePath?.trim() || ctx.last_file || ctx.last_folder || undefined;
+      if (sentPath) data.resolvedPath = sentPath;
+    }
+    return result;
   }
 
   throw new Error(`Unknown desktop command kind: ${String(kind)}`);

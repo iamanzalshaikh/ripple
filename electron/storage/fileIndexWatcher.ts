@@ -1,8 +1,7 @@
 import { watch } from "node:fs";
 import { resolveFolderPath } from "../automation/desktop/openFolder.js";
 import { upsertFileIndexPath, rebuildFileIndex } from "./fileIndex.js";
-
-const WATCH_ROOTS = ["downloads", "documents", "desktop"] as const;
+import { getSearchRootKeys } from "./indexConfig.js";
 const DEBOUNCE_MS = 3000;
 
 let watchers: ReturnType<typeof watch>[] = [];
@@ -43,7 +42,7 @@ function scheduleFlush(): void {
 export function startFileIndexWatcher(): void {
   if (process.platform !== "win32") return;
 
-  for (const rootKey of WATCH_ROOTS) {
+  for (const rootKey of getSearchRootKeys()) {
     const dir = resolveFolderPath(rootKey);
     try {
       const w = watch(dir, { recursive: true }, (_event, filename) => {

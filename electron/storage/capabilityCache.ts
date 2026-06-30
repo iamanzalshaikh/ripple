@@ -1,6 +1,8 @@
 import { existsSync } from "node:fs";
 import { getRippleDb } from "./rippleDb.js";
 import { recencyScore } from "./graphScoring.js";
+import { isJunkRecallPath } from "../automation/retriever/pathRecallFilters.js";
+import { parseGmailOpenEmailCommand } from "../automation/gmail/parseGmailOpenEmail.js";
 
 export type CapabilityCacheEntry = {
   phrase: string;
@@ -52,6 +54,13 @@ export function getCapabilityCacheHit(phrase: string): CapabilityCacheEntry | nu
     return null;
   }
 
+  if (isJunkRecallPath(entry.entity)) {
+    getRippleDb()
+      .prepare(`DELETE FROM capability_cache WHERE phrase_key = ?`)
+      .run(key);
+    return null;
+  }
+
   const ageDecay = recencyScore(entry.resolved_at);
   const effectiveConfidence = entry.confidence * (0.5 + 0.5 * ageDecay);
   if (effectiveConfidence < CACHE_MIN_CONFIDENCE) {
@@ -69,6 +78,8 @@ export function setCapabilityCacheEntry(
   entity: string,
   confidence: number,
 ): void {
+  if (isJunkRecallPath(entity)) return;
+  if (parseGmailOpenEmailCommand(phrase)) return;
   ensureTable();
   const key = keyFor(phrase);
   const now = new Date().toISOString();

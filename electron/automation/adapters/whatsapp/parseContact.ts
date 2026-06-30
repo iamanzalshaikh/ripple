@@ -1,4 +1,4 @@
-import { isInstagramTabActive } from "../../../focus/focusContext.js";
+import { isInstagramTabActive, isWhatsAppTabActive } from "../../../focus/focusContext.js";
 import { isGmailVoiceCommand } from "../../commandIntent.js";
 import {
   looksLikeBoxDrawingMojibake,
@@ -35,7 +35,7 @@ export function resolveWhatsAppSearchName(raw: string): string {
       name = cleanContactName(fixed);
     }
   }
-  if (/ڈاکٹر\s*فاطمہ|ڈاکٹر\s*فاطمه/u.test(name)) return "Dr. Fatima";
+  if (/ڈاکٹر\s*فاطم/u.test(name)) return "Dr. Fatima";
   if (/^dr\.?\s*fatima$/i.test(name)) return "Dr. Fatima";
   if (/^doctor\s+fatima$/i.test(name)) return "Dr. Fatima";
   return name;
@@ -65,17 +65,20 @@ function parseUrduSearchAndMessage(
   cmd: string,
 ): { message: string; contact: string } | null {
   const patterns = [
-    /(?:سرچ|تلاش|ڈھونڈ)\s+(.+?)\s+(?:اور\s+)?(?:پوچھ|کہو|کہیں|بول|لکھ|سکہ)[^\s]*\s*(?:کریں\s+)?(?:کہ\s+)?(.+)$/u,
+    /(?:سرچ|تلاش|ڈھونڈ)\s+(.+?)\s+(?:اور\s+)?(?:پوچھ|کہو|کہیں|بول|لکھ|سکہ)[^\s]*\s*(?:سکتے\s+ہیں\s+)?(?:کریں\s+)?(?:کہ\s+)?(.+)$/u,
+    /(?:سرچ|تلاش|ڈھونڈ)\s+(ڈاکٹر\s*فاطم\w*)\s+(?:اور\s+).+$/u,
     /(?:سرچ|تلاش)\s+(.+?)\s+سکہ\s+(.+)$/u,
   ];
   for (const re of patterns) {
     const m = cmd.match(re);
-    if (m?.[1]?.trim() && m?.[2]?.trim()) {
-      return {
-        contact: finalizeContact(m[1])!,
-        message: m[2].trim(),
-      };
+    if (!m?.[1]?.trim()) continue;
+    const contact = finalizeContact(m[1]);
+    if (!contact) continue;
+    const message = m[2]?.trim() ?? "";
+    if (message) {
+      return { contact, message };
     }
+    return { contact, message: "" };
   }
   return null;
 }
@@ -267,6 +270,18 @@ function isSendItemToContactPhrase(cmd: string): boolean {
   );
 }
 
+/** Dotted @-style handle in "Message xx.fx.66 and ask …" — route to Instagram, not WhatsApp. */
+function looksLikeInstagramHandleTarget(cmd: string): boolean {
+  const m = cmd.match(/^\s*message\s+(.+?)\s+and\s+(?:say|ask|tell)/i);
+  if (!m?.[1]?.trim()) return false;
+  const raw = m[1].trim();
+  if (/^(?:dr|doctor|mr|mrs|ms|prof)\.?\s+/i.test(raw)) return false;
+  const compact = raw.replace(/^underscope\s+/i, "").replace(/\s+/g, "");
+  return (
+    /^[A-Za-z0-9][A-Za-z0-9._]{1,29}$/.test(compact) && /[._]/.test(compact)
+  );
+}
+
 /** Voice command looks like WhatsApp messaging. */
 export function isWhatsAppMessagingCommand(command?: string | null): boolean {
   const cmd = effectiveWhatsAppCommand(command);
@@ -278,6 +293,7 @@ export function isWhatsAppMessagingCommand(command?: string | null): boolean {
   if (/\binstagram\b/i.test(cmd) || /\b(?:insta|ig)\b/i.test(cmd)) return false;
   if (/\bon\s+instagram\b/i.test(cmd)) return false;
   if (isInstagramTabActive()) return false;
+  if (looksLikeInstagramHandleTarget(cmd) && !isWhatsAppTabActive()) return false;
   if (
     /(?:سرچ|تلاش|ڈھونڈ)\s+.+/u.test(cmd) &&
     /(?:پوچھ|کہو|کہیں|سکہ|بول|لکھ)/u.test(cmd)
@@ -299,6 +315,10 @@ export function isWhatsAppMessagingCommand(command?: string | null): boolean {
     /\bmessage\s+(?!to\b)[A-Za-z]/i.test(cmd) &&
     /\b(say|ask|tell|saying)\b/i.test(cmd)
   ) {
+    if (looksLikeInstagramHandleTarget(cmd) && !isWhatsAppTabActive()) return false;
+    if (/^\s*message\s+(?:dr|doctor|mr|mrs|ms|prof)\.?\s+/i.test(cmd)) {
+      return true;
+    }
     return true;
   }
   return false;

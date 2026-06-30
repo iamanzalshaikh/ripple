@@ -7,13 +7,26 @@ import {
   queryModifiedOnDay,
   queryLatestByExtension,
 } from "../../storage/fileIndex.js";
-import { retrieveForPlan, smartQueryToRetrieveInput } from "../retriever/retrieveForPlan.js";
-import { timeRangeToWindow } from "../retriever/timeRange.js";
+import { smartQueryToRetrieveInput } from "../retriever/retrieveForPlan.js";
+import { retrieveFileCandidates } from "../retriever/retriever.js";
+import {
+  isMediaAliasExtension,
+  isOpenedTimeQuery,
+} from "../retriever/timeRange.js";
+import {
+  searchRecentOpenedPathsByExtension,
+  searchRecentOpenedPathsByKind,
+} from "../../storage/activityLog.js";
+import type { OpenedItemKind } from "./openedPathKind.js";
+import { getSearchRootKeys, resolveSearchRootPath } from "../../storage/indexConfig.js";
 import { pickItemFromMatches } from "./disambiguation.js";
 import { openFile, openFolder, resolveFolderPath } from "./openFolder.js";
 import type { SmartSearchQuery } from "./parseSmartSearchCommand.js";
 
-const SEARCH_ROOTS = ["downloads", "documents", "desktop"] as const;
+function searchRootPaths(): string[] {
+  return getSearchRootKeys().map((key) => resolveSearchRootPath(key));
+}
+
 const MAX_SCAN_DEPTH = 4;
 
 function ensureIndex(): void {
@@ -64,8 +77,8 @@ function scanPdfsModifiedSince(startMs: number, endMs: number): string[] {
     }
   }
 
-  for (const rootKey of SEARCH_ROOTS) {
-    walk(resolveFolderPath(rootKey), 0);
+  for (const rootPath of searchRootPaths()) {
+    walk(rootPath, 0);
   }
 
   return hits.sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs);
@@ -101,13 +114,7 @@ async function collectMatchesAsync(
   }
 
   const input = smartQueryToRetrieveInput(query, label);
-  const candidates = await retrieveForPlan({
-    kind: "smart_search",
-    phrase: label,
-    token: input.token,
-    extension: input.extension,
-    timeRange: input.timeRange,
-  });
+  const candidates = await retrieveFileCandidates(input);
 
   return candidates.map((c) => c.path);
 }
@@ -182,6 +189,38 @@ export async function resolveSmartSearch(
   }
 
   if (resolved.length === 0) {
+    if (query.type === "time_ranged") {
+      const input = smartQueryToRetrieveInput(query, label);
+      if (isOpenedTimeQuery(input.phrase) && input.extension) {
+        const recent = (
+          isMediaAliasExtension(input.extension)
+            ? searchRecentOpenedPathsByKind(
+                input.extension as OpenedItemKind,
+                15,
+              )
+            : searchRecentOpenedPathsByExtension(input.extension, 15)
+        ).filter((p) => existsSync(p));
+        if (recent.length > 0) {
+          const rangeLabel =
+            input.timeRange ?? "that time";
+          console.info(
+            `[ripple-desktop] temporal ${rangeLabel} ${input.extension} — no exact hits, clarify with ${recent.length} recent`,
+          );
+          const picked = await pickItemFromMatches(
+            `No ${input.extension} from ${rangeLabel} — pick one you opened recently`,
+            recent,
+          );
+          if (picked) {
+            console.info(
+              `[ripple-desktop] Smart search "${label}" → ${picked} (recent pick)`,
+            );
+            return picked;
+          }
+          throw new Error("Cancelled — pick which file you meant");
+        }
+      }
+    }
+
     throw new Error(
       `No file found for "${label}" — try a specific name or say which folder it's in`,
     );
@@ -205,7 +244,8 @@ export async function resolveSmartSearch(
     query.type === "modified_yesterday" ||
     query.type === "modified_last_week" ||
     query.type === "modified_3_months_ago" ||
-    query.type === "edited_yesterday";
+    query.type === "edited_yesterday" ||
+    query.type === "time_ranged";
   if (timeBased) {
     const sorted = [...resolved].sort(
       (a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs,

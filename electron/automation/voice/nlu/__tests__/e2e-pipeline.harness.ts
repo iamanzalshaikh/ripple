@@ -23,8 +23,11 @@ export type PipelineResult = {
 export function runProductionPipeline(raw: string): PipelineResult {
   const transcript = normalizeTranscript(raw);
   const { nlu } = preprocessForNlu(transcript);
+  const routed = nlu.trim() || transcript;
 
-  const wa = buildWhatsAppCommandResult(transcript);
+  const wa =
+    buildWhatsAppCommandResult(transcript) ??
+    buildWhatsAppCommandResult(routed);
   if (wa?.actions?.length) {
     return {
       transcript,
@@ -37,7 +40,7 @@ export function runProductionPipeline(raw: string): PipelineResult {
     };
   }
 
-  const desktop = parseDesktopIntent(transcript);
+  const desktop = parseDesktopIntent(transcript) ?? parseDesktopIntent(routed);
   if (desktop) {
     return {
       transcript,
@@ -50,7 +53,9 @@ export function runProductionPipeline(raw: string): PipelineResult {
     };
   }
 
-  const yt = buildYouTubeCommandResult(transcript);
+  const yt =
+    buildYouTubeCommandResult(transcript) ??
+    buildYouTubeCommandResult(routed);
   if (yt?.actions?.length) {
     return {
       transcript,

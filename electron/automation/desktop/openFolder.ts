@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { shell } from "electron";
+import { recordFileTouch } from "../../storage/recordFileTouch.js";
 
 const WELL_KNOWN: Record<string, () => string> = {
   downloads: () => join(homedir(), "Downloads"),
@@ -26,6 +27,7 @@ export async function openFolder(path: string): Promise<string> {
   if (err) {
     throw new Error(err);
   }
+  recordFileTouch({ path: resolved, source: "open" });
   return `Opened folder: ${resolved}`;
 }
 
@@ -39,5 +41,6 @@ export async function openFile(path: string): Promise<string> {
   if (err) {
     throw new Error(err);
   }
+  recordFileTouch({ path, source: "open" });
   return `Opened file: ${path}`;
 }

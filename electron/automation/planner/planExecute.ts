@@ -36,7 +36,14 @@ import {
 } from "../../telemetry/commandTelemetry.js";
 import { getCapabilityCacheHit } from "../../storage/capabilityCache.js";
 import { graphLookup } from "../retriever/graphLookup.js";
+import { intentFromGraphCandidate } from "../desktop/parseGraphOpenCommand.js";
 import { retrieveFileCandidates } from "../retriever/retriever.js";
+import {
+  parseExtensionFromText,
+  parseParentFolderFromText,
+  parseTimeRangeFromText,
+  stripTimePhrasesFromToken,
+} from "../retriever/timeRange.js";
 import { resolveCandidates } from "./resolver.js";
 import {
   guidedApiUnavailable,
@@ -119,6 +126,27 @@ function notFoundResult(command: string, detail: string): PlanExecuteResult {
   return { kind: "not_found", hint: guidedNotFound(command) };
 }
 
+function payloadFromGraphHit(
+  command: string,
+  hit: { path: string; label: string; score: number },
+  source: PlannerSource,
+  confidence: number,
+): PlanExecuteResult {
+  const spoken =
+    command.match(/\bopen\s+(?:my\s+|the\s+)?(.+?)\s*$/i)?.[1]?.trim() ??
+    hit.label;
+  const intent = intentFromGraphCandidate(
+    { ...hit, source: "graph" },
+    spoken,
+  );
+  const payload = commandPayloadFromIntent(intent, command, " (graph)");
+  const limited = checkRateLimit(command, payload);
+  if (limited) return limited;
+  const blocked = checkPermission(command, payload);
+  if (blocked) return blocked;
+  return { kind: "payload", payload, source, confidence };
+}
+
 async function tryGroundedLookup(
   command: string,
   nlu: string,
@@ -139,25 +167,43 @@ async function tryGroundedLookup(
   const graphHit = graphLookup(nlu) ?? graphLookup(command.trim());
   if (graphHit) {
     recordPlannerSource("graph", command);
-    return payloadFromPath(
-      command,
-      graphHit.path,
-      "graph",
-      graphHit.score,
-      " (graph)",
-    );
+    return payloadFromGraphHit(command, graphHit, "graph", graphHit.score);
   }
 
   const openMatch = extractSearchToken(nlu) ?? extractSearchToken(command.trim());
-  if (!openMatch) return null;
+  const timeRange =
+    parseTimeRangeFromText(nlu) ??
+    parseTimeRangeFromText(command.trim()) ??
+    undefined;
+  const extension =
+    parseExtensionFromText(nlu) ??
+    parseExtensionFromText(command.trim()) ??
+    undefined;
+  const parentFolder =
+    parseParentFolderFromText(nlu) ??
+    parseParentFolderFromText(command.trim()) ??
+    undefined;
 
-  const token = openMatch.trim();
+  let token = openMatch?.trim() ?? "";
+  if (timeRange && token) {
+    token = stripTimePhrasesFromToken(token);
+  }
+
+  if (!token && !timeRange && !extension) return null;
+
   const candidates = await retrieveFileCandidates({
     phrase: nlu,
-    token,
+    token: token || undefined,
+    timeRange,
+    extension,
+    parentFolder,
   });
 
-  const resolved = resolveCandidates(token, candidates, 0.92);
+  const resolved = resolveCandidates(
+    token || extension || nlu.slice(0, 40),
+    candidates,
+    0.92,
+  );
   if (resolved.kind === "execute") {
     recordPlannerSource("offline", command);
     return payloadFromPath(

@@ -15,15 +15,13 @@ export function isEditOrRephraseCommand(command: string): boolean {
     /\b(rephrase|rewrite|reword|revise|edit|modify|adjust|improve|fix|refresh)\b/i.test(c) ||
     /\b(behtar|behtareen|jazbati|wazeh|dubara|tabdeel|zarurat)\b/i.test(c) ||
     /\bmake\s+(it|this|that)(\s+\w+){0,3}\s+(more\s+)?/i.test(c) ||
-    /\bmake\s+(?:this|that)\s+text\s+(more\s+)?(emotional|confident|sad|angry|mad|formal|casual|professional|friendly|short|long)\b/i.test(c) ||
-    /\bmake\s+it\s+(more\s+)?(emotional|confident|sad|angry|mad|formal|casual|professional|friendly|short|long)\b/i.test(c) ||
+    /\bmake\s+(?:this|that)\s+text\s+(more\s+)?(emotional|confident|sad|angry|mad|formal|casual|professional|friendly|short|long|warm|empathetic|playful|supportive|enthusiastic|sincere|caring|loving|funny|polite|gentle|romantic|excited|respectful)\b/i.test(c) ||
+    /\bmake\s+it\s+(more\s+)?(emotional|confident|sad|angry|mad|formal|casual|professional|friendly|short|long|warm|empathetic|playful|supportive|enthusiastic|sincere|caring|loving|funny|polite|gentle|romantic|excited|respectful)\b/i.test(c) ||
     /\bmake\s+it\s+like\b/i.test(c) ||
-    /\b(more|less)\s+(confident|emotional|formal|casual|professional|friendly|angry)\b/i.test(c) ||
+    /\b(more|less)\s+(confident|emotional|formal|casual|professional|friendly|angry|warm|empathetic|playful|supportive|enthusiastic|sincere|caring|loving|funny|polite|gentle|romantic|excited|respectful)\b/i.test(c) ||
     /\b(change|update)\s+(the\s+)?(tone|wording|text)\b/i.test(c) ||
     /\b(shorten|lengthen|expand|condense)\b/i.test(c) ||
-    /\b(emotional|confident|sad|angry|mad|formal|casual|professional|friendly)\s*$/i.test(c) ||
-    c === "undo" ||
-    c === "revert"
+    /\b(emotional|confident|sad|angry|mad|formal|casual|professional|friendly|warm|empathetic|playful|supportive|enthusiastic|sincere|caring|loving|funny|polite|gentle|romantic|excited|respectful)\s*$/i.test(c)
   );
 }
 

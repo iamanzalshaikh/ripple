@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { APP_ROLE_HINTS } from "../automation/desktop/appRoles.js";
@@ -13,6 +13,7 @@ import { boostEntityFromOpen, lookupEntity, rememberEntity } from "./knowledgeGr
 export function bootstrapDemoSeeds(): void {
   seedDefaultAppRoles();
   seedResumeAlias();
+  seedProjectFolder();
 }
 
 function seedDefaultAppRoles(): void {
@@ -69,5 +70,28 @@ function seedResumeAlias(): void {
       }
       return;
     }
+  }
+}
+
+function seedProjectFolder(): void {
+  const keys = ["my project", "project"];
+  if (keys.some((k) => lookupEntity(k))) return;
+
+  const candidates = [
+    join(homedir(), "Desktop", "projectRipple"),
+    join(homedir(), "Desktop", "Projects", "Ripple"),
+    join(homedir(), "Documents", "projectRipple"),
+    join(homedir(), "Projects", "Ripple"),
+  ];
+
+  for (const path of candidates) {
+    if (!existsSync(path)) continue;
+    try {
+      if (!statSync(path).isDirectory()) continue;
+    } catch {
+      continue;
+    }
+    boostEntityFromOpen("my project", path);
+    return;
   }
 }

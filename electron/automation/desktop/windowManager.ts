@@ -6,10 +6,32 @@ import {
   focusWindowByHwnd,
   minimizeAllWindowsNative,
 } from "../../native/win32Bridge.js";
+import { delay } from "../delay.js";
+
+/** UWP host — many unrelated apps share this process; require title keyword match. */
+const AMBIGUOUS_PROCESS_NAMES = new Set(["applicationframehost"]);
+
+/** Desktop shell — not a File Explorer window. */
+const DESKTOP_SHELL_TITLES = new Set(["program manager"]);
 
 function scoreWindow(win: VisibleWindow, app: NativeAppEntry): number {
   const proc = win.processName.toLowerCase();
   const title = win.windowTitle.toLowerCase();
+  const className = (win.className ?? "").toLowerCase();
+
+  if (app.id === "file-explorer") {
+    if (DESKTOP_SHELL_TITLES.has(title.trim())) return 0;
+    if (className === "cabinetwclass") return 90;
+    if (title.includes("file explorer")) return 70;
+    if (proc === "explorer" && title.includes("\\")) return 55;
+  }
+
+  if (AMBIGUOUS_PROCESS_NAMES.has(proc) && (app.titleKeywords?.length ?? 0) > 0) {
+    const hasKeyword = app.titleKeywords!.some((kw) =>
+      title.includes(kw.toLowerCase()),
+    );
+    if (!hasKeyword) return 0;
+  }
 
   let score = 0;
   for (const p of app.processNames) {

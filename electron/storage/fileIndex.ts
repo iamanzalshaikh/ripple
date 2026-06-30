@@ -2,8 +2,8 @@ import { existsSync, readdirSync, statSync } from "node:fs";
 import { basename, extname, join } from "node:path";
 import { getRippleDb } from "./rippleDb.js";
 import { resolveFolderPath } from "../automation/desktop/openFolder.js";
-
-const SEARCH_ROOTS = ["downloads", "documents", "desktop"] as const;
+import { getSearchRootKeys } from "./indexConfig.js";
+import { recordFileTouch } from "./recordFileTouch.js";
 const MAX_DEPTH = 3;
 const MAX_ITEMS_PER_ROOT = 25_000;
 const SKIP_DIR_NAMES = new Set([
@@ -93,7 +93,7 @@ export function getFileIndexCount(): number {
 /** Full rebuild of Downloads, Documents, Desktop index. */
 export function rebuildFileIndex(): number {
   const items: IndexedItem[] = [];
-  for (const rootKey of SEARCH_ROOTS) {
+  for (const rootKey of getSearchRootKeys()) {
     const rootCount = { n: 0 };
     listItemsRecursive(resolveFolderPath(rootKey), rootKey, 0, items, rootCount);
     if (rootCount.n >= MAX_ITEMS_PER_ROOT) {
@@ -199,6 +199,12 @@ export function upsertFileIndexPath(path: string): void {
       Math.floor(st.mtimeMs),
       new Date().toISOString(),
     );
+
+  try {
+    recordFileTouch({ path, source: "file_index", logActivity: false });
+  } catch {
+    /* semantic touch is best-effort */
+  }
 }
 
 type IndexRow = {

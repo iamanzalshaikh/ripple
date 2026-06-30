@@ -10,5 +10,7 @@ describe("parseUndoCommand", () => {
   it("parses Hinglish wapas karo", () => {
     expect(parseUndoCommand("wapas karo")).toEqual({ kind: "undo_last" });
     expect(parseUndoCommand("Undo kar do")).toEqual({ kind: "undo_last" });
+    expect(parseUndoCommand("ulta karo")).toEqual({ kind: "undo_last" });
+    expect(parseUndoCommand("last action wapas")).toEqual({ kind: "undo_last" });
   });
 });

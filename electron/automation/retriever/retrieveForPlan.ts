@@ -1,6 +1,7 @@
 import type { NativeCommandIntent } from "../desktop/parseNativeCommand.js";
 import type { SmartSearchQuery } from "../desktop/parseSmartSearchCommand.js";
 import type { TimeRangeId } from "./timeRange.js";
+import { parseTimeRangeFromText } from "./timeRange.js";
 import type { RetrieveInput } from "./retriever.js";
 import { retrieveFileCandidates } from "./retriever.js";
 import type { Candidate } from "../planner/types.js";
@@ -12,6 +13,8 @@ export type PlanRetrieveStep = {
   parentFolder?: string;
   extension?: string;
   timeRange?: TimeRangeId;
+  lifeEventTopic?: string;
+  contactTopic?: string;
 };
 
 function smartQueryToRetrieveInput(
@@ -55,6 +58,20 @@ function smartQueryToRetrieveInput(
         token: query.token,
         timeRange: "yesterday",
       };
+    case "time_ranged":
+      return {
+        phrase: query.command,
+        extension: query.extension,
+        timeRange: query.timeRange ?? parseTimeRangeFromText(query.command) ?? undefined,
+        parentFolder: query.parentFolder,
+      };
+    case "semantic_topic":
+      return {
+        phrase: query.phrase,
+        extension: query.extension,
+        lifeEventTopic: query.lifeEventTopic,
+        contactTopic: query.contactTopic,
+      };
   }
 }
 
@@ -79,6 +96,9 @@ export function planStepFromIntent(
         token: input.token,
         extension: input.extension,
         timeRange: input.timeRange,
+        parentFolder: input.parentFolder,
+        lifeEventTopic: input.lifeEventTopic,
+        contactTopic: input.contactTopic,
       };
     }
     case "file":
@@ -101,6 +121,8 @@ export function retrieveInputFromPlanStep(
     extension: step.extension,
     parentFolder: step.parentFolder,
     timeRange: step.timeRange,
+    lifeEventTopic: step.lifeEventTopic,
+    contactTopic: step.contactTopic,
   };
 }
 
@@ -120,4 +142,5 @@ export async function retrieveForIntent(
   return retrieveForPlan(step);
 }
 
+export { retrieveAppCandidates } from "./retrieveAppCandidates.js";
 export { smartQueryToRetrieveInput };

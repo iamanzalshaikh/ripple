@@ -1,33 +1,26 @@
 /**
  * Golden rule (§1) — every non-execute outcome must guide the user.
+ * P4 — responses match user's spoken language when detectable.
  */
+import {
+  spokenApiUnavailable,
+  spokenExamples,
+  spokenMissingParent,
+  spokenNotFound,
+} from "../voice/i18n/spokenResponses.js";
 
-const EXAMPLES = [
-  '"Download kholo" or "Open Downloads"',
-  '"Create folder in downloads, name myproject"',
-  '"Mera resume kholo" or "Open my resume"',
-  '"VS Code kholo" or "Open Chrome"',
-] as const;
-
-export function guidedExamples(): string {
-  return EXAMPLES.map((e) => `• ${e}`).join("\n");
+export function guidedExamples(command?: string | null): string {
+  return spokenExamples(command);
 }
 
 /** Outcome 4 — explain why not found + what to try. */
 export function guidedNotFound(command: string, detail?: string): string {
-  const preview = command.trim().slice(0, 60);
-  const prefix = detail
-    ? `${detail} `
-    : `I couldn't match "${preview}" to a desktop action on your PC. `;
-  return `${prefix}Try saying:\n${guidedExamples()}`;
+  return spokenNotFound(command, detail);
 }
 
 /** When OpenAI / auth is unavailable (online-first). */
-export function guidedApiUnavailable(): string {
-  return (
-    "Full voice understanding needs OpenAI — sign in and set OPENAI_API_KEY on ripple-backend. " +
-    `Until then, try a direct command:\n${guidedExamples()}`
-  );
+export function guidedApiUnavailable(command?: string | null): string {
+  return spokenApiUnavailable(command);
 }
 
 /** When GPT returned a plan we could not map to a local tool. */
@@ -41,15 +34,7 @@ export function guidedGptMapMiss(command: string): string {
 /** P1 — create/move without a location slot. */
 export function guidedMissingParent(
   op: "folder" | "file" | "move" | "delete",
+  command?: string | null,
 ): string {
-  const examples: Record<string, string> = {
-    folder: '"create folder in downloads named myproject"',
-    file: '"create file in documents named notes.txt"',
-    move: '"move Invoice.pdf from downloads to desktop"',
-    delete: '"delete temp.txt from downloads"',
-  };
-  return (
-    `Which location — Downloads, Documents, or Desktop? ` +
-    `Try: ${examples[op]}`
-  );
+  return spokenMissingParent(op, command);
 }

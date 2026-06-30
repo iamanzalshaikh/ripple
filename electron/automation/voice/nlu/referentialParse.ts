@@ -1,4 +1,5 @@
 import { normalizeTranscript } from "../normalizeTranscript.js";
+import { isTemporalFileOpenQuery } from "../../retriever/timeRange.js";
 import type { SessionMemoryIntent } from "../../desktop/parseSessionMemoryCommand.js";
 import type { RecallTarget } from "../../desktop/parseSessionMemoryCommand.js";
 
@@ -65,8 +66,11 @@ export function parseReferentialRecall(
   }
 
   if (
-    /^\s*open\s+(?:the\s+)?last\s+pdf\b/i.test(lower) ||
-    /^\s*open\s+(?:the\s+)?pdf\s+I\s+(?:had\s+)?open/i.test(lower)
+    !isTemporalFileOpenQuery(cmd) &&
+    (/^\s*open\s+(?:the\s+)?last\s*pdf(?![.\w])\b/i.test(lower) ||
+      /^\s*open\s+(?:the\s+)?pdf\s+I\s+(?:had\s+)?open(?:ed)?\s*\.?\s*$/i.test(
+        lower,
+      ))
   ) {
     return recall("pdf");
   }

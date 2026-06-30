@@ -87,8 +87,10 @@ export function resolveAlias(spoken: string): UserAlias | null {
   for (const key of keys) {
     for (const candidate of candidates) {
       if (candidate === key) return store.aliases[key];
-      if (candidate.endsWith(` ${key}`) || candidate === key) {
-        return store.aliases[key];
+      if (candidate.endsWith(` ${key}`)) {
+        const prefix = candidate.slice(0, candidate.length - key.length - 1).trim();
+        const words = prefix ? prefix.split(/\s+/).length : 0;
+        if (words <= 2) return store.aliases[key];
       }
     }
   }

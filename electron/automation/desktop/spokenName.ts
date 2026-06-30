@@ -9,6 +9,13 @@ export function normalizeRegistryKey(name: string): string {
 
 /** Self-correction: "Start study mode. Sorry, start work mode" → work mode */
 export function extractLastRunPhrase(cmd: string): string | null {
+  const hinglish = cmd.match(
+    /(?:^|\s)(?:mera\s+|my\s+)?(.+?)\s+(?:chalu|shuru)\s+karo\s*\.?\s*$/i,
+  );
+  if (hinglish?.[1]) {
+    return sanitizeSpokenName(hinglish[1]);
+  }
+
   const matches = [
     ...cmd.matchAll(/(?:start|run|launch)\s+(?:my\s+)?([^.,;]+)/gi),
   ];

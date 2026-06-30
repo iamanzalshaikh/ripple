@@ -125,6 +125,18 @@ interface RippleApi {
     message?: string;
     csv?: string;
   }>;
+  getCiGateStatus: () => Promise<{
+    ok: boolean;
+    message?: string;
+    gate?: {
+      passed: number;
+      total: number;
+      passRatePercent: number;
+      thresholdPercent: number;
+      meetsGate: boolean;
+      failures: string[];
+    };
+  }>;
   getCommandHistory: (args?: {
     page?: number;
     limit?: number;

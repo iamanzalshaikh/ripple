@@ -1845,8 +1845,19 @@ const SIDEBAR_ATTEMPT_MS = 2000;
 const SIDEBAR_MAX_ATTEMPTS = 2;
 const SEARCH_HIT_TIMEOUT_MS = 4000;
 
+let waRunLogBuffer = null;
+
 function waLog(step, detail) {
   console.info(`${WA_LOG} ${step}`, detail ?? "");
+  if (waRunLogBuffer) {
+    const extra =
+      detail !== undefined && detail !== ""
+        ? typeof detail === "object"
+          ? JSON.stringify(detail)
+          : String(detail)
+        : "";
+    waRunLogBuffer.push(extra ? `${step}: ${extra}` : step);
+  }
 }
 
 function sleep(ms) {
@@ -2278,9 +2289,23 @@ async function blurSearchBox(search) {
   await waitForComposeInput(CHAT_OPEN_TIMEOUT_MS);
 }
 
+function isComposerPlaceholder(text, el) {
+  const t = String(text ?? "").trim();
+  if (!t) return true;
+  if (/^type a message/i.test(t)) return true;
+  const label = labelOf(el);
+  if (label && t.toLowerCase() === label.trim()) return true;
+  return false;
+}
+
 function getEditableText(el) {
-  if (el instanceof HTMLInputElement) return (el.value ?? "").trim();
-  return (el.textContent ?? "").replace(/\u200b/g, "").trim();
+  if (el instanceof HTMLInputElement) {
+    const v = (el.value ?? "").trim();
+    return isComposerPlaceholder(v, el) ? "" : v;
+  }
+  const raw = (el.textContent ?? "").replace(/\u200b/g, "").trim();
+  if (isComposerPlaceholder(raw, el)) return "";
+  return raw;
 }
 
 function clearEditable(el) {
@@ -2419,6 +2444,7 @@ function writtenMatchesComposer(written, target) {
   if (w === t) return true;
   if (countLeadingRepeats(w, t) > 1) return false;
   if (w.length > t.length * 1.08) return false;
+  if (w.includes(t) && w.length <= t.length + 4) return true;
   return false;
 }
 
@@ -2455,7 +2481,7 @@ function forceComposerToSingleCopy(el, msg) {
   }
 }
 
-/** Replace all composer text — select-all + one insert; never stack multiple strategies. */
+/** Replace all composer text — clipboard paste first (Lexical-safe), then insertText. */
 async function replaceComposerText(el, text) {
   const msg = String(text ?? "").trim();
   if (!msg) throw new Error("Empty message");
@@ -2469,20 +2495,37 @@ async function replaceComposerText(el, text) {
   await sleep(120);
   el.focus({ preventScroll: true });
 
+  let written = "";
+
   try {
-    document.execCommand("selectAll", false, null);
+    await navigator.clipboard.writeText(msg);
+    try {
+      document.execCommand("selectAll", false, null);
+    } catch (_) {
+      /* ignore */
+    }
+    await sleep(60);
+    try {
+      document.execCommand("paste");
+    } catch (_) {
+      /* ignore */
+    }
+    el.dispatchEvent(new InputEvent("input", { bubbles: true }));
+    await sleep(120);
+    written = getEditableText(el);
   } catch (_) {
     /* ignore */
   }
-  await sleep(60);
 
-  try {
-    document.execCommand("insertText", false, msg);
-  } catch (_) {
-    /* ignore */
+  if (!writtenMatchesComposer(written, msg)) {
+    try {
+      document.execCommand("insertText", false, msg);
+    } catch (_) {
+      /* ignore */
+    }
+    written = getEditableText(el);
   }
 
-  let written = getEditableText(el);
   if (
     countLeadingRepeats(written, msg) > 1 ||
     written.length > msg.length * 1.08 ||
@@ -2965,11 +3008,168 @@ function findAttachButton() {
   return null;
 }
 
+function findAttachMenuItem(labelRegex) {
+  const scopes = [
+    ...document.querySelectorAll(
+      '#main [role="menu"] [role="menuitem"], #main [role="menu"] button, #main [role="menu"] li',
+    ),
+    ...document.querySelectorAll(
+      '[data-animate-dropdown-item="true"], [role="button"][tabindex="0"]',
+    ),
+  ];
+  for (const item of scopes) {
+    const text = (
+      item.getAttribute("aria-label") ??
+      item.getAttribute("title") ??
+      item.textContent ??
+      ""
+    ).trim();
+    if (text && labelRegex.test(text)) return item;
+  }
+  return null;
+}
+
+function isDocumentExtension(ext) {
+  return new Set([
+    ".pdf",
+    ".doc",
+    ".docx",
+    ".xls",
+    ".xlsx",
+    ".ppt",
+    ".pptx",
+    ".txt",
+    ".rtf",
+  ]).has(ext);
+}
+
+function isMediaExtension(ext) {
+  return new Set([
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".webp",
+    ".mp4",
+    ".mov",
+    ".avi",
+    ".mkv",
+    ".3gp",
+  ]).has(ext);
+}
+
+function pickFileInput(fileName) {
+  const ext = (fileName.match(/\.[^.]+$/) || [""])[0].toLowerCase();
+  const inputs = [...document.querySelectorAll('input[type="file"]')];
+  if (inputs.length === 0) return null;
+  if (inputs.length === 1) return inputs[0];
+
+  if (isDocumentExtension(ext)) {
+    return (
+      inputs.find((input) => {
+        const accept = (input.getAttribute("accept") ?? "").toLowerCase();
+        return (
+          accept.includes("pdf") ||
+          accept.includes(".doc") ||
+          accept.includes("application") ||
+          accept.includes("*")
+        );
+      }) ?? inputs[inputs.length - 1]
+    );
+  }
+
+  if (isMediaExtension(ext)) {
+    return (
+      inputs.find((input) => {
+        const accept = (input.getAttribute("accept") ?? "").toLowerCase();
+        return accept.includes("image") || accept.includes("video");
+      }) ?? inputs[0]
+    );
+  }
+
+  return inputs[inputs.length - 1] ?? inputs[0];
+}
+
+function resolveAttachMimeType(fileName, mimeType) {
+  const ext = (fileName.match(/\.[^.]+$/) || [""])[0].toLowerCase();
+  const map = {
+    ".pdf": "application/pdf",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".doc": "application/msword",
+    ".docx":
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".txt": "text/plain",
+  };
+  return map[ext] ?? mimeType ?? "application/octet-stream";
+}
+
+function findWhatsAppAttachError() {
+  const snippets = [];
+  for (const el of document.querySelectorAll(
+    '[role="alert"], [data-testid*="toast"], [data-testid*="snackbar"], span, div',
+  )) {
+    const t = (el.textContent ?? "").trim();
+    if (!t || t.length > 200) continue;
+    if (
+      /not supported|couldn.?t add|can't add|file type|unsupported/i.test(t)
+    ) {
+      snippets.push(t);
+    }
+  }
+  return snippets[0] ?? null;
+}
+
+function hasAttachmentPreview() {
+  const selectors = [
+    '#main [data-testid="media-canvas"]',
+    '#main [data-testid="media-viewer"]',
+    '#main [data-animate-media-viewer]',
+    '[data-testid="media-viewer"]',
+    '#main span[data-icon="document"]',
+    '#main span[data-icon="pdf"]',
+    '#main footer [data-icon="send"]',
+    '[data-testid="media-caption-input-container"]',
+    'div[role="dialog"] [data-icon="document"]',
+    'div[role="dialog"] [data-icon="send"]',
+    '#main img[src^="blob:"]',
+    '#main video[src^="blob:"]',
+  ];
+  return selectors.some((sel) => {
+    const el = document.querySelector(sel);
+    return el && isVisible(el);
+  });
+}
+
 async function attachFileFromPayload(attachment) {
   const fileName = attachment?.fileName;
-  const mimeType = attachment?.mimeType || "application/octet-stream";
   const base64 = attachment?.base64;
   if (!fileName || !base64) return false;
+
+  const ext = (fileName.match(/\.[^.]+$/) || [""])[0].toLowerCase();
+  const mimeType = resolveAttachMimeType(fileName, attachment?.mimeType);
+  const blocked = new Set([
+    ".zip",
+    ".rar",
+    ".7z",
+    ".json",
+    ".js",
+    ".ts",
+    ".mjs",
+    ".exe",
+    ".dll",
+    ".csv",
+    ".log",
+    ".rtf",
+  ]);
+  if (blocked.has(ext)) {
+    throw new Error(
+      `WhatsApp does not support ${ext} files — use PDF, PNG, DOCX, or MP4`,
+    );
+  }
 
   await dismissBlockingModals();
   const attachBtn = await waitUntil(() => findAttachButton(), 8000, 200);
@@ -2977,35 +3177,180 @@ async function attachFileFromPayload(attachment) {
   attachBtn.click();
   await sleep(600);
 
-  const input = await waitUntil(
-    () => document.querySelector('input[type="file"]'),
-    8000,
-    200,
-  );
+  if (isDocumentExtension(ext)) {
+    const docBtn = await waitUntil(
+      () =>
+        findAttachMenuItem(/^document$/i) ??
+        document.querySelector('[aria-label="Document"]') ??
+        document.querySelector('[data-icon="attach-document"]') ??
+        document.querySelector('[data-icon="document"]'),
+      4000,
+      150,
+    );
+    if (!docBtn) {
+      throw new Error(
+        "WhatsApp Document menu not found — reload Ripple extension at chrome://extensions",
+      );
+    }
+    docBtn.click();
+    await sleep(500);
+    waLog("attach menu → Document");
+  } else if (isMediaExtension(ext)) {
+    const mediaBtn = await waitUntil(
+      () =>
+        findAttachMenuItem(/^photos?\s*(?:&|and)?\s*videos?$/i) ??
+        document.querySelector('[aria-label="Photos & videos"]') ??
+        document.querySelector('[data-icon="attach-image"]'),
+      2500,
+      150,
+    );
+    if (mediaBtn) {
+      mediaBtn.click();
+      await sleep(450);
+      waLog("attach menu → Photos & videos");
+    }
+  }
+
+  const input = await waitUntil(() => pickFileInput(fileName), 8000, 200);
   if (!input) throw new Error("WhatsApp file picker not found");
 
   const bytes = base64ToBytes(base64);
   const blob = new Blob([bytes], { type: mimeType });
-  const file = new File([blob], fileName, { type: mimeType });
+  const file = new File([blob], fileName, {
+    type: mimeType,
+    lastModified: Date.now(),
+  });
   const dt = new DataTransfer();
   dt.items.add(file);
   input.files = dt.files;
+  input.dispatchEvent(new Event("input", { bubbles: true }));
   input.dispatchEvent(new Event("change", { bubbles: true }));
-  await sleep(1500);
+  await sleep(800);
+
+  const previewReady = await waitUntil(
+    () => hasAttachmentPreview() || findWhatsAppAttachError(),
+    10000,
+    250,
+  );
+  const attachErr = findWhatsAppAttachError();
+  if (attachErr) {
+    throw new Error(`WhatsApp attach failed: ${attachErr}`);
+  }
+  if (!previewReady && !hasAttachmentPreview()) {
+    waLog(
+      "preview not detected by selectors — continuing (check [WA] logs in DevTools)",
+    );
+  } else {
+    waLog("preview detected");
+  }
+
   waLog("file attached", fileName);
   return true;
 }
 
 async function sendAttachmentPreview() {
-  const sendBtn = document
-    .querySelector('[data-icon="send"], span[data-icon="send"]')
-    ?.closest("button, [role='button']");
+  const footerSendSelectors = [
+    '#main footer [data-icon="send"]',
+    '#main footer span[data-icon="send"]',
+    '#main footer button[aria-label*="Send"]',
+    '#main footer [role="button"][aria-label*="Send"]',
+    '#main [data-testid="compose-btn-send"]',
+  ];
+
+  const clickSendNode = (node) => {
+    if (!node || !isVisible(node)) return false;
+    const target = node.closest?.("button, [role='button']") ?? node;
+    if (!target || !isVisible(target)) return false;
+    target.click();
+    target.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    target.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    target.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    return true;
+  };
+
+  const dumpSendCandidates = () => {
+    const rows = [];
+    for (const sel of footerSendSelectors) {
+      const nodes = Array.from(document.querySelectorAll(sel));
+      for (const node of nodes) {
+        rows.push({
+          selector: sel,
+          visible: isVisible(node),
+          label: labelOf(node),
+        });
+      }
+    }
+    for (const node of Array.from(document.querySelectorAll('#main [data-icon="send"]'))) {
+      rows.push({
+        selector: '#main [data-icon="send"]',
+        visible: isVisible(node),
+        label: labelOf(node),
+      });
+    }
+    waLog("send candidates", rows.length ? rows : "none");
+  };
+
+  const findSendButton = () => {
+    const previewRoots = [
+      document.querySelector('[data-testid="media-viewer"]'),
+      document.querySelector('[data-animate-media-viewer]'),
+      document.querySelector('div[role="dialog"]'),
+    ].filter(Boolean);
+
+    for (const root of previewRoots) {
+      const icon = root.querySelector('[data-icon="send"]');
+      const iconBtn = icon?.closest("button, [role='button']") ?? icon;
+      if (iconBtn && isVisible(iconBtn)) return iconBtn;
+      const ariaBtn = root.querySelector(
+        'button[aria-label*="Send"], [role="button"][aria-label*="Send"]',
+      );
+      if (ariaBtn && isVisible(ariaBtn)) return ariaBtn;
+    }
+
+    for (const sel of footerSendSelectors) {
+      const el = document.querySelector(sel);
+      const btn = el?.closest("button, [role='button']") ?? el;
+      if (btn && isVisible(btn)) return btn;
+    }
+
+    for (const el of document.querySelectorAll('#main [data-icon="send"]')) {
+      const btn = el.closest("button, [role='button']") ?? el;
+      if (btn && isVisible(btn)) return btn;
+    }
+    return null;
+  };
+
+  waLog("looking for attachment send button");
+  dumpSendCandidates();
+  const sendBtn = await waitUntil(() => findSendButton(), 8000, 200);
   if (sendBtn && isVisible(sendBtn)) {
-    sendBtn.click();
-    await sleep(500);
+    waLog("send button found", labelOf(sendBtn));
+    clickSendNode(sendBtn);
+    await sleep(700);
+    const stillVisible = findSendButton();
+    if (stillVisible && isVisible(stillVisible)) {
+      waLog("send button still visible — second click");
+      clickSendNode(stillVisible);
+      await sleep(700);
+    }
     waLog("attachment sent");
     return;
   }
+
+  waLog("send button not found — trying brute-force node clicks");
+  const iconNodes = Array.from(document.querySelectorAll('#main [data-icon="send"]')).filter((n) =>
+    isVisible(n),
+  );
+  for (const node of iconNodes.slice(0, 6)) {
+    waLog("click fallback node", labelOf(node));
+    if (clickSendNode(node)) {
+      await sleep(450);
+      waLog("fallback node clicked");
+      return;
+    }
+  }
+
+  waLog("send nodes failed — trying Enter key");
   document.dispatchEvent(
     new KeyboardEvent("keydown", {
       key: "Enter",
@@ -3014,7 +3359,19 @@ async function sendAttachmentPreview() {
       bubbles: true,
     }),
   );
-  waLog("attachment send via Enter");
+  const active = document.activeElement;
+  if (active) {
+    active.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Enter",
+        code: "Enter",
+        keyCode: 13,
+        bubbles: true,
+      }),
+    );
+  }
+  await sleep(500);
+  waLog("attachment send via Enter", active ? labelOf(active) : "no active element");
 }
 
 async function insertMessage(text, send) {
@@ -3126,6 +3483,7 @@ async function insertMessage(text, send) {
     runInProgress = true;
 
     (async () => {
+      waRunLogBuffer = [];
       try {
         waLog("run start", { contact: msg.contact, send: !!msg.send });
         await searchAndOpen(msg.contact);
@@ -3157,11 +3515,17 @@ async function insertMessage(text, send) {
                 : hasAttachment
                   ? `Attached file for ${msg.contact}`
                   : `Opened chat with ${msg.contact}`,
+          logs: waRunLogBuffer ? [...waRunLogBuffer] : [],
         });
       } catch (e) {
         waLog("run failed", e?.message ?? String(e));
-        sendResponse({ ok: false, error: e?.message ?? String(e) });
+        sendResponse({
+          ok: false,
+          error: e?.message ?? String(e),
+          logs: waRunLogBuffer ? [...waRunLogBuffer] : [],
+        });
       } finally {
+        waRunLogBuffer = null;
         runInProgress = false;
       }
     })();

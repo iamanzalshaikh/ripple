@@ -1,10 +1,13 @@
 import { normalizeTranscript } from "../voice/normalizeTranscript.js";
 import { parseReferentialRecall } from "../voice/nlu/referentialParse.js";
+import { isTemporalFileOpenQuery } from "../retriever/timeRange.js";
 
 export type RecallTarget =
   | "auto"
   | "file"
   | "pdf"
+  | "video"
+  | "image"
   | "folder"
   | "workspace"
   | "app"
@@ -37,14 +40,33 @@ export function parseSessionMemoryCommand(
   }
 
   if (
-    /^\s*open\s+(?:the\s+)?last\s+pdf(?:\s+(?:I\s+)?(?:had\s+)?open(?:ed)?)?\s*\.?\s*$/i.test(
+    !isTemporalFileOpenQuery(cmd) &&
+    (/^\s*open\s+(?:the\s+)?last\s*pdf(?![.\w])(?:\s+(?:I\s+)?(?:had\s+)?open(?:ed)?)?\s*\.?\s*$/i.test(
       cmd,
     ) ||
-    /^\s*open\s+(?:the\s+)?pdf\s+I\s+(?:had\s+)?open(?:ed)?\s*\.?\s*$/i.test(cmd) ||
-    /^\s*open\s+(?:my\s+)?last\s+pdf\s*\.?\s*$/i.test(cmd) ||
-    /^\s*open\s+(?:the\s+)?pdf\s+I\s+(?:just\s+)?opened\s*\.?\s*$/i.test(cmd)
+      /^\s*open\s+(?:the\s+)?pdf\s+I\s+(?:had\s+)?open(?:ed)?\s*\.?\s*$/i.test(cmd) ||
+      /^\s*open\s+(?:my\s+)?last\s*pdf\s*\.?\s*$/i.test(cmd) ||
+      /^\s*open\s+(?:the\s+)?pdf\s+I\s+(?:just\s+)?opened\s*\.?\s*$/i.test(cmd))
   ) {
     return { kind: "recall_memory", target: "pdf" };
+  }
+
+  if (
+    /^\s*open\s+(?:the\s+)?last\s*video(?:\s+(?:I\s+)?(?:had\s+)?open(?:ed)?)?\s*\.?\s*$/i.test(
+      cmd,
+    ) ||
+    /^\s*open\s+(?:my\s+)?last\s*video\s*\.?\s*$/i.test(cmd)
+  ) {
+    return { kind: "recall_memory", target: "video" };
+  }
+
+  if (
+    /^\s*open\s+(?:the\s+)?last\s*(?:image|photo|picture)(?:\s+(?:I\s+)?(?:had\s+)?open(?:ed)?)?\s*\.?\s*$/i.test(
+      cmd,
+    ) ||
+    /^\s*open\s+(?:my\s+)?last\s*(?:image|photo|picture)\s*\.?\s*$/i.test(cmd)
+  ) {
+    return { kind: "recall_memory", target: "image" };
   }
 
   if (/^\s*open\s+(?:the\s+)?last\s+file\s*\.?\s*$/i.test(cmd)) {
@@ -52,6 +74,14 @@ export function parseSessionMemoryCommand(
   }
 
   if (/^\s*open\s+(?:the\s+)?last\s+folder\s*\.?\s*$/i.test(cmd)) {
+    return { kind: "recall_memory", target: "folder" };
+  }
+
+  if (
+    /^\s*open\s+(?:the\s+)?last\s+folder\s+(?:I\s+)?(?:had\s+)?open(?:ed)?\s*\.?\s*$/i.test(
+      cmd,
+    )
+  ) {
     return { kind: "recall_memory", target: "folder" };
   }
 

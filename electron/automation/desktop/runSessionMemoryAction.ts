@@ -8,9 +8,34 @@ import { openFile, openFolder } from "./openFolder.js";
 import type { RecallTarget } from "./parseSessionMemoryCommand.js";
 import { getMemory } from "../../storage/sessionMemory.js";
 import type { LastOpenedKind } from "../../storage/sessionMemory.js";
-import { getLastSuccessfulOpen } from "../../storage/desktopHistory.js";
+import { queryLatestByExtension } from "../../storage/fileIndex.js";
 import { focusAppWindow } from "./windowManager.js";
-import { getFocusContext } from "../../focus/focusContext.js";
+import {
+  getFocusContext,
+  refreshFocusFromExtension,
+} from "../../focus/focusContext.js";
+import {
+  IMAGE_EXTENSIONS,
+  VIDEO_EXTENSIONS,
+} from "./mediaFocusMemory.js";
+import { resolveLastOpenedByKind } from "./p8RecallResolver.js";
+import type { OpenedItemKind } from "./openedPathKind.js";
+
+function newestExistingByExtensions(extensions: string[]): string | null {
+  const seen = new Set<string>();
+  const candidates: string[] = [];
+  for (const ext of extensions) {
+    for (const path of queryLatestByExtension(ext, 20)) {
+      const key = path.toLowerCase();
+      if (seen.has(key) || !existsSync(path)) continue;
+      seen.add(key);
+      candidates.push(path);
+    }
+  }
+  if (candidates.length === 0) return null;
+  candidates.sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs);
+  return candidates[0] ?? null;
+}
 
 function parentFromExplorerFocus(): string | null {
   const ctx = getFocusContext();
@@ -68,6 +93,7 @@ function kindMatchesTarget(kind: LastOpenedKind, target: RecallTarget): boolean 
   if (target === "auto" || target === "parent") return true;
   if (target === "folder") return kind === "folder" || kind === "project";
   if (target === "file") return kind === "file";
+  if (target === "video" || target === "image") return kind === "file";
   if (target === "workspace") return kind === "workspace";
   if (target === "app") return kind === "app";
   return false;
@@ -88,18 +114,50 @@ async function tryLastOpened(target: RecallTarget): Promise<string | null> {
   return openLastPath(path, kind);
 }
 
+const TARGET_TO_KIND: Partial<Record<RecallTarget, OpenedItemKind>> = {
+  pdf: "pdf",
+  image: "image",
+  video: "video",
+  folder: "folder",
+  file: "file",
+};
+
+async function recallByP8Kind(
+  kind: OpenedItemKind,
+  label: string,
+): Promise<string> {
+  await refreshFocusFromExtension();
+  const ctx = getFocusContext();
+  const path = await resolveLastOpenedByKind(kind, ctx);
+  if (path) {
+    console.info(`[ripple-desktop] recall (${label}) → ${path}`);
+    return openLastPath(path, label);
+  }
+  if (kind === "video") {
+    const fallback = newestExistingByExtensions(VIDEO_EXTENSIONS);
+    if (fallback) {
+      console.info(`[ripple-desktop] recall (video) → indexed: ${fallback}`);
+      return openLastPath(fallback, "video");
+    }
+  }
+  if (kind === "image") {
+    const fallback = newestExistingByExtensions(IMAGE_EXTENSIONS);
+    if (fallback) {
+      console.info(`[ripple-desktop] recall (image) → indexed: ${fallback}`);
+      return openLastPath(fallback, "image");
+    }
+  }
+  throw new Error(
+    `No ${label} opened yet — open a ${label} first, then say "open last ${label}"`,
+  );
+}
+
 export async function runRecallMemoryAction(
   target: RecallTarget,
 ): Promise<string> {
-  if (target === "pdf") {
-    const pdf = getMemory("last_pdf");
-    if (pdf) {
-      console.info(`[ripple-desktop] recall (pdf) → last_pdf`);
-      return openLastPath(pdf, "pdf");
-    }
-    throw new Error(
-      'No PDF opened yet — open a PDF first, then say "open last pdf"',
-    );
+  const p8Kind = TARGET_TO_KIND[target];
+  if (p8Kind) {
+    return recallByP8Kind(p8Kind, target);
   }
 
   if (target === "parent") {
@@ -125,56 +183,45 @@ export async function runRecallMemoryAction(
     return fromLastOpened;
   }
 
-  const tryKeys: Array<{ key: Parameters<typeof getMemory>[0]; label: string }> =
-    [];
-
-  if (target === "file") {
-    tryKeys.push({ key: "last_file", label: "file" });
-  } else if (target === "folder") {
-    tryKeys.push({ key: "last_project", label: "project" });
-    tryKeys.push({ key: "last_folder", label: "folder" });
-  } else if (target === "workspace") {
-    tryKeys.push({ key: "last_workspace", label: "workspace" });
+  if (target === "workspace") {
+    const url = getMemory("last_workspace");
+    if (url) {
+      await openUrlInBrowser(url);
+      return "Opened last workspace";
+    }
   } else if (target === "app") {
     const appId = getMemory("last_app");
     if (appId) {
       return openLastApp(appId);
     }
-  } else {
-    // auto — prefer folder/project then file (most users reopen folders)
-    tryKeys.push({ key: "last_project", label: "project" });
-    tryKeys.push({ key: "last_folder", label: "folder" });
-    tryKeys.push({ key: "last_file", label: "file" });
-    tryKeys.push({ key: "last_workspace", label: "workspace" });
+  } else if (target === "auto") {
+    await refreshFocusFromExtension();
+    const ctx = getFocusContext();
+    for (const kind of [
+      "folder",
+      "file",
+      "pdf",
+      "image",
+      "video",
+    ] as OpenedItemKind[]) {
+      const path = await resolveLastOpenedByKind(kind, ctx);
+      if (!path) continue;
+      console.info(`[ripple-desktop] recall (auto) → last ${kind}`);
+      return openLastPath(path, kind);
+    }
     const appId = getMemory("last_app");
     if (appId) {
       try {
         return await openLastApp(appId);
       } catch {
-        /* try path keys next */
+        /* fall through */
       }
     }
-  }
-
-  for (const { key, label } of tryKeys) {
-    const value = getMemory(key);
-    if (!value) continue;
-
-    if (key === "last_workspace" || /^https?:\/\//i.test(value)) {
-      await openUrlInBrowser(value);
+    const workspace = getMemory("last_workspace");
+    if (workspace) {
+      await openUrlInBrowser(workspace);
       return "Opened last workspace";
     }
-
-    console.info(`[ripple-desktop] recall (${target}) → ${key}`);
-    return openLastPath(value, label);
-  }
-
-  const history = getLastSuccessfulOpen();
-  if (history?.resolved_path && existsSync(history.resolved_path)) {
-    console.info(
-      `[ripple-desktop] recall (${target}) → history: ${history.resolved_path}`,
-    );
-    return openLastPath(history.resolved_path, "item");
   }
 
   if (target === "file") {

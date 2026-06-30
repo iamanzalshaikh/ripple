@@ -32,10 +32,15 @@ import {
   type SmartSearchIntent,
 } from "./parseSmartSearchCommand.js";
 import { parseUndoCommand, type UndoCommandIntent } from "./parseUndoCommand.js";
+import { parseGraphOpenCommand } from "./parseGraphOpenCommand.js";
+import { parseGmailOpenEmailCommand } from "../gmail/parseGmailOpenEmail.js";
 import type { CompoundIntent } from "../voice/nlu/compoundParse.js";
 import type { ReferentialSendIntent } from "../voice/nlu/parseReferentialWhatsApp.js";
+import type { RememberLifeEventIntent } from "../retriever/parseSemanticOpen.js";
+import type { GmailOpenEmailIntent } from "../gmail/parseGmailOpenEmail.js";
 import { parseReferentialSend } from "../voice/nlu/parseReferentialWhatsApp.js";
 import { parseDesktopIntent } from "../voice/nlu/pipeline.js";
+import { normalizeTranscript } from "../voice/normalizeTranscript.js";
 
 export type OpenResolvedIntent = { kind: "open_resolved"; path: string };
 
@@ -52,7 +57,9 @@ export type NativeCommandIntent =
   | UndoCommandIntent
   | OpenResolvedIntent
   | ReferentialSendIntent
-  | CompoundIntent;
+  | CompoundIntent
+  | RememberLifeEventIntent
+  | GmailOpenEmailIntent;
 
 /**
  * Strict regex parsers only — no NLU fallback.
@@ -78,8 +85,22 @@ export function parseNativeCommandStrict(
   const sessionRecall = parseSessionMemoryCommand(command);
   if (sessionRecall) return sessionRecall;
 
+  const cmd = normalizeTranscript(command ?? "");
+  if (/^\s*open\s+(?:move|rename|delete|send|copy)\b/i.test(cmd)) {
+    const fileOpAfterOpen = parseFileOperationCommand(
+      cmd.replace(/^\s*open\s+/i, ""),
+    );
+    if (fileOpAfterOpen) return fileOpAfterOpen;
+  }
+
   const aliasOpen = parseAliasOpenCommand(command);
   if (aliasOpen) return aliasOpen;
+
+  const gmailEmail = parseGmailOpenEmailCommand(command);
+  if (gmailEmail) return gmailEmail;
+
+  const graphOpen = parseGraphOpenCommand(command);
+  if (graphOpen) return graphOpen;
 
   const referentialSend = parseReferentialSend(command);
   if (referentialSend) return referentialSend;

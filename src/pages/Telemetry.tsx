@@ -10,7 +10,15 @@ interface Props {
 
 export function TelemetryPage({ onBack }: Props) {
   const [summary, setSummary] = useState<Summary | null>(null);
+  const [ciGate, setCiGate] = useState<{
+    passed: number;
+    total: number;
+    passRatePercent: number;
+    thresholdPercent: number;
+    meetsGate: boolean;
+  } | null>(null);
   const [loading, setLoading] = useState(true);
+  const [gateLoading, setGateLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -26,9 +34,19 @@ export function TelemetryPage({ onBack }: Props) {
     setLoading(false);
   }, []);
 
+  const loadGate = useCallback(async () => {
+    setGateLoading(true);
+    const res = await window.ripple.getCiGateStatus();
+    if (res.ok && res.gate) {
+      setCiGate(res.gate);
+    }
+    setGateLoading(false);
+  }, []);
+
   useEffect(() => {
     void load();
-  }, [load]);
+    void loadGate();
+  }, [load, loadGate]);
 
   async function handleExport() {
     const res = await window.ripple.exportTelemetryCsv();
@@ -76,8 +94,11 @@ export function TelemetryPage({ onBack }: Props) {
         <div className="flex gap-2">
           <button
             type="button"
-            onClick={() => void load()}
-            disabled={loading}
+            onClick={() => {
+              void load();
+              void loadGate();
+            }}
+            disabled={loading || gateLoading}
             className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-900 disabled:opacity-50"
           >
             Refresh
@@ -94,6 +115,30 @@ export function TelemetryPage({ onBack }: Props) {
 
       {error ? (
         <p className="mb-4 text-sm text-red-400">{error}</p>
+      ) : null}
+
+      {ciGate ? (
+        <section className="mb-6 rounded-2xl border border-zinc-800 bg-zinc-900/50 p-5">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-medium text-zinc-300">CI gate (P6)</h3>
+              <p className="mt-1 text-xs text-zinc-500">
+                Production matrix — threshold {ciGate.thresholdPercent}%
+              </p>
+            </div>
+            <p
+              className={`text-2xl font-semibold ${ciGate.meetsGate ? "text-emerald-400" : "text-red-400"}`}
+            >
+              {ciGate.passRatePercent}%
+            </p>
+          </div>
+          <p className="mt-2 text-sm text-zinc-400">
+            {ciGate.passed}/{ciGate.total} cases pass
+            {gateLoading ? " · rechecking…" : ""}
+          </p>
+        </section>
+      ) : gateLoading ? (
+        <p className="mb-4 text-sm text-zinc-500">Running CI gate check…</p>
       ) : null}
 
       {loading && !summary ? (
@@ -179,6 +224,29 @@ export function TelemetryPage({ onBack }: Props) {
                   >
                     <span>{a.appId}</span>
                     <span className="text-cyan-400">{a.openCount}×</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          <section className="rounded-2xl border border-zinc-800 bg-zinc-900/50 p-5 md:col-span-2">
+            <h3 className="text-sm font-medium text-zinc-300">Recent failures</h3>
+            {summary.recentFailures.length === 0 ? (
+              <p className="mt-2 text-sm text-zinc-500">No recent failures</p>
+            ) : (
+              <ul className="mt-3 space-y-2">
+                {summary.recentFailures.map((row, i) => (
+                  <li
+                    key={`${row.command}-${row.at}-${i}`}
+                    className="rounded-lg border border-zinc-800/80 px-3 py-2 text-sm"
+                  >
+                    <p className="truncate text-zinc-200">"{row.command}"</p>
+                    <p className="mt-1 text-xs text-zinc-500">
+                      {row.outcome ?? "unknown"}
+                      {row.planner_source ? ` · ${row.planner_source}` : ""}
+                      {row.detail ? ` · ${row.detail}` : ""}
+                    </p>
                   </li>
                 ))}
               </ul>

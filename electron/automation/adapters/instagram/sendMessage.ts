@@ -5,13 +5,14 @@ import {
 import { delay } from "../../delay.js";
 import { composeInstagramMessage } from "./composeMessage.js";
 import { openInstagramInBrowser, shouldUseInstagramActiveTab } from "./openInstagram.js";
+import { normalizeSpokenInstagramUsername } from "./instagramUsername.js";
 
 export async function sendInstagramMessage(args: {
   username: string;
   text: string;
   send: boolean;
 }): Promise<string> {
-  const user = args.username.trim().replace(/^@/, "");
+  const user = normalizeSpokenInstagramUsername(args.username.trim()).replace(/^@/, "");
   const text = args.text.trim();
   if (!user) throw new Error("Instagram username missing");
   if (!text) throw new Error("Instagram message text missing");

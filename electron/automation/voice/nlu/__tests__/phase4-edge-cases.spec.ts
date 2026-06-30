@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { nativeIntentFromLlmPlan } from "../intentFromLlm.js";
 import {
   isDesktopIntent,
@@ -10,8 +10,18 @@ import {
 } from "../desktopIntentGuard.js";
 import { parseDesktopIntent as pipelineParse } from "../pipeline.js";
 import { useFreshNluCache } from "./testHelpers.js";
+import { clearCapabilityCache } from "../../../../storage/capabilityCache.js";
+import { clearKnowledgeGraph } from "../../../../storage/knowledgeGraph.js";
+import { initRippleDb } from "../../../../storage/rippleDb.js";
 
 useFreshNluCache();
+beforeEach(() => {
+  initRippleDb();
+  clearCapabilityCache();
+  clearKnowledgeGraph();
+});
+
+const FOLDER_KINDS = new Set(["folder", "open_alias"]);
 
 describe("Phase 4 — negative / edge cases", () => {
   it("empty command returns null", () => {
@@ -32,7 +42,7 @@ describe("Phase 4 — negative / edge cases", () => {
     expect(isRegionalLanguageCommand("Hello world")).toBe(false);
   });
 
-  it("open browser alone is not native app (no browser in registry as launch)", () => {
+  it("open browser alone is not native app (no graph without my)", () => {
     const result = pipelineParse("Open browser");
     expect(result).toBeNull();
   });
@@ -42,9 +52,21 @@ describe("Phase 4 — negative / edge cases", () => {
     expect(result?.intent.kind).not.toBe("compound");
   });
 
+  it("splits multi-sentence open commands into compound steps", () => {
+    const result = parseDesktopIntent(
+      "Open last pdf I opened. Open last folder I opened",
+    );
+    expect(result?.intent.kind).toBe("compound");
+    if (result?.intent.kind === "compound") {
+      expect(result.intent.steps).toHaveLength(2);
+      expect(result.intent.steps[0]?.kind).toBe("recall_memory");
+      expect(result.intent.steps[1]?.kind).toBe("recall_memory");
+    }
+  });
+
   it("whitespace and punctuation normalized", () => {
     const result = parseDesktopIntent("  Open   Downloads.  ");
-    expect(result?.intent.kind).toBe("folder");
+    expect(FOLDER_KINDS.has(result?.intent.kind ?? "")).toBe(true);
   });
 });
 

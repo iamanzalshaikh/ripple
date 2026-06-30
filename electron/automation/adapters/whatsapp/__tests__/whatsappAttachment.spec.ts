@@ -5,18 +5,18 @@ import { tmpdir } from "node:os";
 import { prepareWhatsAppAttachment } from "../whatsappAttachment.js";
 
 describe("prepareWhatsAppAttachment", () => {
-  it("returns base64 payload for small files", () => {
+  it("returns base64 payload for small files", async () => {
     const dir = mkdtempSync(join(tmpdir(), "ripple-wa-"));
     const filePath = join(dir, "test.png");
     writeFileSync(filePath, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
 
-    const payload = prepareWhatsAppAttachment(filePath);
+    const payload = await prepareWhatsAppAttachment(filePath);
     expect(payload?.fileName).toBe("test.png");
     expect(payload?.mimeType).toBe("image/png");
     expect(payload?.base64.length).toBeGreaterThan(4);
   });
 
-  it("returns null for missing paths", () => {
-    expect(prepareWhatsAppAttachment("Z:\\no-such-file.bin")).toBeNull();
+  it("returns null for missing paths", async () => {
+    expect(await prepareWhatsAppAttachment("Z:\\no-such-file.bin")).toBeNull();
   });
 });

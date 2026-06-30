@@ -6,7 +6,7 @@ import { appMatchesRole, parseAppRolePhrase } from "../automation/desktop/appRol
 export type KnowledgeEntity = {
   key: string;
   path: string;
-  type: "file" | "folder" | "app" | "app_role" | "workflow";
+  type: "file" | "folder" | "project" | "app" | "app_role" | "workflow";
   composite_score: number;
   open_count?: number;
 };
@@ -92,29 +92,73 @@ export function confirmEntity(key: string): void {
     .run(now, now, key.trim().toLowerCase());
 }
 
-export function boostEntityFromOpen(key: string, path: string): void {
-  ensureTable();
+function inferEntityType(key: string, path: string): KnowledgeEntity["type"] {
   const normalized = key.trim().toLowerCase();
-  const existing = lookupEntity(normalized);
-  const openCount = (existing?.open_count ?? 0) + 1;
-  let type: KnowledgeEntity["type"] = "file";
+  let isDir = false;
   try {
-    if (existsSync(path) && statSync(path).isDirectory()) type = "folder";
+    isDir = existsSync(path) && statSync(path).isDirectory();
   } catch {
     /* keep file */
   }
+  if (!isDir) return "file";
+  if (
+    normalized === "project" ||
+    normalized === "my project" ||
+    normalized.endsWith(" project")
+  ) {
+    return "project";
+  }
+  return "folder";
+}
+
+function rememberBoostedEntity(
+  key: string,
+  path: string,
+  type: KnowledgeEntity["type"],
+  openCount: number,
+  confirmed: boolean,
+): void {
   const score = compositeScore({
     openCount,
     lastOpenedAtMs: Date.now(),
-    confirmedAtMs: existing ? Date.now() : null,
+    confirmedAtMs: confirmed ? Date.now() : null,
   });
   rememberEntity({
-    key: normalized,
+    key,
     path,
     type,
     composite_score: score,
     open_count: openCount,
   });
+}
+
+export function boostEntityFromOpen(key: string, path: string): void {
+  ensureTable();
+  const normalized = key.trim().toLowerCase();
+  const existing = lookupEntity(normalized);
+  const openCount = (existing?.open_count ?? 0) + 1;
+  const type = inferEntityType(normalized, path);
+  rememberBoostedEntity(normalized, path, type, openCount, Boolean(existing));
+
+  if (!normalized.startsWith("my ") && normalized.length >= 3) {
+    const myKey = `my ${normalized}`;
+    const myExisting = lookupEntity(myKey);
+    const myCount = (myExisting?.open_count ?? 0) + 1;
+    rememberBoostedEntity(myKey, path, type, myCount, Boolean(myExisting));
+  } else if (normalized.startsWith("my ")) {
+    const stripped = normalized.slice(3).trim();
+    if (stripped.length >= 2) {
+      const strippedExisting = lookupEntity(stripped);
+      const strippedCount = (strippedExisting?.open_count ?? 0) + 1;
+      rememberBoostedEntity(
+        stripped,
+        path,
+        type,
+        strippedCount,
+        Boolean(strippedExisting),
+      );
+    }
+  }
 }
 
 /** P5.5 — learn native app launches for role-based recall. */

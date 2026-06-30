@@ -180,6 +180,48 @@ function migrateRippleSchema(database: DatabaseSync): void {
       indexed_at TEXT NOT NULL
     )
   `);
+
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS life_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      label TEXT NOT NULL,
+      topic TEXT NOT NULL,
+      event_at TEXT NOT NULL,
+      end_at TEXT,
+      tags TEXT,
+      created_at TEXT NOT NULL
+    )
+  `);
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS idx_life_events_topic ON life_events(topic)
+  `);
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS idx_life_events_event_at ON life_events(event_at DESC)
+  `);
+
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS semantic_embeddings (
+      path TEXT PRIMARY KEY NOT NULL,
+      dims INTEGER NOT NULL,
+      embedding TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `);
+
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS semantic_refs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ref_key TEXT NOT NULL UNIQUE,
+      app_id TEXT,
+      contact TEXT,
+      summary TEXT NOT NULL,
+      embedding TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    )
+  `);
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS idx_semantic_refs_contact ON semantic_refs(contact)
+  `);
 }
 
 export function initRippleDb(): void {

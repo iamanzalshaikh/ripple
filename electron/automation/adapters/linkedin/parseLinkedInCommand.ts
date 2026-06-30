@@ -17,11 +17,16 @@ function mentionsLinkedIn(cmd: string): boolean {
 }
 
 function sanitizePeopleQuery(raw: string): string {
-  return raw
+  let q = raw
     .replace(/^(?:سرچ|تلاش|ڈھونڈ|کھوج)\s+/u, "")
     .replace(/\s+(?:لنکڈن|لنگڈین|لنک\s*ڈن|linkedin)\s*$/iu, "")
     .replace(/\s+(?:ہون|پر|on)\s*$/iu, "")
     .trim();
+
+  const dup = q.match(/^(.+?)\s*,\s*search\s+.+\s+on\s+linkedin\s*$/i);
+  if (dup?.[1]) q = dup[1].trim();
+
+  return q;
 }
 
 function mentionsOtherApps(cmd: string): boolean {
@@ -132,7 +137,7 @@ export function parseLinkedInCommand(command?: string | null): LinkedInIntent | 
     }
   }
 
-  if ((wantsSearchPeople(cmd) || (onLinkedIn && wantsSearch(cmd))) && (saidLinkedIn || onLinkedIn)) {
+  if (wantsSearch(cmd) && (saidLinkedIn || onLinkedIn)) {
     const query = extractPeopleQuery(cmd);
     if (query) return { kind: "search_people", query };
   }

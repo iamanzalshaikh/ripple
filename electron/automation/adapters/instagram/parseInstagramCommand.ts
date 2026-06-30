@@ -1,9 +1,15 @@
 import {
   isInstagramFocused,
   isInstagramTabActive,
+  isWhatsAppTabActive,
 } from "../../../focus/focusContext.js";
+import { isWhatsAppMessagingCommand } from "../whatsapp/parseContact.js";
 import { isEditOrRephraseCommand } from "../../commandIntent.js";
 import { normalizeTranscript } from "../../voice/normalizeTranscript.js";
+import {
+  isPlausibleInstagramHandle,
+  normalizeSpokenInstagramUsername,
+} from "./instagramUsername.js";
 
 export type InstagramIntent =
   | { kind: "open" }
@@ -29,15 +35,17 @@ function onInstagramTab(): boolean {
 }
 
 function cleanUsername(raw: string): string {
-  return raw
-    .trim()
-    .replace(/^@/, "")
-    .replace(/^to\s+/i, "")
-    .replace(/\s+on\s+instagram$/i, "")
-    .replace(/\s+in\s+instagram$/i, "")
-    .replace(/\s+and\s+send$/i, "")
-    .replace(/[.,;]+$/, "")
-    .replace(/\s{2,}/g, " ");
+  return normalizeSpokenInstagramUsername(
+    raw
+      .trim()
+      .replace(/^@/, "")
+      .replace(/^to\s+/i, "")
+      .replace(/\s+on\s+instagram$/i, "")
+      .replace(/\s+in\s+instagram$/i, "")
+      .replace(/\s+and\s+send$/i, "")
+      .replace(/[.,;]+$/, "")
+      .replace(/\s{2,}/g, " "),
+  );
 }
 
 function commandImpliesSend(cmd: string): boolean {
@@ -78,11 +86,19 @@ function parseMessageSayingOnInstagram(
 }
 
 function parseMessageUserSaying(cmd: string): { username: string; text: string } | null {
-  const m = cmd.match(
-    /^\s*message\s+(.+?)\s+(?:saying|and\s+say|ask)\s*[,]?\s*(.+)$/i,
-  );
-  if (!m?.[1]?.trim() || !m[2]?.trim()) return null;
-  return { username: cleanUsername(m[1]), text: cleanMessageText(m[2]) };
+  const patterns = [
+    /^\s*message\s+(.+?)\s+and\s+(?:say|ask)\s*[,]?\s*(.+)$/i,
+    /^\s*message\s+(.+?)\s+(?:saying|and\s+(?:say|ask))\s*[,]?\s*(.+)$/i,
+    /^\s*(?:dm|text)\s+(.+?)\s+and\s+(?:say|ask)\s*[,]?\s*(.+)$/i,
+  ];
+  for (const re of patterns) {
+    const m = cmd.match(re);
+    if (!m?.[1]?.trim() || !m[2]?.trim()) continue;
+    const username = cleanUsername(m[1]);
+    if (!isPlausibleInstagramHandle(username)) continue;
+    return { username, text: cleanMessageText(m[2]) };
+  }
+  return null;
 }
 
 function parseSendTextToUser(cmd: string): { username: string; text: string } | null {
@@ -116,14 +132,18 @@ function parseMessageUserOnInstagram(cmd: string): { username: string; text?: st
 
 function parseSearchAndSay(cmd: string): { username: string; text: string } | null {
   const patterns = [
+    /^\s*search\s+(@?[A-Za-z0-9][A-Za-z0-9._]{0,29})\s+on\s+instagram\s+and\s+(?:say|ask|message|tell)\s+(.+)$/i,
     /^\s*search\s+(.+?)\s+on\s+instagram\s+and\s+(?:say|ask|message|tell)\s+(.+)$/i,
     /^\s*search\s+(.+?)\s+on\s+instagram\s*,\s*(?:say|ask|message|tell)\s+(.+)$/i,
+    /^\s*search\s+(@?[A-Za-z0-9][A-Za-z0-9._]{0,29})\s+and\s+(?:say|ask|message|tell)\s+(.+)$/i,
     /^\s*search\s+(.+?)\s+and\s+(?:say|ask|message|tell)\s+(.+)$/i,
   ];
   for (const re of patterns) {
     const m = cmd.match(re);
     if (!m?.[1]?.trim() || !m[2]?.trim()) continue;
-    return { username: cleanUsername(m[1]), text: cleanMessageText(m[2]) };
+    const username = cleanUsername(m[1]);
+    if (!isPlausibleInstagramHandle(username)) continue;
+    return { username, text: cleanMessageText(m[2]) };
   }
   return null;
 }
@@ -159,7 +179,11 @@ function parseStructuredMessage(cmd: string): { username: string; text: string }
 
 /** Free-form DM text while an Instagram thread is open (no username in command). */
 function looksLikeNamedMessage(cmd: string): boolean {
-  if (/\bmake\s+it\s+(?:more\s+)?(?:emotional|confident|sad|angry|formal|casual)\b/i.test(cmd)) {
+  if (
+    /\bmake\s+it\s+(?:more\s+)?(?:emotional|confident|sad|angry|formal|casual|professional|friendly|warm|empathetic|playful|supportive|enthusiastic|sincere|caring|loving|funny|polite|gentle|romantic)\b/i.test(
+      cmd,
+    )
+  ) {
     return false;
   }
   return (
@@ -218,7 +242,15 @@ export function parseInstagramCommand(command?: string | null): InstagramIntent 
   const onInstagram = isInstagramFocused() || onInstagramTab();
   const saidInstagram = mentionsInstagram(cmd);
 
-  if (!saidInstagram && !onInstagram) return null;
+  if (isWhatsAppMessagingCommand(cmd) || isWhatsAppTabActive()) return null;
+
+  const structuredEarly = parseStructuredMessage(cmd);
+
+  if (!saidInstagram && !onInstagram) {
+    if (!structuredEarly || !/\b(message|dm|text|send|search)\b/i.test(cmd)) {
+      return null;
+    }
+  }
 
   if (onInstagram && isEditOrRephraseCommand(cmd)) return null;
 
@@ -236,9 +268,11 @@ export function parseInstagramCommand(command?: string | null): InstagramIntent 
   const parsed = parseStructuredMessage(cmd);
 
   if (parsed && (saidInstagram || onInstagram || /\b(message|dm|send|search)\b/i.test(cmd))) {
+    const username = cleanUsername(parsed.username);
+    if (!isPlausibleInstagramHandle(username)) return null;
     return {
       kind: "message",
-      username: parsed.username,
+      username,
       text: parsed.text,
       send: commandImpliesSend(cmd),
     };

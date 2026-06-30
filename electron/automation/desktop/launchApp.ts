@@ -3,6 +3,8 @@ import { promisify } from "node:util";
 import { hideOverlay } from "../../windows/overlay.js";
 import type { NativeAppEntry } from "./nativeAppRegistry.js";
 import { resolveLaunchTarget } from "./resolveLaunchTarget.js";
+import { focusAppWindow } from "./windowManager.js";
+import { delay } from "../delay.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -28,5 +30,12 @@ export async function launchNativeApp(app: NativeAppEntry): Promise<string> {
   );
 
   console.info(`[ripple-desktop] Launched ${app.id} → ${target}`);
-  return `Opened ${app.aliases[0] ?? app.id}`;
+
+  await delay(app.id === "file-explorer" ? 900 : 1400);
+  try {
+    await focusAppWindow(app);
+    return `Opened ${app.aliases[0] ?? app.id}`;
+  } catch {
+    return `Opened ${app.aliases[0] ?? app.id}`;
+  }
 }

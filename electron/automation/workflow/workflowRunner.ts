@@ -159,8 +159,9 @@ export async function runExpandedWorkflow(steps: RippleAction[]): Promise<string
     }
   } catch (e: unknown) {
     const rolled = await rollbackUndoTo(undoBefore, reverseUndoAction);
+    const base = e instanceof Error ? e.message : String(e);
     if (rolled.length > 0) {
-      details.push(`Workflow rolled back: ${rolled.join("; ")}`);
+      throw new Error(`${base} (rolled back: ${rolled.join("; ")})`);
     }
     throw e;
   }

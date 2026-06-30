@@ -1,12 +1,14 @@
 import { describe, expect, it, beforeEach } from "vitest";
-import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { initRippleDb, getRippleDb } from "../rippleDb.js";
 import {
   boostAppFromLaunch,
+  boostEntityFromOpen,
   clearKnowledgeGraph,
   lookupAppRole,
+  lookupEntity,
   rankEntities,
   rememberEntity,
 } from "../knowledgeGraph.js";
@@ -67,5 +69,15 @@ describe("knowledgeGraph P5.5 decay", () => {
     const role = lookupAppRole("my design app");
     expect(role?.path).toBe("figma");
     expect(role?.type).toBe("app_role");
+  });
+
+  it("tags project folders when key is my project", () => {
+    const projectPath = join(workDir, "Ripple");
+    mkdirSync(projectPath);
+    boostEntityFromOpen("my project", projectPath);
+
+    expect(lookupEntity("my project")?.type).toBe("project");
+    expect(lookupEntity("project")?.type).toBe("project");
+    expect(lookupEntity("project")?.path).toBe(projectPath);
   });
 });

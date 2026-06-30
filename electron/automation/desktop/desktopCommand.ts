@@ -67,6 +67,10 @@ function intentLabel(intent: NativeCommandIntent): string {
       return `referential_send:${intent.contact}`;
     case "compound":
       return `compound:${intent.label}`;
+    case "remember_life_event":
+      return `remember_life_event:${intent.label}`;
+    case "open_gmail_email":
+      return `gmail_email:${intent.senderQuery}`;
   }
 }
 
@@ -233,6 +237,20 @@ export function desktopBatchPayload(
         desktopKind: "referential_send",
         contact: intent.contact,
         sendMode: intent.mode,
+      };
+    case "remember_life_event":
+      return {
+        ...base,
+        desktopKind: "remember_life_event",
+        lifeEventLabel: intent.label,
+        lifeEventTopic: intent.topic,
+        lifeEventAt: intent.eventAt,
+      };
+    case "open_gmail_email":
+      return {
+        ...base,
+        desktopKind: "open_gmail_email",
+        gmailSenderQuery: intent.senderQuery,
       };
   }
 }

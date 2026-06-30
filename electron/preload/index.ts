@@ -89,6 +89,19 @@ const api = {
       message?: string;
       csv?: string;
     }>,
+  getCiGateStatus: () =>
+    ipcRenderer.invoke("telemetry:gate") as Promise<{
+      ok: boolean;
+      message?: string;
+      gate?: {
+        passed: number;
+        total: number;
+        passRatePercent: number;
+        thresholdPercent: number;
+        meetsGate: boolean;
+        failures: string[];
+      };
+    }>,
   getCommandHistory: (args?: {
     page?: number;
     limit?: number;
@@ -155,6 +168,37 @@ const api = {
   },
   isOverlay: () =>
     new URLSearchParams(window.location.search).get("overlay") === "1",
+  memory: {
+    ingestCrossApp: (args: {
+      appId: string;
+      summary: string;
+      path?: string;
+      contact?: string;
+      command?: string;
+      externalUrl?: string;
+    }) =>
+      ipcRenderer.invoke("memory:ingest-cross-app", args) as Promise<{
+        ok: boolean;
+        message?: string;
+      }>,
+    seedP8bTest: () =>
+      ipcRenderer.invoke("memory:seed-p8b-test") as Promise<{
+        ok: boolean;
+        data?: {
+          dir: string;
+          ahmedPdf: string;
+          goaPdf: string;
+          voiceCommands: string[];
+        };
+        message?: string;
+      }>,
+    probeSemantic: (phrase: string) =>
+      ipcRenderer.invoke("memory:probe-semantic", { phrase }) as Promise<{
+        ok: boolean;
+        embeddingPaths?: string[];
+        semanticRefs?: string[];
+      }>,
+  },
 };
 
 contextBridge.exposeInMainWorld("ripple", api);

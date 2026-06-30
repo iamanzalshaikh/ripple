@@ -125,6 +125,8 @@ export function parseAliasOpenCommand(
   }
 
   const spoken = openMatch[1].trim();
+  if (/^(?:move|rename|delete|send|copy|create)\b/i.test(spoken)) return null;
+
   const alias = resolveAliasForOpen(cmd, spoken);
   if (!alias) return null;
 

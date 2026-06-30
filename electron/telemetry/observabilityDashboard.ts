@@ -4,6 +4,7 @@ import {
   queryTelemetrySince,
   type CommandTelemetryEvent,
 } from "./commandTelemetry.js";
+import { evaluateCiGate, type CiGateResult } from "./ciGateStatus.js";
 import { listTopAppsForDashboard } from "../storage/knowledgeGraph.js";
 import { listTopWorkflowsForDashboard } from "../storage/workflowGraph.js";
 
@@ -22,7 +23,12 @@ export type ObservabilitySummary = {
   topWorkflows: Array<{ name: string; version: number; runCount: number }>;
   topApps: Array<{ appId: string; openCount: number; score: number }>;
   avgLatencyMs: number;
+  ciGate?: CiGateResult;
 };
+
+export function buildCiGateSummary(): CiGateResult {
+  return evaluateCiGate();
+}
 
 function loadEvents(limit = 500): CommandTelemetryEvent[] {
   const fromDb = queryTelemetryFromDb(limit);

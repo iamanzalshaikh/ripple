@@ -6,19 +6,34 @@ import { setMemory } from "./sessionMemory.js";
 import { trackPathOpen } from "./autoAlias.js";
 import { setCapabilityCacheEntry } from "./capabilityCache.js";
 import { boostEntityFromOpen, boostAppFromLaunch } from "./knowledgeGraph.js";
+import { isJunkRecallPath } from "../automation/retriever/pathRecallFilters.js";
+import { parseGmailOpenEmailCommand } from "../automation/gmail/parseGmailOpenEmail.js";
 import { recordTrustSignal } from "./actionTrust.js";
 import { resolveFolderPath } from "../automation/desktop/openFolder.js";
-import {
-  appendActivityLog,
-  summarizeActivity,
-} from "./activityLog.js";
-import { upsertSemanticIndex } from "./semanticIndex.js";
+import { touchPathFromDesktopData } from "./recordFileTouch.js";
 
 function spokenKeyFromCommand(command: string): string | null {
   const open = command.match(/\bopen\s+(?:my\s+|the\s+)?(.+?)\s*$/i);
   const launch = command.match(/\b(?:launch|start)\s+(?:my\s+|the\s+)?(.+?)\s*$/i);
   const key = (open?.[1] ?? launch?.[1])?.trim().toLowerCase();
-  return key && key.length >= 2 ? key : null;
+  if (!key || key.length < 2) return null;
+
+  // Do not cache memory-style commands; they should resolve from session memory,
+  // not become sticky capability-cache aliases to the last opened file.
+  if (
+    /\b(?:last|previous)\s+(?:pdf|video|image|photo|picture|file|folder|project|workspace|app)\b/i.test(
+      key,
+    ) ||
+    /\b(?:i|we)\s+(?:had\s+)?open(?:ed)?\b/i.test(key) ||
+    /\bgo\s+back\b/i.test(key)
+  ) {
+    return null;
+  }
+
+  // Skip accidental multi-command transcripts ("open A. open B").
+  if (/[.!?]\s+open\b/i.test(command)) return null;
+
+  return key;
 }
 
 export function extractPathFromResult(result: string): string | null {
@@ -57,6 +72,19 @@ function rememberLastPdf(path: string): void {
   console.info(`[ripple-desktop] memory last_pdf → ${path}`);
 }
 
+function rememberLastMedia(path: string): void {
+  if (!path?.trim()) return;
+  const lower = path.toLowerCase();
+  if (/\.(?:mp4|mkv|avi|mov|wmv|webm|m4v|3gp|mpeg|mpg)$/i.test(lower)) {
+    setMemory("last_video", path.trim());
+    console.info(`[ripple-desktop] memory last_video → ${path}`);
+  }
+  if (/\.(?:png|jpe?g|webp|gif|bmp|svg|heic)$/i.test(lower)) {
+    setMemory("last_image", path.trim());
+    console.info(`[ripple-desktop] memory last_image → ${path}`);
+  }
+}
+
 /** Update session memory from a successful desktop action. */
 export function updateMemoryFromDesktopAction(
   kind: string | undefined,
@@ -84,6 +112,7 @@ export function updateMemoryFromDesktopAction(
           setMemory("last_file", resolvedPath);
           rememberLastOpened("file", resolvedPath);
           rememberLastPdf(resolvedPath);
+          rememberLastMedia(resolvedPath);
         }
         break;
       case "item":
@@ -98,6 +127,7 @@ export function updateMemoryFromDesktopAction(
             setMemory("last_file", resolvedPath);
             rememberLastOpened("file", resolvedPath);
             rememberLastPdf(resolvedPath);
+            rememberLastMedia(resolvedPath);
           }
         }
         break;
@@ -112,6 +142,7 @@ export function updateMemoryFromDesktopAction(
             setMemory("last_file", resolvedPath);
             rememberLastOpened("file", resolvedPath);
             rememberLastPdf(resolvedPath);
+            rememberLastMedia(resolvedPath);
           }
         }
         break;
@@ -124,6 +155,7 @@ export function updateMemoryFromDesktopAction(
           setMemory("last_file", aliasPath);
           rememberLastOpened("file", aliasPath);
           rememberLastPdf(aliasPath);
+          rememberLastMedia(aliasPath);
         } else if (aliasType === "workspace" || /^https?:\/\//i.test(aliasPath)) {
           setMemory("last_workspace", aliasPath);
           rememberLastOpened("workspace", aliasPath);
@@ -156,7 +188,10 @@ export function updateMemoryFromDesktopAction(
         if (resolvedPath && existsSync(resolvedPath)) {
           const st = statSync(resolvedPath);
           rememberLastOpened(st.isDirectory() ? "folder" : "file", resolvedPath);
-          if (!st.isDirectory()) rememberLastPdf(resolvedPath);
+          if (!st.isDirectory()) {
+            rememberLastPdf(resolvedPath);
+            rememberLastMedia(resolvedPath);
+          }
         }
         break;
       case "move_file":
@@ -165,6 +200,7 @@ export function updateMemoryFromDesktopAction(
           setMemory("last_file", resolvedPath);
           rememberLastOpened("file", resolvedPath);
           rememberLastPdf(resolvedPath);
+          rememberLastMedia(resolvedPath);
         }
         break;
       default:
@@ -188,7 +224,9 @@ export function recordDesktopActionOutcome(args: {
   const resolvedPath =
     typeof args.data?.resolvedPath === "string"
       ? args.data.resolvedPath
-      : extractPathFromResult(args.result ?? "");
+      : typeof args.data?.sourcePath === "string"
+        ? args.data.sourcePath
+        : extractPathFromResult(args.result ?? "");
 
   try {
     appendDesktopHistory({
@@ -222,28 +260,15 @@ export function recordDesktopActionOutcome(args: {
       if (resolvedPath) {
         trackPathOpen(resolvedPath, args.command);
         const key = spokenKeyFromCommand(args.command);
-        if (key) {
+        const isGmailEmail = Boolean(parseGmailOpenEmailCommand(args.command));
+        if (key && !isGmailEmail && !isJunkRecallPath(resolvedPath)) {
           setCapabilityCacheEntry(key, resolvedPath, 0.99);
           boostEntityFromOpen(key, resolvedPath);
           recordTrustSignal(key, "success");
         }
-        const contact =
-          typeof args.data?.contact === "string" ? args.data.contact : undefined;
-        const appId =
-          typeof args.data?.appId === "string" ? args.data.appId : undefined;
-        appendActivityLog({
-          path: resolvedPath,
-          app_id: appId,
-          contact,
-          command: args.command,
-          summary: summarizeActivity(resolvedPath, args.command),
-        });
-        upsertSemanticIndex({
-          path: resolvedPath,
-          command: args.command,
-          contact,
-          appId,
-        });
+        if (kind !== "referential_send") {
+          touchPathFromDesktopData(args.data, args.command, kind);
+        }
       }
     }
   } catch (e: unknown) {

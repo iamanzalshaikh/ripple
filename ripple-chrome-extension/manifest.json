@@ -1,14 +1,17 @@
 {
   "manifest_version": 3,
-  "name": "Ripple Bridge (WhatsApp + YouTube + LinkedIn + Instagram)",
-  "version": "1.6.1",
-  "description": "Ripple automation via Native Messaging (production).",
+  "name": "Ripple Bridge (WhatsApp + YouTube + LinkedIn + Instagram + Gmail + Slack)",
+  "version": "1.7.1",
+  "description": "Ripple automation + P8b Gmail/Slack memory ingest via Native Messaging.",
   "permissions": ["nativeMessaging", "tabs", "scripting"],
   "host_permissions": [
     "https://web.whatsapp.com/*",
     "https://www.youtube.com/*",
     "https://www.linkedin.com/*",
-    "https://www.instagram.com/*"
+    "https://www.instagram.com/*",
+    "https://mail.google.com/*",
+    "https://app.slack.com/*",
+    "https://*.slack.com/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -32,6 +35,16 @@
     {
       "matches": ["https://www.instagram.com/*"],
       "js": ["instagramContent.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://mail.google.com/*"],
+      "js": ["gmailContent.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://app.slack.com/*", "https://*.slack.com/*"],
+      "js": ["slackContent.js"],
       "run_at": "document_idle"
     }
   ]

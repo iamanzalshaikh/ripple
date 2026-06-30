@@ -31,6 +31,8 @@ import {
   primaryToolFromPayload,
 } from "../automation/safety/actionLimiter.js";
 import { buildDesktopCommandResult } from "../automation/desktop/desktopCommand.js";
+import { commandPayloadFromIntent } from "../automation/desktop/desktopCommand.js";
+import { parseUndoCommand } from "../automation/desktop/parseUndoCommand.js";
 import { shouldSkipFastPathForGpt } from "../automation/voice/nlu/aiFirstRouting.js";
 import { parseWorkflowMetaCommand } from "../automation/desktop/parseWorkflowCommand.js";
 import { isRememberWorkflowPhrase } from "../automation/desktop/spokenName.js";
@@ -38,17 +40,22 @@ import { commandPayloadFromResolvedPath } from "../automation/desktop/desktopCom
 import { pickItemFromMatches } from "../automation/desktop/disambiguation.js";
 import { confirmEntity, boostEntityFromOpen } from "../storage/knowledgeGraph.js";
 import { setCapabilityCacheEntry } from "../storage/capabilityCache.js";
-import { recordTrustSignal } from "../storage/actionTrust.js";
+import { recordFileTouch } from "../storage/recordFileTouch.js";
 import { buildReferentialWhatsAppResult } from "../automation/adapters/whatsapp/buildReferentialWhatsApp.js";
 import { buildWhatsAppCommandResult } from "../automation/adapters/whatsapp/whatsappCommand.js";
 import { clearPreprocessCache } from "../automation/voice/nlu/preprocess.js";
-import { recordCommandEvent } from "../telemetry/commandTelemetry.js";
+import { recordCommandEvent, type PlannerSource } from "../telemetry/commandTelemetry.js";
+import { parseGraphOpenCommand } from "../automation/desktop/parseGraphOpenCommand.js";
 import {
   recordConversationTurn,
   type TurnOutcome,
 } from "../storage/conversationContext.js";
 import type { CommandResultPayload } from "../automation/types.js";
 import { runCommandActions } from "../automation/actionRunner.js";
+import {
+  getPermissionBlockMessage,
+  PermissionBlockedError,
+} from "../automation/safety/permissionGate.js";
 import { setLastCommandIntent } from "../state/lastCommand.js";
 import { rippleSocket } from "../socket/rippleSocket.js";
 import {
@@ -148,6 +155,30 @@ function trackActionUse(payload: CommandResultPayload): void {
   } catch {
     /* optional */
   }
+}
+
+function plannerSourceForFastPath(command: string): PlannerSource {
+  if (parseGraphOpenCommand(command)) return "graph";
+  return "fast";
+}
+
+function recordExecutionTelemetry(
+  command: string,
+  payload: CommandResultPayload,
+  execution: Awaited<ReturnType<typeof runCommandActions>> | undefined,
+  planner_source: PlannerSource,
+  extra?: { latency_ms?: number; detail?: string },
+): void {
+  if (!execution) return;
+  const ok = execution.records.filter((r) => r.status === "executed").length;
+  recordCommandEvent({
+    command,
+    outcome: ok > 0 ? "success" : "error",
+    planner_source,
+    intent: payload.intent,
+    latency_ms: extra?.latency_ms,
+    detail: extra?.detail,
+  });
 }
 
 function rateLimited(payload: CommandResultPayload): string | null {
@@ -279,6 +310,31 @@ export async function runDesktopCommand(
   try {
     clearPreprocessCache();
 
+    const undoIntent =
+      parseUndoCommand(input.command) ??
+      parseUndoCommand(repairCorruptedTranscript(input.command));
+    if (undoIntent) {
+      const undoPayload = commandPayloadFromIntent(
+        undoIntent,
+        input.command.trim(),
+        " (undo)",
+      );
+      console.info(
+        `[ripple-desktop] command:result intent=workflow (undo) id=${undoPayload.command_id}`,
+      );
+      setLastCommandIntent(undoPayload.intent);
+      const execution = await runCommandActions(undoPayload, sendActionAckSafe);
+      recordExecutionTelemetry(
+        input.command,
+        undoPayload,
+        execution,
+        "fast",
+        { detail: "undo" },
+      );
+      logConversationTurn(input.command, "success", { intent: undoPayload.intent });
+      return { ok: true, data: { ...undoPayload, execution } };
+    }
+
     const referentialWa = buildReferentialWhatsAppResult(input.command);
     if (referentialWa?.actions?.length && referentialWa.command_id) {
       console.info(
@@ -286,6 +342,13 @@ export async function runDesktopCommand(
       );
       setLastCommandIntent(referentialWa.intent);
       const execution = await runCommandActions(referentialWa, sendActionAckSafe);
+      recordExecutionTelemetry(
+        input.command,
+        referentialWa,
+        execution,
+        "fast",
+        { detail: "referential_whatsapp" },
+      );
       logConversationTurn(input.command, "success", { intent: referentialWa.intent });
       return { ok: true, data: { ...referentialWa, execution } };
     }
@@ -303,6 +366,13 @@ export async function runDesktopCommand(
           `[ripple-desktop] actions done: ${ok}/${execution.records.length} succeeded`,
         );
       }
+      recordExecutionTelemetry(
+        input.command,
+        linkedinEarly,
+        execution,
+        "fast",
+        { detail: "linkedin-local" },
+      );
       return { ok: true, data: { ...linkedinEarly, execution } };
     }
 
@@ -323,6 +393,13 @@ export async function runDesktopCommand(
           );
         }
         logConversationTurn(input.command, "success", { intent: waEarly.intent });
+        recordExecutionTelemetry(
+          input.command,
+          waEarly,
+          execution,
+          "fast",
+          { detail: "whatsapp-early" },
+        );
         return { ok: true, data: { ...waEarly, execution } };
       }
     }
@@ -344,6 +421,13 @@ export async function runDesktopCommand(
           );
         }
         logConversationTurn(input.command, "success", { intent: waMention.intent });
+        recordExecutionTelemetry(
+          input.command,
+          waMention,
+          execution,
+          "fast",
+          { detail: "whatsapp-mention" },
+        );
         return { ok: true, data: { ...waMention, execution } };
       }
     }
@@ -368,6 +452,13 @@ export async function runDesktopCommand(
             `[ripple-desktop] actions done: ${ok}/${execution.records.length} succeeded`,
           );
         }
+        recordExecutionTelemetry(
+          input.command,
+          youtubeEarly,
+          execution,
+          "fast",
+          { detail: "youtube-local" },
+        );
         return { ok: true, data: { ...youtubeEarly, execution } };
       }
     }
@@ -378,6 +469,21 @@ export async function runDesktopCommand(
       desktopFast.command_id &&
       !shouldSkipFastPathForGpt(input.command)
     ) {
+      const permissionBlocked = getPermissionBlockMessage(
+        input.command,
+        desktopFast,
+      );
+      if (permissionBlocked) {
+        recordCommandEvent({
+          command: input.command,
+          outcome: "blocked",
+          permission: "blocked",
+          planner_source: plannerSourceForFastPath(input.command),
+          detail: permissionBlocked.slice(0, 200),
+        });
+        logConversationTurn(input.command, "blocked");
+        return { ok: false, message: permissionBlocked };
+      }
       const limited = rateLimited(desktopFast);
       if (limited) {
         recordCommandEvent({
@@ -397,13 +503,13 @@ export async function runDesktopCommand(
         console.info(
           `[ripple-desktop] actions done: ${ok}/${execution.records.length} succeeded`,
         );
-        recordCommandEvent({
-          command: input.command,
-          outcome: ok > 0 ? "success" : "error",
-          planner_source: "fast",
-          intent: desktopFast.intent,
-        });
       }
+      recordExecutionTelemetry(
+        input.command,
+        desktopFast,
+        execution,
+        plannerSourceForFastPath(input.command),
+      );
       logConversationTurn(input.command, "success", { intent: desktopFast.intent });
       trackActionUse(desktopFast);
       return { ok: true, data: { ...desktopFast, execution } };
@@ -422,6 +528,13 @@ export async function runDesktopCommand(
           `[ripple-desktop] actions done: ${ok}/${execution.records.length} succeeded`,
         );
       }
+      recordExecutionTelemetry(
+        input.command,
+        whatsappOnly,
+        execution,
+        "fast",
+        { detail: "whatsapp-local" },
+      );
       return { ok: true, data: { ...whatsappOnly, execution } };
     }
 
@@ -532,6 +645,11 @@ export async function runDesktopCommand(
           paths,
         );
         if (picked) {
+          recordFileTouch({
+            path: picked,
+            command: input.command,
+            source: "clarify",
+          });
           const key = input.command.match(/\bopen\s+(?:my\s+|the\s+)?(.+?)\s*$/i)?.[1]
             ?.trim()
             .toLowerCase();
@@ -567,6 +685,13 @@ export async function runDesktopCommand(
         });
         return { ok: false, message: "Cancelled — pick which file you meant" };
       }
+      recordCommandEvent({
+        command: input.command,
+        outcome: "clarify",
+        planner_source: "offline",
+        latency_ms: planLatencyMs,
+        detail: "clarify_pending",
+      });
       return {
         ok: false,
         message: planned.question,
@@ -586,6 +711,13 @@ export async function runDesktopCommand(
           `[ripple-desktop] actions done: ${ok}/${execution.records.length} succeeded`,
         );
       }
+      recordExecutionTelemetry(
+        input.command,
+        notionOnly,
+        execution,
+        "fast",
+        { detail: "notion-local" },
+      );
       return { ok: true, data: { ...notionOnly, execution } };
     }
 
@@ -602,6 +734,13 @@ export async function runDesktopCommand(
           `[ripple-desktop] actions done: ${ok}/${execution.records.length} succeeded`,
         );
       }
+      recordExecutionTelemetry(
+        input.command,
+        youtubeOnly,
+        execution,
+        "fast",
+        { detail: "youtube-local" },
+      );
       return { ok: true, data: { ...youtubeOnly, execution } };
     }
 
@@ -618,6 +757,13 @@ export async function runDesktopCommand(
           `[ripple-desktop] actions done: ${ok}/${execution.records.length} succeeded`,
         );
       }
+      recordExecutionTelemetry(
+        input.command,
+        linkedinOnly,
+        execution,
+        "fast",
+        { detail: "linkedin-local" },
+      );
       return { ok: true, data: { ...linkedinOnly, execution } };
     }
 
@@ -638,11 +784,33 @@ export async function runDesktopCommand(
           `[ripple-desktop] actions done: ${ok}/${execution.records.length} succeeded`,
         );
       }
+      recordExecutionTelemetry(
+        input.command,
+        instagramOnly,
+        execution,
+        "fast",
+        { detail: "instagram-local" },
+      );
       return { ok: true, data: { ...instagramOnly, execution } };
     }
 
     return runBackendCommandFlow(input);
   } catch (e: unknown) {
+    if (e instanceof PermissionBlockedError) {
+      recordCommandEvent({
+        command: input.command,
+        outcome: "blocked",
+        permission: "blocked",
+        detail: e.message.slice(0, 200),
+      });
+      logConversationTurn(input.command, "blocked");
+      return { ok: false, message: e.message };
+    }
+    recordCommandEvent({
+      command: input.command,
+      outcome: "error",
+      detail: e instanceof Error ? e.message.slice(0, 200) : "unknown",
+    });
     logConversationTurn(input.command, "error");
     return {
       ok: false,

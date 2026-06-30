@@ -1,5 +1,6 @@
 import { BrowserWindow } from "electron";
 import { dismissOverlay } from "../windows/overlay.js";
+import { enforceCommandPermission } from "./safety/permissionGate.js";
 import { executeSingleAction } from "./executeAction.js";
 import type {
   ActionAckPayload,
@@ -36,6 +37,8 @@ export async function runCommandActions(
   if (!commandId || actions.length === 0) {
     return null;
   }
+
+  enforceCommandPermission(result);
 
   const records: ActionRunRecord[] = [];
 

@@ -66,7 +66,12 @@ import {
   rebuildFileIndex,
   startFileIndexBackground,
 } from "../storage/fileIndex.js";
-import { buildObservabilitySummary, exportTelemetryCsv } from "../telemetry/observabilityDashboard.js";
+import { startSemanticIndexBackfill } from "../storage/recordFileTouch.js";
+import { pruneActivityLogOlderThan } from "../storage/activityLog.js";
+import { ingestCrossAppReference } from "../storage/crossAppIngest.js";
+import { probeP8bSearch, seedP8bTestData } from "../storage/p8bTestSeed.js";
+import { startMediaFocusWatcher } from "../focus/focusContext.js";
+import { buildObservabilitySummary, buildCiGateSummary, exportTelemetryCsv } from "../telemetry/observabilityDashboard.js";
 import { getNativeCapabilities, initNativeHost } from "../native/nativeHost.js";
 import { bootstrapDemoSeeds } from "../storage/bootstrapSeeds.js";
 import { runPreflightHealth } from "../services/preflightHealth.js";
@@ -558,6 +563,17 @@ function registerIpc(): void {
     }
   });
 
+  ipcMain.handle("telemetry:gate", async () => {
+    try {
+      return { ok: true, gate: buildCiGateSummary() };
+    } catch (e: unknown) {
+      return {
+        ok: false,
+        message: e instanceof Error ? e.message : "CI gate unavailable",
+      };
+    }
+  });
+
   ipcMain.handle("native:capabilities", async () => {
     try {
       return {
@@ -578,6 +594,95 @@ function registerIpc(): void {
     if (!active) setOverlayState("idle");
     return { ok: true };
   });
+
+  /** P8b — extension / bridge records email, Slack, etc. file references. */
+  ipcMain.handle(
+    "memory:ingest-cross-app",
+    async (
+      _e,
+      args: {
+        appId?: string;
+        summary?: string;
+        path?: string;
+        contact?: string;
+        command?: string;
+        externalUrl?: string;
+      },
+    ) => {
+      try {
+        const appId = args.appId?.trim().toLowerCase();
+        const summary = args.summary?.trim();
+        if (!appId || !summary) {
+          return { ok: false, message: "appId and summary required" };
+        }
+        const allowed = new Set([
+          "gmail",
+          "slack",
+          "email",
+          "whatsapp",
+          "teams",
+          "outlook",
+        ]);
+        if (!allowed.has(appId)) {
+          return { ok: false, message: `Unsupported appId: ${appId}` };
+        }
+        ingestCrossAppReference({
+          appId: appId as import("../storage/crossAppIngest.js").CrossAppId,
+          summary,
+          path: args.path ?? null,
+          contact: args.contact ?? null,
+          command: args.command ?? null,
+          externalUrl: args.externalUrl ?? null,
+        });
+        return { ok: true };
+      } catch (e: unknown) {
+        return {
+          ok: false,
+          message: e instanceof Error ? e.message : "Ingest failed",
+        };
+      }
+    },
+  );
+
+  ipcMain.handle("memory:seed-p8b-test", async () => {
+    try {
+      const data = seedP8bTestData();
+      return {
+        ok: true,
+        data: {
+          ...data,
+          voiceCommands: [
+            "Open PDF I discussed with Ahmed",
+            "Open that thing Sarah sent",
+            "Remember my Goa trip was March 15 2025",
+            "Open pdf before my Goa trip",
+          ],
+        },
+      };
+    } catch (e: unknown) {
+      return {
+        ok: false,
+        message: e instanceof Error ? e.message : "Seed failed",
+      };
+    }
+  });
+
+  ipcMain.handle(
+    "memory:probe-semantic",
+    async (_e, args: { phrase?: string }) => {
+      const phrase = args.phrase?.trim();
+      if (!phrase) return { ok: false, message: "phrase required" };
+      try {
+        const probe = probeP8bSearch(phrase);
+        return { ok: true, ...probe };
+      } catch (e: unknown) {
+        return {
+          ok: false,
+          message: e instanceof Error ? e.message : "Probe failed",
+        };
+      }
+    },
+  );
 }
 
 if (gotSingleInstanceLock) {
@@ -592,6 +697,9 @@ app.whenReady().then(async () => {
   await initNativeHost();
   initNativeAppRegistry();
   startFileIndexBackground();
+  startSemanticIndexBackfill();
+  pruneActivityLogOlderThan(9);
+  startMediaFocusWatcher();
   startFileIndexWatcher();
   startAppDiscoveryBackground();
   scanInstalledApps()

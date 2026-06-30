@@ -103,6 +103,16 @@ function parseCasualSmartSearch(cmd: string): SmartSearchIntent | null {
   if (nameSearch?.[1]) {
     const token = nameSearch[1].trim().toLowerCase();
     if (/\band\s+(?:say|text|message|ask)\b/.test(token)) return null;
+    if (
+      /\b(?:on|in|at)\s+(?:linkedin|instagram|youtube|notion|whatsapp|gmail|google\s*mail|facebook|twitter)\b/i.test(
+        lower,
+      ) ||
+      /\b(?:linkedin|instagram|youtube|notion|whatsapp|gmail|slack|discord)\b/i.test(
+        lower,
+      )
+    ) {
+      return null;
+    }
     if (/\bon\s+whatsapp\b/i.test(lower) || /\bwhatsapp\b/i.test(lower)) {
       return null;
     }

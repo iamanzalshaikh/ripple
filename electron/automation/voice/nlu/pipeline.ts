@@ -1,10 +1,20 @@
 import type { NativeCommandIntent } from "../../desktop/parseNativeCommand.js";
 import { parseNativeCommandStrict } from "../../desktop/parseNativeCommand.js";
+import { parseUndoCommand } from "../../desktop/parseUndoCommand.js";
 import { parseCompoundIntent } from "./compoundParse.js";
 import { parseByIntentClassifier } from "./intentClassifier.js";
 import { parseNluFallback } from "./intentExtract.js";
 import { preprocessForNlu, type NluPreprocessResult } from "./preprocess.js";
 import { parseSessionMemoryCommand } from "../../desktop/parseSessionMemoryCommand.js";
+import { parseSmartSearchCommand } from "../../desktop/parseSmartSearchCommand.js";
+import {
+  parseRememberLifeEventCommand,
+  type RememberLifeEventIntent,
+} from "../../retriever/parseSemanticOpen.js";
+import { parseGmailOpenEmailCommand } from "../../gmail/parseGmailOpenEmail.js";
+import { isTemporalFileOpenQuery } from "../../retriever/timeRange.js";
+
+export type { RememberLifeEventIntent };
 
 export type { NluPreprocessResult };
 export { preprocessForNlu };
@@ -25,6 +35,58 @@ export function parseDesktopIntent(
   if (!preprocessed.nlu) return null;
 
   const { nlu, raw, changed } = preprocessed;
+
+  // P4.7 — undo before recall/compound so "wapas karo" is never misrouted.
+  const undoEarly =
+    parseUndoCommand(raw) ?? parseUndoCommand(nlu);
+  if (undoEarly) {
+    return { intent: undoEarly, viaNlu: changed, preprocessed };
+  }
+
+  const rememberLife =
+    parseRememberLifeEventCommand(nlu) ?? parseRememberLifeEventCommand(raw);
+  if (rememberLife) {
+    return {
+      intent: { kind: "remember_life_event", ...rememberLife },
+      viaNlu: changed,
+      preprocessed,
+    };
+  }
+
+  const gmailEmail =
+    parseGmailOpenEmailCommand(raw) ?? parseGmailOpenEmailCommand(nlu);
+  if (gmailEmail) {
+    return { intent: gmailEmail, viaNlu: changed, preprocessed };
+  }
+
+  const smartSearch =
+    parseSmartSearchCommand(raw) ?? parseSmartSearchCommand(nlu);
+  if (smartSearch?.query.type === "semantic_topic") {
+    return { intent: smartSearch, viaNlu: changed, preprocessed };
+  }
+
+  // Time-based file open — before recall:pdf ("open pdf I opened 2 months ago").
+  if (
+    smartSearch?.query.type === "time_ranged" ||
+    (smartSearch &&
+      (isTemporalFileOpenQuery(raw) || isTemporalFileOpenQuery(nlu)))
+  ) {
+    return { intent: smartSearch, viaNlu: changed, preprocessed };
+  }
+
+  // Multi-sentence compound should run before recall so
+  // "Open last pdf... Open last folder..." does not get truncated to first recall.
+  const looksMultiClause =
+    /[.!?]\s+(?=(?:please\s+|kindly\s+)?(?:open|show|find|search|send|launch|start|switch|go)\b)/i.test(
+      nlu,
+    ) ||
+    /\s+(?:and|aur|then|phir|plus|\+)\s+/i.test(nlu);
+  if (looksMultiClause) {
+    const compoundEarly = parseCompoundIntent(nlu, raw);
+    if (compoundEarly) {
+      return { intent: compoundEarly, viaNlu: true, preprocessed };
+    }
+  }
 
   // Recall before NLU filler maps can mangle "bring it back" → "open it back".
   const recallEarly =

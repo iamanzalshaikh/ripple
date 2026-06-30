@@ -1,5 +1,8 @@
 import { getForegroundWindow, focusWindowByHwnd } from "../native/win32Bridge.js";
 import { getMemory, setMemory } from "../storage/sessionMemory.js";
+import { rememberPdfFromFocus } from "../automation/desktop/pdfFocusMemory.js";
+import { rememberMediaFromFocus } from "../automation/desktop/mediaFocusMemory.js";
+import { rememberFolderFromFocus } from "../automation/desktop/folderFocusMemory.js";
 
 const STICKY_WEB_MS = 15 * 60 * 1000;
 
@@ -275,6 +278,19 @@ export function isWhatsAppTabActive(): boolean {
   return getStickyWebSurface() === "whatsapp";
 }
 
+/** Gmail tab in browser (inbox or thread) — not compose-only. */
+export function isGmailTabActive(): boolean {
+  const ctx = saved;
+  if (ctx) {
+    if (isClearlyDesktopForeground(ctx)) return false;
+    if (ctx.isGmail) return true;
+    if (ctx.activeTabUrl && /mail\.google\.com/i.test(ctx.activeTabUrl)) return true;
+    if (detectGmail(ctx.windowTitle, ctx.processName)) return true;
+    return false;
+  }
+  return getStickyWebSurface() === "gmail";
+}
+
 /** Gmail compose window (not inbox) — in-place edit / Urdu voice. */
 export function isGmailComposeFocused(): boolean {
   const ctx = saved;
@@ -375,6 +391,9 @@ export async function captureFocusContext(): Promise<FocusContext | null> {
     const enriched = await enrichContextFromExtension(ctx);
     saved = enriched;
     rememberWebSurface(enriched);
+    rememberPdfFromFocus(enriched);
+    rememberMediaFromFocus(enriched);
+    rememberFolderFromFocus(enriched);
     console.info(
       `[ripple-desktop] focus captured: ${enriched.processName} | "${enriched.windowTitle.slice(0, 60)}" | gmail=${enriched.isGmail} whatsapp=${enriched.isWhatsApp} notion=${enriched.isNotion} youtube=${enriched.isYouTube} linkedin=${enriched.isLinkedIn} instagram=${enriched.isInstagram}${enriched.activeTabUrl ? ` url=${enriched.activeTabUrl.slice(0, 50)}` : ""}`,
     );
@@ -389,14 +408,63 @@ export async function captureFocusContext(): Promise<FocusContext | null> {
   }
 }
 
-/** Re-read active tab URL from extension before command routing. */
+/** Re-read focus + extension tab URL before command routing. */
 export async function refreshFocusFromExtension(): Promise<FocusContext | null> {
-  const ctx = saved ?? (await captureFocusContext());
+  await captureFocusContext();
+  const ctx = saved;
   if (!ctx) return null;
   const enriched = await enrichContextFromExtension(ctx);
   saved = enriched;
   rememberWebSurface(enriched);
+  rememberPdfFromFocus(enriched);
+  rememberMediaFromFocus(enriched);
+  rememberFolderFromFocus(enriched);
   return enriched;
+}
+
+const P8_FOCUS_POLL_MS = 2000;
+const P8_FOCUS_BURST_MS = 500;
+const P8_BURST_DURATION_MS = 12_000;
+let p8FocusTimer: ReturnType<typeof setTimeout> | null = null;
+let p8BurstUntil = 0;
+
+function isExplorerOrShellProcess(processName: string): boolean {
+  const p = processName.toLowerCase();
+  return (
+    p === "explorer" ||
+    p.includes("photos") ||
+    p.includes("applicationframehost") ||
+    p.includes("dllhost")
+  );
+}
+
+function scheduleP8FocusPoll(intervalMs: number): void {
+  if (p8FocusTimer) clearTimeout(p8FocusTimer);
+  p8FocusTimer = setTimeout(() => {
+    void (async () => {
+      try {
+        const ctx = await captureFocusContext();
+        if (ctx && isExplorerOrShellProcess(ctx.processName)) {
+          p8BurstUntil = Date.now() + P8_BURST_DURATION_MS;
+        }
+      } catch {
+        /* ignore poll errors */
+      } finally {
+        const delay =
+          Date.now() < p8BurstUntil ? P8_FOCUS_BURST_MS : intervalMs;
+        scheduleP8FocusPoll(delay);
+      }
+    })();
+  }, intervalMs);
+}
+
+/** Poll foreground — tracks pdf, image, video, folder views into activity_log (P8). */
+export function startMediaFocusWatcher(intervalMs = P8_FOCUS_POLL_MS): void {
+  if (p8FocusTimer || process.platform !== "win32") return;
+  scheduleP8FocusPoll(intervalMs);
+  console.info(
+    `[ripple-desktop] P8 focus watcher → ${intervalMs}ms default, ${P8_FOCUS_BURST_MS}ms burst when Explorer/Photos active`,
+  );
 }
 
 export async function restoreFocusContext(): Promise<boolean> {

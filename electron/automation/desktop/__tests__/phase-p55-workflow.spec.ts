@@ -50,6 +50,14 @@ describe("parseWorkflowCommand P5.5", () => {
     }
   });
 
+  it("parses Hinglish work mode chalu karo", () => {
+    const intent = parseWorkflowRunCommand("work mode chalu karo");
+    expect(intent?.kind).toBe("run_workflow");
+    if (intent?.kind === "run_workflow") {
+      expect(intent.workflow.name).toBe("work mode");
+    }
+  });
+
   it("parses list workflow singular", () => {
     expect(parseWorkflowMetaCommand("List Workflow")?.kind).toBe("list_workflows");
     expect(parseWorkflowMetaCommand("List workflows")?.kind).toBe("list_workflows");

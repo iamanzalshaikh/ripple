@@ -3,6 +3,8 @@ import { getRippleDb } from "./rippleDb.js";
 export type MemoryKey =
   | "last_file"
   | "last_pdf"
+  | "last_video"
+  | "last_image"
   | "last_folder"
   | "last_project"
   | "last_contact"
@@ -13,7 +15,16 @@ export type MemoryKey =
   | "last_parent_folder"
   | "last_prior_opened_path"
   | "last_web_surface"
-  | "last_web_surface_at";
+  | "last_web_surface_at"
+  | "last_viewed_pdf"
+  | "last_viewed_pdf_title"
+  | "last_viewed_pdf_at"
+  | "last_viewed_video"
+  | "last_viewed_video_title"
+  | "last_viewed_video_at"
+  | "last_viewed_image"
+  | "last_viewed_image_title"
+  | "last_viewed_image_at";
 
 export type LastOpenedKind =
   | "file"

@@ -20,9 +20,13 @@ describe("Phase 4.6 — session memory & aliases", () => {
     ["फिर से खोलो", "auto"],
     ["Open last pdf", "pdf"],
     ["Open last pdf I opened", "pdf"],
+    ["Open lastpdf I opened", "pdf"],
     ["Open the pdf I had open", "pdf"],
+    ["Open last video I opened", "video"],
+    ["Open last image I opened", "image"],
     ["Open last file", "file"],
     ["Open last folder", "folder"],
+    ["Open last folder I opened", "folder"],
   ])('recall "%s" → target:%s', (cmd, target) => {
     const result = parseDesktopIntent(cmd);
     expect(result?.intent.kind).toBe("recall_memory");

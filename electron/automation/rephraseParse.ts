@@ -24,11 +24,20 @@ const MAKE_IT_TONE =
 const MAKE_THIS_TEXT_TONE =
   /\s*[,]?\s*make\s+(?:this|that)\s+text\s+(?:more\s+)?(?:emotional|confident|sad|angry|mad|formal|casual|professional|friendly|short|long)\s*$/i;
 
+/** Voice command looks like edit/rephrase — strip Whisper duplicate phrases. */
+export function normalizeRephraseCommand(command: string): string {
+  const cmd = command.trim();
+  const dup = cmd.match(/^(.+?),\s*\1\.?$/i);
+  if (dup?.[1]?.trim()) return dup[1].trim();
+  return cmd;
+}
+
 /** Text to rewrite — from "rephrase, ..." or "Hello... Make it more emotional." */
 export function extractRephraseSourceText(command: string): string | null {
-  if (!isEditOrRephraseCommand(command)) return null;
+  const cmd = normalizeRephraseCommand(command);
+  if (!isEditOrRephraseCommand(cmd)) return null;
 
-  const makeThisText = command.match(
+  const makeThisText = cmd.match(
     /^(.+?)\s*[,]?\s*make\s+(?:this|that)\s+text\s+(?:more\s+)?/i,
   );
   if (makeThisText?.[1]?.trim()) {
@@ -45,7 +54,7 @@ export function extractRephraseSourceText(command: string): string | null {
     }
   }
 
-  const makeIt = command.match(/^(.+?)\s*[,]?\s*make\s+it\s+(?:more\s+)?/i);
+  const makeIt = cmd.match(/^(.+?)\s*[,]?\s*make\s+it\s+(?:more\s+)?/i);
   if (makeIt?.[1]?.trim()) {
     const body = makeIt[1].trim().replace(TONE_SUFFIX, "").trim();
     if (
@@ -56,7 +65,7 @@ export function extractRephraseSourceText(command: string): string | null {
     }
   }
 
-  const m = command.match(
+  const m = cmd.match(
     /^\s*(?:rephrase|rewrite|reword|revise|edit)\s*[,]?\s*(.+)$/i,
   );
   if (m?.[1]?.trim()) {

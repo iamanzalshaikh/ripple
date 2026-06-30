@@ -462,6 +462,7 @@ function connectNative() {
         ok: !!result?.ok,
         error: result?.error,
         detail: result?.detail,
+        logs: result?.logs,
       });
     } catch (e) {
       nativePort.postMessage({
@@ -485,5 +486,28 @@ function connectNative() {
   reconnectDelayMs = 3000;
   console.info("[ripple-ext] Native Messaging port open");
 }
+
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (msg?.type !== "RIPPLE_CROSS_APP_INGEST") return;
+  if (!nativePort) {
+    sendResponse?.({ ok: false, error: "Native port not connected" });
+    return true;
+  }
+  try {
+    nativePort.postMessage({
+      type: "CROSS_APP_INGEST_PUSH",
+      appId: msg.appId,
+      summary: msg.summary,
+      contact: msg.contact,
+      command: msg.command,
+      path: msg.path,
+      externalUrl: msg.externalUrl,
+    });
+    sendResponse?.({ ok: true });
+  } catch (e) {
+    sendResponse?.({ ok: false, error: String(e?.message ?? e) });
+  }
+  return true;
+});
 
 connectNative();

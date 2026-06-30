@@ -2,6 +2,8 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { basename } from "node:path";
 import { getRippleDb } from "./rippleDb.js";
 import { tokenizeForSemantic } from "../automation/retriever/semanticScoring.js";
+import { rankSemanticProfiles } from "../automation/retriever/semanticVectorRank.js";
+import { upsertPathEmbedding } from "./semanticEmbeddings.js";
 
 export type SemanticProfile = {
   path: string;
@@ -64,6 +66,8 @@ export function upsertSemanticIndex(args: {
          indexed_at = excluded.indexed_at`,
     )
     .run(args.path, label, JSON.stringify(tokens), snippet.slice(0, 2000), mtime, now);
+
+  upsertPathEmbedding(args.path, snippet);
 }
 
 export function getSemanticProfile(path: string): SemanticProfile | null {
@@ -109,7 +113,7 @@ export function searchSemanticIndex(phrase: string, limit = 20): SemanticProfile
   if (queryTokens.size === 0) return [];
 
   const rows = getRippleDb()
-    .prepare(`SELECT path, label, tokens, snippet, mtime FROM semantic_index LIMIT 500`)
+    .prepare(`SELECT path, label, tokens, snippet, mtime FROM semantic_index LIMIT 800`)
     .all() as Array<{
     path: string;
     label: string;
@@ -118,7 +122,7 @@ export function searchSemanticIndex(phrase: string, limit = 20): SemanticProfile
     mtime: number;
   }>;
 
-  const scored: Array<{ profile: SemanticProfile; score: number }> = [];
+  const profiles: SemanticProfile[] = [];
 
   for (const row of rows) {
     if (!existsSync(row.path)) continue;
@@ -134,25 +138,20 @@ export function searchSemanticIndex(phrase: string, limit = 20): SemanticProfile
     for (const t of tokens) {
       if (queryTokens.has(t)) overlap++;
     }
-    if (overlap === 0) continue;
+    if (overlap === 0 && !phrase.toLowerCase().includes(row.label.toLowerCase().slice(0, 4))) {
+      continue;
+    }
 
-    const score = overlap / Math.max(queryTokens.size, tokens.length);
-    scored.push({
-      profile: {
-        path: row.path,
-        label: row.label,
-        tokens,
-        snippet: row.snippet,
-        mtime: row.mtime,
-      },
-      score,
+    profiles.push({
+      path: row.path,
+      label: row.label,
+      tokens,
+      snippet: row.snippet,
+      mtime: row.mtime,
     });
   }
 
-  return scored
-    .sort((a, b) => b.score - a.score)
-    .slice(0, limit)
-    .map((s) => s.profile);
+  return rankSemanticProfiles(phrase, profiles, limit);
 }
 
 export function clearSemanticIndex(): void {

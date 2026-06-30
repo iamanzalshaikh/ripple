@@ -71,8 +71,16 @@ export async function executeReferentialSend(
 
   const message = buildReferentialSendMessage(targetPath);
   const kind = itemKindLabel(targetPath);
-  const attachment = prepareWhatsAppAttachment(targetPath);
-  const outboundText = attachment ? "" : message;
+  const attachment = await prepareWhatsAppAttachment(targetPath);
+  const outboundText = attachment
+    ? `Here is ${attachment.fileName}`
+    : message;
+
+  if (!attachment && kind === "folder") {
+    throw new Error(
+      `Could not attach folder "${basename(targetPath)}" — put a PDF or image inside it (WhatsApp does not accept .zip or code files).`,
+    );
+  }
   console.info(
     `[ripple-desktop] sending ${kind} "${basename(targetPath)}" from ${targetPath} → WhatsApp contact "${contact}"${attachment ? " (file attach)" : " (text only)"}`,
   );
