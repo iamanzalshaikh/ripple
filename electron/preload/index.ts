@@ -102,6 +102,70 @@ const api = {
         failures: string[];
       };
     }>,
+  getP85Dashboard: () =>
+    ipcRenderer.invoke("telemetry:p85") as Promise<{
+      ok: boolean;
+      message?: string;
+      dashboard?: {
+        session: {
+          total: number;
+          execute: number;
+          defer: number;
+          clarify: number;
+          l0Hits: number;
+          gptHits: number;
+          avgLatencyMs: number;
+          fallbackPct: number;
+        };
+        persisted: {
+          total: number;
+          execute: number;
+          defer: number;
+          clarify: number;
+          l0Hits: number;
+          gptHits: number;
+          cacheHits: number;
+          avgLatencyMs: number;
+          l0HitRatePct: number;
+          gptFallbackPct: number;
+          topDeferReasons: Array<{ reason: string; count: number }>;
+          topTools: Array<{ tool: string; count: number }>;
+        };
+        routerParity: {
+          p85Executes: number;
+          mismatchTotal: number;
+          byLegacyRouter: Record<string, number>;
+          recentMismatches: Array<{
+            legacyRouter: string;
+            p85Reason: string;
+            command: string;
+            at: number;
+          }>;
+          readyForDeprecation: boolean;
+        };
+        cacheEntries: number;
+        recentObservations?: Array<{
+          command: string;
+          planSource: string;
+          goal: string;
+          tools: string[];
+          intent?: string;
+          succeeded: boolean;
+          recovered: boolean;
+          recoveryAttempts: number;
+          failureClass?: string;
+          actionCount: number;
+          failedActions: string[];
+          at: number;
+        }>;
+      };
+    }>,
+  exportPlannerShadowCsv: () =>
+    ipcRenderer.invoke("telemetry:p85:export") as Promise<{
+      ok: boolean;
+      message?: string;
+      csv?: string;
+    }>,
   getCommandHistory: (args?: {
     page?: number;
     limit?: number;
@@ -165,6 +229,13 @@ const api = {
     const handler = () => cb();
     ipcRenderer.on("disambiguation:hide", handler);
     return () => ipcRenderer.removeListener("disambiguation:hide", handler);
+  },
+  onClarifyQuestion: (
+    cb: (payload: { question: string }) => void,
+  ): Unsubscribe => {
+    const handler = (_: unknown, payload: unknown) => cb(payload as never);
+    ipcRenderer.on("overlay:clarify", handler);
+    return () => ipcRenderer.removeListener("overlay:clarify", handler);
   },
   isOverlay: () =>
     new URLSearchParams(window.location.search).get("overlay") === "1",

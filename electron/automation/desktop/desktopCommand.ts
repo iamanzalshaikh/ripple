@@ -4,6 +4,7 @@ import { parseDesktopIntent } from "../voice/nlu/pipeline.js";
 import type { CompoundIntent } from "../voice/nlu/compoundParse.js";
 import type { NativeCommandIntent } from "./parseNativeCommand.js";
 import { resolveKnownItemPath } from "./openDesktopItem.js";
+import { buildTypingPayloadFromTypeIntent, insertTextDataFromTypeIntent } from "../../agent/typingPayload.js";
 
 function intentLabel(intent: NativeCommandIntent): string {
   switch (intent.kind) {
@@ -70,7 +71,19 @@ function intentLabel(intent: NativeCommandIntent): string {
     case "remember_life_event":
       return `remember_life_event:${intent.label}`;
     case "open_gmail_email":
-      return `gmail_email:${intent.senderQuery}`;
+      return intent.attachmentQuery
+        ? `gmail_attachment:${intent.attachmentQuery}`
+        : intent.subjectQuery
+          ? `gmail_subject:${intent.subjectQuery}`
+          : `gmail_email:${intent.senderQuery ?? ""}`;
+    case "open_cross_app_attachment":
+      return `cross_app_attachment:${intent.extension ?? "file"}:${intent.contact ?? intent.phrase}`;
+    case "type_text":
+      return intent.text
+        ? `type_text:${intent.text.slice(0, 40)}`
+        : intent.keys
+          ? `type_keys:${intent.keys}`
+          : "type_sequence";
   }
 }
 
@@ -251,6 +264,22 @@ export function desktopBatchPayload(
         ...base,
         desktopKind: "open_gmail_email",
         gmailSenderQuery: intent.senderQuery,
+        gmailSubjectQuery: intent.subjectQuery,
+        gmailAttachmentQuery: intent.attachmentQuery,
+      };
+    case "open_cross_app_attachment":
+      return {
+        ...base,
+        desktopKind: "open_cross_app_attachment",
+        crossAppAttachmentPhrase: intent.phrase,
+        crossAppAttachmentExt: intent.extension,
+        crossAppAttachmentContact: intent.contact,
+      };
+    case "type_text":
+      return {
+        ...base,
+        desktopKind: "type_text",
+        ...insertTextDataFromTypeIntent(intent),
       };
   }
 }
@@ -307,6 +336,14 @@ function compoundStepsToWorkflowPayload(
   let chainedPath: string | undefined;
 
   return steps.map((step, i) => {
+    if (step.kind === "type_text") {
+      return {
+        type: "INSERT_TEXT" as const,
+        status: "pending" as const,
+        data: insertTextDataFromTypeIntent(step),
+      };
+    }
+
     const batch = desktopBatchPayload(
       step as Exclude<NativeCommandIntent, CompoundIntent>,
       `${command.trim()} [${i + 1}/${steps.length}]`,
@@ -340,6 +377,10 @@ function payloadFromIntent(
 ): CommandResultPayload {
   console.info(`[ripple-desktop] you said: "${command.trim()}"`);
   console.info(`[ripple-desktop] desktop intent: ${intentLabel(intent)}${tag}`);
+
+  if (intent.kind === "type_text") {
+    return buildTypingPayloadFromTypeIntent(command, intent);
+  }
 
   if (intent.kind === "compound") {
     return {

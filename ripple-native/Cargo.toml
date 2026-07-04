@@ -1,0 +1,38 @@
+[package]
+name = "ripple-native"
+version = "0.1.0"
+edition = "2021"
+description = "Ripple P7 native OS sidecar (Windows)"
+
+[[bin]]
+name = "ripple-native"
+path = "src/main.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "io-util", "net", "time"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+rand = "0.8"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.58", features = [
+  "Win32_Foundation",
+  "Win32_UI_WindowsAndMessaging",
+  "Win32_System_Pipes",
+  "Win32_Storage_FileSystem",
+  "Win32_Security",
+  "Win32_Security_Authorization",
+  "Win32_System_LibraryLoader",
+  "Win32_Graphics_Gdi",
+  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_UI_Accessibility",
+  "Win32_System_ProcessStatus",
+  "Win32_System_Threading",
+  "Win32_System_Com",
+  "Foundation",
+  "Graphics_Imaging",
+  "Media_Ocr",
+  "Storage_Streams",
+] }

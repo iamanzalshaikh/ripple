@@ -82,6 +82,8 @@ export function parseGraphOpenCommand(
   if (!spoken) return null;
 
   if (/^(?:mail|email)s?\s+from\b/i.test(spoken)) return null;
+  if (/\s+(?:mail|email)s?$/i.test(spoken)) return null;
+  if (/(?:mail|email)s?\s+(?:about|on|regarding)\b/i.test(cmd)) return null;
 
   if (/^(?:downloads?|documents?|desktop)$/i.test(spoken)) return null;
 

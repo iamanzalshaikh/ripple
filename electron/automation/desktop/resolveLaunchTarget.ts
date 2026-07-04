@@ -55,6 +55,20 @@ const INSTALL_CANDIDATES: Record<string, string[]> = {
   discord: [
     join(process.env.LOCALAPPDATA ?? "", "Discord", "Update.exe"),
   ],
+  "antigravity-ide": [
+    join(
+      process.env.LOCALAPPDATA ?? "",
+      "Programs",
+      "Antigravity IDE",
+      "Antigravity IDE.exe",
+    ),
+    join(
+      process.env.LOCALAPPDATA ?? "",
+      "Programs",
+      "Antigravity",
+      "Antigravity IDE.exe",
+    ),
+  ],
 };
 
 /**

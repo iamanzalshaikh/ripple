@@ -1,6 +1,7 @@
 import { normalizeTranscript } from "../voice/normalizeTranscript.js";
 import { isWebOnlyAppTarget, resolveNativeApp } from "./nativeAppRegistry.js";
 import type { NativeAppEntry } from "./nativeAppRegistry.js";
+import { firstCompoundClause, hasCompoundTailAfterFirstClause } from "../voice/nlu/compoundParse.js";
 
 export type NativeAppIntent =
   | { kind: "launch_app"; app: NativeAppEntry; rawName: string }
@@ -19,10 +20,15 @@ function looksLikeFolder(name: string): boolean {
 }
 
 function resolveAppName(raw: string): NativeAppEntry | null {
-  const trimmed = raw.trim().replace(/\s+/g, " ");
+  const trimmed = firstCompoundClause(raw.trim().replace(/\s+/g, " "));
   if (!trimmed || looksLikeFile(trimmed) || looksLikeFolder(trimmed)) return null;
   if (isWebOnlyAppTarget(trimmed)) return null;
   return resolveNativeApp(trimmed);
+}
+
+/** True when open target continues with type/save/etc. — defer to compound planner. */
+function openTargetHasCompoundTail(target: string): boolean {
+  return hasCompoundTailAfterFirstClause(target);
 }
 
 /**
@@ -66,9 +72,14 @@ export function parseNativeAppCommand(
     if (/\s+(?:in|on)\s+(?:my\s+)?(?:downloads?|documents?|desktop)\s*$/i.test(cmd)) {
       return null;
     }
-    const app = resolveAppName(openMatch[1]);
+    const target = openMatch[1].trim();
+    if (openTargetHasCompoundTail(target)) {
+      return null;
+    }
+    const app = resolveAppName(target);
     if (app) {
-      return { kind: "launch_app", app, rawName: openMatch[1].trim() };
+      const shortName = firstCompoundClause(target.replace(/\s+/g, " "));
+      return { kind: "launch_app", app, rawName: shortName };
     }
   }
 

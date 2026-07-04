@@ -1,4 +1,5 @@
 import { slotNormalize } from "../voice/nlu/slotNormalize.js";
+import { isEditorClearTextPhrase } from "../../agent/parseDesktopInput.js";
 import {
   parseParentKey,
   parseLocationSuffix,
@@ -19,6 +20,7 @@ export function parseFileOperationCommand(
 ): FileOpIntent | null {
   const raw = slotNormalize(command ?? "");
   if (!raw) return null;
+  if (isEditorClearTextPhrase(raw)) return null;
 
   const cmd = takePrimaryFileOpCommand(raw);
   const { body, parent: suffixParent } = parseLocationSuffix(cmd);

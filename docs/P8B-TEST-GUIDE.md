@@ -1,125 +1,104 @@
-# P8b+ — Testing guide (embeddings + Gmail/Slack + voice)
+# P8b+ — Testing guide (embeddings + Gmail/Slack/Outlook/Teams + voice)
 
-## 0. Restart everything
+## Quick start (3 steps)
 
-```powershell
-cd c:\Users\ANZAL\Desktop\projectRipple\ripple-desktop
-npm run dev
+```
+Step 1 → npm run dev          (Ripple app running)
+Step 2 → npm run seed:p8b     (fills test memory — run in a 2nd terminal)
+Step 3 → Ctrl+Space in Ripple → say a command from the list below
 ```
 
-Reload the Chrome extension after this update:
-
-1. Open `chrome://extensions`
-2. Find **Ripple Bridge** → click **Reload** (version should be **1.7.0**)
-3. Confirm native host still connected (Ripple terminal log: `Native Messaging host connected`)
+Reload Chrome extension **1.9.0** once if you have not already (`chrome://extensions` → Reload).
 
 ---
 
-## 1. Automated tests (run first)
+## All 9 voice commands (after seed)
 
-```powershell
-cd c:\Users\ANZAL\Desktop\projectRipple\ripple-desktop
+Run `npm run seed:p8b` first. Then say each command in Ripple:
 
-npx vitest run electron/automation/retriever/__tests__/p8b-embeddings.spec.ts electron/automation/voice/nlu/__tests__/semantic-voice-routing.spec.ts electron/automation/retriever/__tests__/phase-p8-semantic.spec.ts --maxWorkers=1
+| # | Say this | What should happen |
+|---|----------|-------------------|
+| 1 | `Open PDF I discussed with Ahmed` | Opens `ahmed-quarterly-proposal.pdf` |
+| 2 | `Open that thing Sarah sent` | Opens Sarah's contract PDF or clarifies |
+| 3 | `Open pdf before my Goa trip` | Opens `goa-packing-checklist.pdf` (life event filter) |
+| 4 | `Open email from MongoDB Atlas` | Opens Gmail search or remembered Atlas thread |
+| 5 | `Open the Naukri shortlist email` | Opens Gmail search for Naukri shortlist |
+| 6 | `Open email about job shortlist` | Same Naukri thread (subject variant) |
+| 7 | `Open Gmail thread with pdf attached` | Opens local `atlas-quarterly-report.pdf` |
+| 8 | `Open pdf Ahmed sent` | Opens local `ahmed-invoice.pdf` |
+| 9 | `Open attachment from Sarah` | Opens Sarah's contract PDF |
+
+**Bonus (life event write):** `Remember my Goa trip was March 15 2025` — stores/updates life event.
+
+### Logs to watch (`npm run dev` terminal)
+
 ```
-
-All should pass.
+desktop intent: smart:...              → semantic file open (#1–3)
+desktop intent: gmail_email:...          → Gmail sender (#4)
+desktop intent: gmail_subject:...        → Gmail subject (#5–6)
+desktop intent: gmail_attachment:pdf     → attachment (#7)
+desktop intent: cross_app_attachment:...   → local attachment (#8–9)
+```
 
 ---
 
-## 2. Seed test memory (DevTools — fastest)
+## Seed command
 
-1. In Ripple app, press **F12** (DevTools)
-2. Console tab, paste:
+```powershell
+cd c:\Users\ANZAL\Desktop\projectRipple\ripple-desktop
+npm run seed:p8b
+```
+
+Prints folder paths + probe results for all 9 commands.
+
+Or in Ripple DevTools (F12):
 
 ```javascript
 const r = await window.ripple.memory.seedP8bTest();
-console.log(r);
-```
-
-Expected: `ok: true` with paths under `%TEMP%\ripple-p8b-manual-*`
-
-3. Probe embeddings:
-
-```javascript
-await window.ripple.memory.probeSemantic("Open PDF I discussed with Ahmed");
-await window.ripple.memory.probeSemantic("that thing Sarah sent");
-```
-
-Expected: `embeddingPaths` includes the Ahmed PDF path; `semanticRefs` includes Sarah slack summary.
-
----
-
-## 3. Voice commands (after seed)
-
-Press **Ctrl+Space** (or your voice hotkey) and say **exactly**:
-
-| # | Say this | Expected |
-|---|----------|----------|
-| 1 | `Open PDF I discussed with Ahmed` | Opens `ahmed-quarterly-proposal.pdf` |
-| 2 | `Open that thing Sarah sent` | Clarify or best match from Sarah slack ref |
-| 3 | `Remember my Goa trip was March 15 2025` | Reply: `Remembered life event: Goa trip` |
-| 4 | `Open pdf before my Goa trip` | Opens `goa-packing-checklist.pdf` |
-
-### Logs to confirm (Ripple terminal)
-
-```
-[ripple-desktop] P8 semantic → N hit(s) for "Open PDF I discussed with Ahmed"
-[ripple-desktop] Smart search "semantic_..." → C:\...\ahmed-quarterly-proposal.pdf
-[ripple-desktop] P8 life-event filter → before "Goa trip"
-[ripple-desktop] P8 cross-app ingest → slack | Sarah shared...
+console.log(r.data.voiceCommands);
 ```
 
 ---
 
-## 4. Manual cross-app ingest (no extension)
+## Flow diagram
 
-DevTools console:
-
-```javascript
-await window.ripple.memory.ingestCrossApp({
-  appId: "gmail",
-  summary: "Ahmed sent invoice Q4 PDF attachment",
-  contact: "ahmed",
-  command: "Gmail: Ahmed invoice"
-});
+```
+npm run seed:p8b
+       │
+       ▼
+  ripple.db gets fake Ahmed/Sarah/Goa files + Gmail refs + attachment paths
+       │
+       ▼
+  Ctrl+Space → voice command
+       │
+       ├── semantic (#1–3)     → search embeddings → open local PDF
+       ├── gmail sender (#4)     → semantic ref → Gmail URL
+       ├── gmail subject (#5–6)  → semantic ref → Gmail URL
+       └── attachment (#7–9)     → local file in seed folder first, else Gmail
 ```
 
-Then voice: **`Open PDF I discussed with Ahmed`** (should rank invoice-related memory higher if you also opened that file).
+**Live browser ingest** (optional, separate from seed): open real Gmail/Slack in Chrome → extension writes to same DB → then voice recall works on real emails too.
 
 ---
 
-## 5. Gmail extension hook (live)
+## Live browser tests (extension, not seed)
 
-1. Open **https://mail.google.com** in Chrome (same profile as extension)
-2. Open any email thread with a subject + sender
-3. Ripple terminal should show within ~2s:
-
-```
-[ripple-desktop] P8 cross-app ingest → gmail | Email: <subject> ...
-```
-
-4. Chrome DevTools on Gmail page → Console may show: `[ripple-gmail] ingest queued ...`
-
----
-
-## 6. Slack extension hook (live)
-
-1. Open **https://app.slack.com** 
-2. Open a channel where someone shared a file or sent a message
-3. Ripple terminal:
-
-```
-[ripple-desktop] P8 cross-app ingest → slack | <name> shared file: ...
-```
+| App | Do this in browser | Expected log |
+|-----|-------------------|--------------|
+| Gmail | Open any email thread | `P8 cross-app ingest → gmail` |
+| Gmail | Thread with PDF | `... (+1 attachment(s))` |
+| Gmail | PDF auto-downloads | File in `Downloads/Ripple/attachments/` |
+| Slack | Open channel with file share | `P8 cross-app ingest → slack` |
+| Outlook | Open email in reading pane | `P8 cross-app ingest → outlook` |
+| Teams | Open chat with attachment | `P8 cross-app ingest → teams` |
 
 ---
 
-## 7. Real-world WhatsApp path (builds contact memory)
+## Automated tests
 
-1. Send a PDF to a contact named **Ahmed** on WhatsApp Web
-2. Wait for send to complete
-3. Say: **`Open PDF I discussed with Ahmed`**
+```powershell
+npx vitest run electron/storage/__tests__/p8b-seed-cli.spec.ts electron/automation/gmail/__tests__/parseOpenCrossAppAttachment.spec.ts --maxWorkers=1
+```
 
 ---
 
@@ -127,13 +106,13 @@ Then voice: **`Open PDF I discussed with Ahmed`** (should rank invoice-related m
 
 | Problem | Fix |
 |---------|-----|
-| No `P8 cross-app ingest` from Gmail | Reload extension v1.7.0; refresh Gmail tab |
-| Native host disconnected | Restart `npm run dev`; reload extension |
-| Voice opens wrong file | Run `seedP8bTest()` again; check `probeSemantic` output |
-| Empty semantic hits | Open the file once manually so path exists on disk |
+| Voice opens nothing | Run `npm run seed:p8b` again (clears + re-seeds) |
+| Wrong file opens | Check seed output folder in terminal |
+| No Gmail ingest | Reload extension v1.9.0; refresh Gmail tab |
+| Attachment opens Gmail not file | Seed puts files under temp folder — run seed first |
 
 ---
 
 ## DB location
 
-`%LOCALAPPDATA%\Ripple\ripple.db` — tables: `semantic_embeddings`, `semantic_refs`, `activity_log`, `life_events`
+`%LOCALAPPDATA%\Ripple\ripple.db`

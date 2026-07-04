@@ -8,6 +8,9 @@ files:
   - out/**/*
   - package.json
   - "!**/*.map"
+extraResources:
+  - from: ripple-native/target/release/ripple-native.exe
+    to: native/win32/ripple-native.exe
 win:
   target:
     - target: nsis

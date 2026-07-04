@@ -1,5 +1,9 @@
 import type { NativeCommandIntent } from "../../desktop/parseNativeCommand.js";
 import { parseNativeCommandStrict } from "../../desktop/parseNativeCommand.js";
+import {
+  desktopInputToTypeIntent,
+  parseDesktopInputFallback,
+} from "../../../agent/parseDesktopInput.js";
 import { parseSessionMemoryCommand } from "../../desktop/parseSessionMemoryCommand.js";
 import { parseSmartSearchCommand } from "../../desktop/parseSmartSearchCommand.js";
 import { isTemporalFileOpenQuery } from "../../retriever/timeRange.js";
@@ -7,6 +11,7 @@ import { parseNluFallback } from "./intentExtract.js";
 import { preprocessForNlu } from "./preprocess.js";
 import { cleanContactName } from "../../adapters/whatsapp/parseContact.js";
 import { parseReferentialSend } from "./parseReferentialWhatsApp.js";
+import { isEditorClearTextPhrase } from "../../../agent/parseDesktopInput.js";
 import type { ReferentialSendIntent } from "./parseReferentialWhatsApp.js";
 
 export type CompoundIntent = {
@@ -20,14 +25,50 @@ const COMPOUND_SPLIT =
 const SENTENCE_SPLIT =
   /[.!?]\s+(?=(?:please\s+|kindly\s+)?(?:open|show|find|search|send|launch|start|switch|go)\b)/i;
 
+/** Clause-start verbs after comma or conjunction boundaries. */
+export const COMPOUND_CLAUSE_VERBS =
+  "type|write|save|close|launch|open|switch|focus|search|paste|calculate|dictate|likho|enter|put|click|press|draw|sketch|erase|scroll|drag|select|move|fill|paint";
+
+/** Comma between clauses — not commas inside dictated text ("hello, world"). */
+export const COMMA_CLAUSE_SPLIT = new RegExp(
+  `,\\s+(?=(?:${COMPOUND_CLAUSE_VERBS})\\b)`,
+  "i",
+);
+
+const COMPOUND_CLAUSE_BOUNDARY = new RegExp(
+  `\\s*(?:,\\s*(?=(?:${COMPOUND_CLAUSE_VERBS})\\b)|\\s+(?:and|aur|then|phir|plus|\\+)\\s+)`,
+  "i",
+);
+
+/** First segment before a compound boundary — for app-name resolution. */
+export function firstCompoundClause(text: string): string {
+  const trimmed = text.trim();
+  if (!trimmed) return trimmed;
+  return trimmed.split(COMPOUND_CLAUSE_BOUNDARY)[0]?.trim() ?? trimmed;
+}
+
+/** True when text continues after the first clause (type/save/and…). */
+export function hasCompoundTailAfterFirstClause(text: string): boolean {
+  const normalized = text.trim().replace(/\s+/g, " ");
+  const first = firstCompoundClause(normalized);
+  return first.length > 0 && first.length < normalized.length;
+}
+
 /** "Downloads kholo aur latest PDF open karo" → two parseable steps. */
 export function splitCompoundParts(nlu: string): string[] | null {
   const trimmed = nlu.trim();
-  if (!COMPOUND_SPLIT.test(trimmed) && !SENTENCE_SPLIT.test(trimmed)) return null;
+  if (
+    !COMPOUND_SPLIT.test(trimmed) &&
+    !SENTENCE_SPLIT.test(trimmed) &&
+    !COMMA_CLAUSE_SPLIT.test(trimmed)
+  ) {
+    return null;
+  }
 
   const parts = trimmed
     .split(SENTENCE_SPLIT)
     .flatMap((part) => part.split(COMPOUND_SPLIT))
+    .flatMap((part) => part.split(COMMA_CLAUSE_SPLIT))
     .map((p) => p.trim())
     .filter((p) => p.length >= 3);
 
@@ -59,6 +100,9 @@ function parseCompoundPart(
   part: string,
   raw?: string,
 ): NativeCommandIntent | null {
+  const input = parseDesktopInputFallback(part);
+  if (input) return desktopInputToTypeIntent(input);
+
   const recall = parseSessionMemoryCommand(part);
   if (recall) return recall;
 
@@ -193,6 +237,8 @@ export function parseOpenAndSendCompound(nlu: string): CompoundIntent | null {
 }
 
 export function parseCompoundIntent(nlu: string, raw?: string): CompoundIntent | null {
+  if (isEditorClearTextPhrase(nlu)) return null;
+
   const sendItem = parseSendItemToContactCompound(nlu);
   if (sendItem) {
     console.info(
@@ -231,6 +277,17 @@ export function parseCompoundIntent(nlu: string, raw?: string): CompoundIntent |
     const intent = parseCompoundPart(part, raw);
     if (!intent || intent.kind === "compound") return null;
     steps.push(intent);
+  }
+
+  if (
+    steps.length >= 2 &&
+    steps.every(
+      (s) =>
+        s.kind === "type_text" &&
+        (Boolean(s.keys) || Boolean(s.sequence)),
+    )
+  ) {
+    return null;
   }
 
   console.info(

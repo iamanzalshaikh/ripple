@@ -29,6 +29,12 @@ export default defineConfig(({ mode }) => {
     },
     renderer: {
       root: resolve(__dirname),
+      server: {
+        watch: {
+          // Test edits during dev should not reload the Electron window.
+          ignored: ["**/__tests__/**", "**/*.spec.ts"],
+        },
+      },
       build: {
         rollupOptions: {
           input: resolve(__dirname, "index.html"),

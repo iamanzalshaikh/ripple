@@ -26,6 +26,7 @@ export function OverlayPage() {
     Array<{ path: string; label: string }>
   >([]);
   const [clarifySpoken, setClarifySpoken] = useState("");
+  const [clarifyQuestion, setClarifyQuestion] = useState<string | null>(null);
 
   const sessionIdRef = useRef<string | undefined>(undefined);
   const streamIdRef = useRef<string>("");
@@ -63,11 +64,20 @@ export function OverlayPage() {
     const unsubHide = api.onDisambiguationHide?.(() => {
       setClarifyItems([]);
       setClarifySpoken("");
+      setClarifyQuestion(null);
       setPhase("idle");
+    });
+    const unsubClarify = api.onClarifyQuestion?.(({ question }) => {
+      setClarifyQuestion(question);
+      setClarifyItems([]);
+      setClarifySpoken("");
+      setPhase("clarify");
+      setError(null);
     });
     return () => {
       unsubShow?.();
       unsubHide?.();
+      unsubClarify?.();
     };
   }, []);
 
@@ -215,6 +225,18 @@ export function OverlayPage() {
     setClarifyItems([]);
     setPhase("idle");
   }, []);
+
+  if (phase === "clarify" && clarifyQuestion && clarifyItems.length === 0) {
+    return (
+      <div className="flex h-full w-full flex-col gap-1.5 p-2">
+        <p className="text-[10px] font-medium text-violet-200/90">Need a detail</p>
+        <p className="line-clamp-3 text-[11px] leading-snug text-zinc-100">
+          {clarifyQuestion}
+        </p>
+        <p className="text-[10px] text-zinc-500">Press voice again and answer.</p>
+      </div>
+    );
+  }
 
   if (phase === "clarify" && clarifyItems.length > 0) {
     return (

@@ -38,11 +38,27 @@ import type { CompoundIntent } from "../voice/nlu/compoundParse.js";
 import type { ReferentialSendIntent } from "../voice/nlu/parseReferentialWhatsApp.js";
 import type { RememberLifeEventIntent } from "../retriever/parseSemanticOpen.js";
 import type { GmailOpenEmailIntent } from "../gmail/parseGmailOpenEmail.js";
+import type { OpenCrossAppAttachmentIntent } from "../gmail/parseOpenCrossAppAttachment.js";
+import type { SaveFileIntent } from "./parseSaveFileCommand.js";
 import { parseReferentialSend } from "../voice/nlu/parseReferentialWhatsApp.js";
 import { parseDesktopIntent } from "../voice/nlu/pipeline.js";
 import { normalizeTranscript } from "../voice/normalizeTranscript.js";
+import {
+  parseBrowserWorkspaceSearch,
+  type BrowserSearchIntent,
+} from "../browser/parseBrowserWorkspaceSearch.js";
+
+export type { BrowserSearchIntent };
 
 export type OpenResolvedIntent = { kind: "open_resolved"; path: string };
+
+export type TypeTextIntent = {
+  kind: "type_text";
+  text?: string;
+  keys?: string;
+  sequence?: Array<{ value: string; delayMs?: number }>;
+  replaceAll?: boolean;
+};
 
 export type NativeCommandIntent =
   | DesktopOpenIntent
@@ -59,7 +75,11 @@ export type NativeCommandIntent =
   | ReferentialSendIntent
   | CompoundIntent
   | RememberLifeEventIntent
-  | GmailOpenEmailIntent;
+  | GmailOpenEmailIntent
+  | OpenCrossAppAttachmentIntent
+  | SaveFileIntent
+  | TypeTextIntent
+  | BrowserSearchIntent;
 
 /**
  * Strict regex parsers only — no NLU fallback.
@@ -113,6 +133,9 @@ export function parseNativeCommandStrict(
 
   const app = parseNativeAppCommand(command);
   if (app) return app;
+
+  const browserSearch = parseBrowserWorkspaceSearch(command);
+  if (browserSearch) return browserSearch;
 
   const smartSearch = parseSmartSearchCommand(command);
   if (smartSearch) return smartSearch;

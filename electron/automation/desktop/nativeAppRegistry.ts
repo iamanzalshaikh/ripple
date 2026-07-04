@@ -147,6 +147,19 @@ export const COMMON_NATIVE_APPS: NativeAppEntry[] = [
     titleKeywords: ["discord"],
   },
   {
+    id: "antigravity-ide",
+    aliases: [
+      "antigravity",
+      "antigravity ide",
+      "anti gravity",
+      "anti-gravity",
+      "antigravity-ide",
+    ],
+    launch: "Antigravity IDE",
+    processNames: ["antigravity ide"],
+    titleKeywords: ["antigravity"],
+  },
+  {
     id: "task-manager",
     aliases: ["task manager", "taskmgr"],
     launch: "taskmgr.exe",
@@ -202,8 +215,17 @@ export function resolveNativeApp(spoken: string): NativeAppEntry | null {
     if (key === alias) return entry;
   }
 
+  const clauseKey = key.split(/[,\s]+(?:and|then|write|type|save|paste|click|press)\b/i)[0]?.trim() ?? key;
+  const lookupKey = clauseKey.length < key.length ? clauseKey : key;
+
   for (const { alias, entry } of aliasIndex) {
-    if (key.startsWith(`${alias} `) || key.endsWith(` ${alias}`)) return entry;
+    if (lookupKey === alias) return entry;
+  }
+
+  if (lookupKey === key) {
+    for (const { alias, entry } of aliasIndex) {
+      if (key.startsWith(`${alias} `) || key.endsWith(` ${alias}`)) return entry;
+    }
   }
 
   return null;

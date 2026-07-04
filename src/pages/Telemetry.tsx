@@ -4,6 +4,10 @@ type Summary = NonNullable<
   Awaited<ReturnType<RippleApi["getTelemetrySummary"]>>["summary"]
 >;
 
+type P85Dashboard = NonNullable<
+  Awaited<ReturnType<RippleApi["getP85Dashboard"]>>["dashboard"]
+>;
+
 interface Props {
   onBack: () => void;
 }
@@ -19,6 +23,8 @@ export function TelemetryPage({ onBack }: Props) {
   } | null>(null);
   const [loading, setLoading] = useState(true);
   const [gateLoading, setGateLoading] = useState(false);
+  const [p85Loading, setP85Loading] = useState(true);
+  const [p85, setP85] = useState<P85Dashboard | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -43,10 +49,35 @@ export function TelemetryPage({ onBack }: Props) {
     setGateLoading(false);
   }, []);
 
+  const loadP85 = useCallback(async () => {
+    setP85Loading(true);
+    const res = await window.ripple.getP85Dashboard();
+    if (res.ok && res.dashboard) {
+      setP85(res.dashboard);
+    }
+    setP85Loading(false);
+  }, []);
+
   useEffect(() => {
     void load();
     void loadGate();
-  }, [load, loadGate]);
+    void loadP85();
+  }, [load, loadGate, loadP85]);
+
+  async function handleExportP85() {
+    const res = await window.ripple.exportPlannerShadowCsv();
+    if (!res.ok || !res.csv) {
+      setError(res.message ?? "P8.5 export failed");
+      return;
+    }
+    const blob = new Blob([res.csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `ripple-p85-shadow-${Date.now()}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
 
   async function handleExport() {
     const res = await window.ripple.exportTelemetryCsv();
@@ -97,8 +128,9 @@ export function TelemetryPage({ onBack }: Props) {
             onClick={() => {
               void load();
               void loadGate();
+              void loadP85();
             }}
-            disabled={loading || gateLoading}
+            disabled={loading || gateLoading || p85Loading}
             className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-900 disabled:opacity-50"
           >
             Refresh
@@ -140,6 +172,188 @@ export function TelemetryPage({ onBack }: Props) {
       ) : gateLoading ? (
         <p className="mb-4 text-sm text-zinc-500">Running CI gate check…</p>
       ) : null}
+
+      <section className="mb-6 rounded-2xl border border-violet-800/40 bg-violet-950/20 p-5">
+        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-medium text-violet-200">
+              P8.5 Universal Planner
+            </h3>
+            <p className="mt-1 text-xs text-zinc-500">
+              Session + SQLite shadow · router parity for legacy deprecation
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            {p85?.routerParity.readyForDeprecation ? (
+              <span className="rounded-full bg-emerald-500/20 px-2.5 py-0.5 text-xs font-medium text-emerald-400">
+                Ready to deprecate legacy routers
+              </span>
+            ) : (
+              <span className="rounded-full bg-amber-500/20 px-2.5 py-0.5 text-xs font-medium text-amber-400">
+                Shadow mode — collecting parity data
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={() => void handleExportP85()}
+              className="rounded-lg border border-violet-600/50 px-3 py-1.5 text-xs text-violet-300 hover:bg-violet-950/40"
+            >
+              Export P8.5 CSV
+            </button>
+          </div>
+        </div>
+
+        {p85Loading && !p85 ? (
+          <p className="text-sm text-zinc-500">Loading P8.5 metrics…</p>
+        ) : p85 ? (
+          <div className="grid gap-4 md:grid-cols-3">
+            <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/40 p-4">
+              <p className="text-xs text-zinc-500">L0 hit rate (persisted)</p>
+              <p className="mt-1 text-2xl font-semibold text-cyan-400">
+                {p85.persisted.l0HitRatePct}%
+              </p>
+              <p className="mt-1 text-xs text-zinc-500">
+                {p85.persisted.l0Hits}/{p85.persisted.execute} executes
+              </p>
+            </div>
+            <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/40 p-4">
+              <p className="text-xs text-zinc-500">GPT fallback</p>
+              <p className="mt-1 text-2xl font-semibold text-violet-400">
+                {p85.persisted.gptFallbackPct}%
+              </p>
+              <p className="mt-1 text-xs text-zinc-500">
+                cache entries: {p85.cacheEntries}
+              </p>
+            </div>
+            <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/40 p-4">
+              <p className="text-xs text-zinc-500">Router mismatches</p>
+              <p className="mt-1 text-2xl font-semibold text-amber-400">
+                {p85.routerParity.mismatchTotal}
+              </p>
+              <p className="mt-1 text-xs text-zinc-500">
+                {p85.routerParity.p85Executes} P8.5 executes this session
+              </p>
+            </div>
+
+            <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/40 p-4 md:col-span-2">
+              <p className="text-xs font-medium text-zinc-400">Session planner mix</p>
+              <ul className="mt-2 grid grid-cols-2 gap-x-6 gap-y-1 text-sm text-zinc-300">
+                <li className="flex justify-between">
+                  <span>Total</span>
+                  <span>{p85.session.total}</span>
+                </li>
+                <li className="flex justify-between">
+                  <span>Execute</span>
+                  <span className="text-emerald-400">{p85.session.execute}</span>
+                </li>
+                <li className="flex justify-between">
+                  <span>Defer</span>
+                  <span>{p85.session.defer}</span>
+                </li>
+                <li className="flex justify-between">
+                  <span>Clarify</span>
+                  <span className="text-amber-400">{p85.session.clarify}</span>
+                </li>
+                <li className="flex justify-between">
+                  <span>Avg latency</span>
+                  <span>{p85.session.avgLatencyMs}ms</span>
+                </li>
+                <li className="flex justify-between">
+                  <span>Fallback %</span>
+                  <span>{p85.session.fallbackPct}%</span>
+                </li>
+              </ul>
+            </div>
+
+            <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/40 p-4">
+              <p className="text-xs font-medium text-zinc-400">Top tools</p>
+              {p85.persisted.topTools.length === 0 ? (
+                <p className="mt-2 text-xs text-zinc-500">No executes yet</p>
+              ) : (
+                <ul className="mt-2 space-y-1 text-xs text-zinc-300">
+                  {p85.persisted.topTools.slice(0, 6).map((t) => (
+                    <li key={t.tool} className="flex justify-between">
+                      <span className="truncate pr-2">{t.tool}</span>
+                      <span className="text-violet-400">{t.count}×</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            {p85.persisted.topDeferReasons.length > 0 ? (
+              <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/40 p-4 md:col-span-3">
+                <p className="text-xs font-medium text-zinc-400">Top defer reasons</p>
+                <ul className="mt-2 flex flex-wrap gap-2">
+                  {p85.persisted.topDeferReasons.map((r) => (
+                    <li
+                      key={r.reason}
+                      className="rounded-lg border border-zinc-700/80 px-2 py-1 text-xs text-zinc-300"
+                    >
+                      {r.reason}{" "}
+                      <span className="text-orange-400">{r.count}×</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+
+            {p85.routerParity.recentMismatches.length > 0 ? (
+              <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/40 p-4 md:col-span-3">
+                <p className="text-xs font-medium text-zinc-400">
+                  Recent legacy router mismatches
+                </p>
+                <ul className="mt-2 space-y-2">
+                  {p85.routerParity.recentMismatches.map((m, i) => (
+                    <li
+                      key={`${m.at}-${i}`}
+                      className="rounded-lg border border-zinc-800/80 px-3 py-2 text-xs"
+                    >
+                      <p className="truncate text-zinc-200">"{m.command}"</p>
+                      <p className="mt-1 text-zinc-500">
+                        {m.legacyRouter} · P8.5 would {m.p85Reason}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+
+            {p85.recentObservations && p85.recentObservations.length > 0 ? (
+              <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/40 p-4 md:col-span-3">
+                <p className="text-xs font-medium text-zinc-400">
+                  P9 execution observations (session)
+                </p>
+                <ul className="mt-2 space-y-2">
+                  {p85.recentObservations.map((o, i) => (
+                    <li
+                      key={`${o.at}-${i}`}
+                      className="flex items-start justify-between gap-3 rounded-lg border border-zinc-800/80 px-3 py-2 text-xs"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-zinc-200">"{o.command}"</p>
+                        <p className="mt-1 text-zinc-500">
+                          {o.planSource} · {o.tools.join(", ")}
+                          {o.recovered ? " · recovered" : ""}
+                        </p>
+                      </div>
+                      <span
+                        className={
+                          o.succeeded ? "text-emerald-400" : "text-red-400"
+                        }
+                      >
+                        {o.succeeded ? "ok" : "fail"}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </div>
+        ) : (
+          <p className="text-sm text-zinc-500">P8.5 metrics unavailable</p>
+        )}
+      </section>
 
       {loading && !summary ? (
         <p className="text-sm text-zinc-500">Loading…</p>

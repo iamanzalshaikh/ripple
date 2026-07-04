@@ -1,7 +1,7 @@
 import type { NativeCommandIntent } from "../../desktop/parseNativeCommand.js";
 import { parseNativeCommandStrict } from "../../desktop/parseNativeCommand.js";
 import { parseUndoCommand } from "../../desktop/parseUndoCommand.js";
-import { parseCompoundIntent } from "./compoundParse.js";
+import { parseCompoundIntent, COMMA_CLAUSE_SPLIT } from "./compoundParse.js";
 import { parseByIntentClassifier } from "./intentClassifier.js";
 import { parseNluFallback } from "./intentExtract.js";
 import { preprocessForNlu, type NluPreprocessResult } from "./preprocess.js";
@@ -12,6 +12,7 @@ import {
   type RememberLifeEventIntent,
 } from "../../retriever/parseSemanticOpen.js";
 import { parseGmailOpenEmailCommand } from "../../gmail/parseGmailOpenEmail.js";
+import { parseOpenCrossAppAttachmentCommand } from "../../gmail/parseOpenCrossAppAttachment.js";
 import { isTemporalFileOpenQuery } from "../../retriever/timeRange.js";
 
 export type { RememberLifeEventIntent };
@@ -59,6 +60,13 @@ export function parseDesktopIntent(
     return { intent: gmailEmail, viaNlu: changed, preprocessed };
   }
 
+  const crossAppAttachment =
+    parseOpenCrossAppAttachmentCommand(raw) ??
+    parseOpenCrossAppAttachmentCommand(nlu);
+  if (crossAppAttachment) {
+    return { intent: crossAppAttachment, viaNlu: changed, preprocessed };
+  }
+
   const smartSearch =
     parseSmartSearchCommand(raw) ?? parseSmartSearchCommand(nlu);
   if (smartSearch?.query.type === "semantic_topic") {
@@ -80,7 +88,8 @@ export function parseDesktopIntent(
     /[.!?]\s+(?=(?:please\s+|kindly\s+)?(?:open|show|find|search|send|launch|start|switch|go)\b)/i.test(
       nlu,
     ) ||
-    /\s+(?:and|aur|then|phir|plus|\+)\s+/i.test(nlu);
+    /\s+(?:and|aur|then|phir|plus|\+)\s+/i.test(nlu) ||
+    COMMA_CLAUSE_SPLIT.test(nlu);
   if (looksMultiClause) {
     const compoundEarly = parseCompoundIntent(nlu, raw);
     if (compoundEarly) {

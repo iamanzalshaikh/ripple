@@ -1,3 +1,7 @@
+import {
+  normalizeDesktopVoiceCommand,
+  parseDesktopInputFallback,
+} from "../../agent/parseDesktopInput.js";
 import type { CommandResultPayload } from "../types.js";
 import {
   buildDesktopCommandResult,
@@ -22,6 +26,13 @@ import { looksLikeBoxDrawingMojibake } from "../voice/i18n/repairEncoding.js";
 import { policyFor } from "../voice/nlu/confidencePolicy.js";
 import { fetchDesktopIntentFromLlm } from "../voice/nlu/llmIntent.js";
 import { nativeIntentFromLlmPlan } from "../voice/nlu/intentFromLlm.js";
+import { buildTypingPayloadFromTypeIntent } from "../../agent/typingPayload.js";
+import type { TypeTextIntent } from "../desktop/parseNativeCommand.js";
+import {
+  buildWorldModel,
+  summarizeWorldForLog,
+  worldModelForLlm,
+} from "../../agent/worldModel.js";
 import { permissionForCommand } from "../safety/permissionEngine.js";
 import {
   rateLimitForPayload,
@@ -147,7 +158,7 @@ function payloadFromGraphHit(
   return { kind: "payload", payload, source, confidence };
 }
 
-async function tryGroundedLookup(
+export async function tryGroundedLookup(
   command: string,
   nlu: string,
 ): Promise<PlanExecuteResult | null> {
@@ -247,16 +258,52 @@ async function tryGptPlanner(
     return { kind: "not_found", hint: guidedApiUnavailable() };
   }
 
+  const world = await buildWorldModel();
+  console.info(`[ripple-desktop] world model: ${summarizeWorldForLog(world)}`);
+
   const plan = await fetchDesktopIntentFromLlm(
     accessToken,
     command,
     nlu,
     {
-    ...getLlmSessionContext(),
-  });
+      ...getLlmSessionContext(),
+    },
+    await worldModelForLlm(world),
+    /^(?:can you )?(?:please )?(?:write|compose|draft)\b/i.test(command)
+      ? "compose_text"
+      : undefined,
+  );
 
   if (!plan) {
     return null;
+  }
+
+  if (plan.action === "type_text" || plan.action === "press_keys") {
+    const typingIntent = nativeIntentFromLlmPlan(plan);
+    if (typingIntent?.kind === "type_text") {
+      if (policyFor(plan.confidence, 1) === "rephrase") {
+        recordCommandEvent({
+          command,
+          outcome: "not_found",
+          planner_source: "gpt",
+          detail: `low_confidence:${plan.confidence}`,
+        });
+        return { kind: "not_found", hint: guidedNotFound(command) };
+      }
+      const payload = buildTypingPayloadFromTypeIntent(
+        command,
+        typingIntent as TypeTextIntent,
+      );
+      const limited = checkRateLimit(command, payload);
+      if (limited) return limited;
+      recordPlannerSource("gpt", command);
+      return {
+        kind: "payload",
+        payload,
+        source: "gpt",
+        confidence: payloadConfidence("gpt", plan.confidence),
+      };
+    }
   }
 
   const native = nativeIntentFromLlmPlan(plan);
@@ -322,8 +369,16 @@ export async function planDesktopCommand(
   }
 
   const { nlu } = preprocessForNlu(trimmed);
-  const fastCandidates =
-    nlu.toLowerCase() !== trimmed.toLowerCase() ? [trimmed, nlu] : [trimmed];
+  const normalizedDesktop = normalizeDesktopVoiceCommand(trimmed);
+  const fastCandidates = Array.from(
+    new Set(
+      normalizedDesktop.toLowerCase() !== trimmed.toLowerCase()
+        ? [normalizedDesktop, trimmed, ...(nlu.toLowerCase() !== trimmed.toLowerCase() ? [nlu] : [])]
+        : nlu.toLowerCase() !== trimmed.toLowerCase()
+          ? [trimmed, nlu]
+          : [trimmed],
+    ),
+  );
 
   for (const candidate of fastCandidates) {
     const local = buildDesktopCommandResult(candidate);

@@ -65,10 +65,16 @@ function rememberWorkflowIntent(
   };
 }
 
+function normalizeWorkflowTranscript(command: string): string {
+  return normalizeTranscript(command)
+    .replace(/\bmode\s*open\b/gi, "mode open")
+    .replace(/([a-z])(open\s+)/gi, "$1 $2");
+}
+
 export function parseWorkflowMetaCommand(
   command?: string | null,
 ): WorkflowIntent | null {
-  const cmd = normalizeTranscript(command ?? "");
+  const cmd = normalizeWorkflowTranscript(command ?? "");
   if (!cmd) return null;
 
   if (/(?:^|\s)(?:list|show)\s+(?:my\s+)?workflows?\s*\.?\s*$/i.test(cmd)) {

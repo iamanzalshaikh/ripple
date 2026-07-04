@@ -1,4 +1,5 @@
 import { isWhatsAppTabActive } from "../../../focus/focusContext.js";
+import { parseDesktopInputFallback } from "../../../agent/parseDesktopInput.js";
 import { isEditOrRephraseCommand, isGmailVoiceCommand } from "../../commandIntent.js";
 import {
   commandImpliesSend,
@@ -65,6 +66,7 @@ export function isContextualWhatsAppComposeCommand(command?: string | null): boo
   if (looksLikeBoxDrawingMojibake(raw)) return false;
   const cmd = effectiveWhatsAppCommand(command);
   if (!cmd || !isWhatsAppTabActive()) return false;
+  if (parseDesktopInputFallback(cmd)) return false;
   if (isEditOrRephraseCommand(cmd)) return false;
   if (isGmailVoiceCommand(cmd)) return false;
   if (isWhatsAppOpenCommand(cmd)) return false;

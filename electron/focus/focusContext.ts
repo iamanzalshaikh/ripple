@@ -1,8 +1,18 @@
-import { getForegroundWindow, focusWindowByHwnd } from "../native/win32Bridge.js";
+import { getForegroundWindow, focusWindowByHwnd, getWindowUnderCursorNative } from "../native/win32Bridge.js";
 import { getMemory, setMemory } from "../storage/sessionMemory.js";
 import { rememberPdfFromFocus } from "../automation/desktop/pdfFocusMemory.js";
 import { rememberMediaFromFocus } from "../automation/desktop/mediaFocusMemory.js";
 import { rememberFolderFromFocus } from "../automation/desktop/folderFocusMemory.js";
+import type { ForegroundWindow } from "../native/types.js";
+import {
+  getSidecarCapabilities,
+  isNativeClientAuthenticated,
+} from "../native/nativeClient.js";
+import {
+  isSaveDialogContext,
+  isSaveDialogModalLocked,
+  isSaveDialogTitle,
+} from "./saveDialogMode.js";
 
 const STICKY_WEB_MS = 15 * 60 * 1000;
 
@@ -39,7 +49,7 @@ function rememberWebSurface(ctx: FocusContext): void {
   setMemory("last_web_surface_at", String(Date.now()));
 }
 
-function isClearlyDesktopForeground(ctx: FocusContext): boolean {
+export function isClearlyDesktopForeground(ctx: FocusContext): boolean {
   if (ctx.isBrowser) return false;
   const p = ctx.processName.toLowerCase();
   return (
@@ -66,13 +76,36 @@ export function getStickyWebSurface(): StickyWebSurface | null {
 }
 
 function isRippleOwnWindow(processName: string, windowTitle: string): boolean {
-  const p = processName.toLowerCase();
-  const t = windowTitle.toLowerCase();
-  return (
-    p.includes("ripple") ||
-    t.includes("ripple") ||
-    (p.includes("electron") && /ripple|voice|assistant/i.test(t))
-  );
+  return isRippleApplicationWindow(processName, windowTitle);
+}
+
+/** True when HWND belongs to Ripple itself (never a typing target). */
+export function isRippleApplicationWindow(
+  processName: string,
+  windowTitle: string,
+): boolean {
+  const p = (processName ?? "").toLowerCase();
+  const t = (windowTitle ?? "").toLowerCase().trim();
+
+  if (p === "ripple-desktop" || p === "ripple.exe" || /^ripple[\w.-]*$/.test(p)) {
+    return true;
+  }
+
+  if (p === "electron" || /\bripple\b/.test(p)) {
+    if (!t || t === "ripple") return true;
+    if (/^(?:ripple|voice|assistant|overlay)(?:\s|$)/i.test(t)) return true;
+    if (/\bripple\s+(voice|assistant|desktop|overlay)\b/i.test(t)) return true;
+    return false;
+  }
+
+  // Editor titles like "file.md - projectRipple" are not the Ripple app window.
+  if (/\bproject\s*ripple\b/i.test(t)) return false;
+  if (/\.[a-z0-9]{1,6}\s*[-–—]\s/.test(t)) return false;
+
+  if (/^(?:ripple|voice|assistant|overlay)(?:\s|$)/i.test(t)) return true;
+  if (/\bripple\s+(voice|assistant|desktop|overlay)\b/i.test(t)) return true;
+
+  return false;
 }
 
 /** Keep web-app flags from captured window title when extension reports a different active tab. */
@@ -111,6 +144,172 @@ export interface FocusContext {
 }
 
 let saved: FocusContext | null = null;
+let lastNonRippleFocus: FocusContext | null = null;
+let voiceCommandTarget: FocusContext | null = null;
+let focusCaptureLocked = false;
+let voiceSessionFrozen = false;
+let commandFocusGraceUntil = 0;
+
+const COMMAND_FOCUS_GRACE_MS = 8000;
+
+/** Explorer desktop shell — never a valid keyboard/mouse typing target. */
+export function isDesktopShellForeground(
+  ctx: Pick<FocusContext, "processName" | "windowTitle">,
+): boolean {
+  const proc = (ctx.processName ?? "").toLowerCase();
+  if (proc !== "explorer") return false;
+  const title = (ctx.windowTitle ?? "").trim().toLowerCase();
+  return !title || title === "program manager";
+}
+
+/** Shell HWNDs with no title are unreliable typing targets (steal focus from real apps). */
+export function isWeakFocusContext(
+  ctx: Pick<FocusContext, "hwnd" | "processName" | "windowTitle">,
+): boolean {
+  if (!ctx.hwnd) return true;
+  if (isRippleOwnWindow(ctx.processName, ctx.windowTitle)) return true;
+  if (isDesktopShellForeground(ctx)) return true;
+  const title = (ctx.windowTitle ?? "").trim();
+  const proc = (ctx.processName ?? "").toLowerCase();
+  if (
+    !title &&
+    (proc === "explorer" ||
+      proc === "shellexperiencehost" ||
+      proc === "searchhost" ||
+      proc === "applicationframehost")
+  ) {
+    return true;
+  }
+  return false;
+}
+
+export function setFocusCaptureLocked(locked: boolean): void {
+  focusCaptureLocked = locked;
+}
+
+export function setVoiceSessionFrozen(frozen: boolean): void {
+  voiceSessionFrozen = frozen;
+}
+
+/** Keep voice/typing target stable briefly after command execution. */
+export function extendCommandFocusGrace(ms = COMMAND_FOCUS_GRACE_MS): void {
+  commandFocusGraceUntil = Math.max(commandFocusGraceUntil, Date.now() + ms);
+}
+
+export function isCommandFocusGraceActive(): boolean {
+  return Date.now() < commandFocusGraceUntil;
+}
+
+function bestStableFocus(): FocusContext | null {
+  for (const ctx of [voiceCommandTarget, lastNonRippleFocus, saved]) {
+    if (ctx?.hwnd && !isWeakFocusContext(ctx)) return ctx;
+  }
+  return voiceCommandTarget ?? lastNonRippleFocus ?? saved;
+}
+
+function rememberNonRippleFocus(ctx: FocusContext): void {
+  if (
+    !isRippleOwnWindow(ctx.processName, ctx.windowTitle) &&
+    !isWeakFocusContext(ctx)
+  ) {
+    lastNonRippleFocus = ctx;
+  }
+}
+
+function buildFocusContextFromRaw(raw: ForegroundWindow): FocusContext {
+  return {
+    hwnd: Number(raw.hwnd) || 0,
+    processName: raw.processName ?? "",
+    windowTitle: raw.windowTitle ?? "",
+    capturedAt: Date.now(),
+    isGmail: detectGmail(raw.windowTitle ?? "", raw.processName ?? ""),
+    isWhatsApp: detectWhatsApp(raw.windowTitle ?? "", raw.processName ?? ""),
+    isSlack: detectSlack(raw.windowTitle ?? "", raw.processName ?? ""),
+    isNotion: detectNotion(raw.windowTitle ?? "", raw.processName ?? ""),
+    isYouTube: detectYouTube(raw.windowTitle ?? "", raw.processName ?? ""),
+    isLinkedIn: detectLinkedIn(raw.windowTitle ?? "", raw.processName ?? ""),
+    isInstagram: detectInstagram(raw.windowTitle ?? "", raw.processName ?? ""),
+    isBrowser: detectBrowser(raw.processName ?? ""),
+  };
+}
+
+/** Snapshot the app the user was in when voice hotkey fired (before overlay). */
+export async function snapshotPreVoiceTarget(): Promise<FocusContext | null> {
+  if (process.platform !== "win32") return null;
+  try {
+    const raw = await getForegroundWindow();
+    if (!raw?.hwnd) return lastNonRippleFocus;
+    if (isRippleOwnWindow(raw.processName ?? "", raw.windowTitle ?? "")) {
+      return lastNonRippleFocus ?? saved;
+    }
+    const ctx = buildFocusContextFromRaw(raw);
+    if (!isWeakFocusContext(ctx)) {
+      voiceCommandTarget = ctx;
+      lastNonRippleFocus = ctx;
+      saved = ctx;
+      console.info(
+        `[ripple-desktop] voice target: ${ctx.processName} | "${ctx.windowTitle.slice(0, 60)}"`,
+      );
+      return ctx;
+    }
+
+    const underMouse = await voiceTargetFromMouseFallback();
+    if (underMouse) {
+      voiceCommandTarget = underMouse;
+      lastNonRippleFocus = underMouse;
+      saved = underMouse;
+      console.info(
+        `[ripple-desktop] voice target (mouse fallback): ${underMouse.processName} | "${underMouse.windowTitle.slice(0, 60)}"`,
+      );
+      return underMouse;
+    }
+
+    const fallback = bestStableFocus();
+    if (fallback) {
+      voiceCommandTarget = fallback;
+      console.info(
+        `[ripple-desktop] voice target (weak fg skip): ${fallback.processName} | "${fallback.windowTitle.slice(0, 60)}"`,
+      );
+      return fallback;
+    }
+
+    console.info(
+      `[ripple-desktop] voice target weak/unresolved: ${ctx.processName} | "${ctx.windowTitle.slice(0, 60)}"`,
+    );
+    return null;
+  } catch {
+    return lastNonRippleFocus;
+  }
+}
+
+async function voiceTargetFromMouseFallback(): Promise<FocusContext | null> {
+  const under = await getWindowUnderCursorNative();
+  if (!under?.hwnd) return null;
+  if (isRippleOwnWindow(under.processName ?? "", under.windowTitle ?? "")) {
+    return null;
+  }
+  const ctx = buildFocusContextFromRaw(under);
+  if (isWeakFocusContext(ctx)) return null;
+  return ctx;
+}
+
+export function clearVoiceCommandTarget(): void {
+  voiceCommandTarget = null;
+}
+
+export function resolveTypingFocusTarget(): FocusContext | null {
+  const candidates = [voiceCommandTarget, lastNonRippleFocus, saved];
+  for (const ctx of candidates) {
+    if (
+      ctx?.hwnd &&
+      !isRippleOwnWindow(ctx.processName, ctx.windowTitle) &&
+      !isWeakFocusContext(ctx)
+    ) {
+      return ctx;
+    }
+  }
+  return null;
+}
 
 function detectGmail(title: string, processName: string): boolean {
   const t = title.toLowerCase();
@@ -264,9 +463,15 @@ export function isInstagramTabActive(): boolean {
   return isInstagramWindowTitle(ctx.windowTitle);
 }
 
+export function isDesktopAppForeground(): boolean {
+  const ctx = resolveTypingFocusTarget() ?? voiceCommandTarget ?? saved;
+  if (!ctx?.hwnd) return false;
+  return isClearlyDesktopForeground(ctx);
+}
+
 /** True when WhatsApp Web is the focused context. */
 export function isWhatsAppTabActive(): boolean {
-  const ctx = saved;
+  const ctx = voiceCommandTarget ?? saved;
   if (ctx) {
     if (isClearlyDesktopForeground(ctx)) return false;
     if (ctx.isWhatsApp) return true;
@@ -274,7 +479,9 @@ export function isWhatsAppTabActive(): boolean {
     if (detectWhatsApp(ctx.windowTitle, ctx.processName)) return true;
     return false;
   }
-  // Overlay stole focus — short sticky fallback only when we have no hwnd context.
+  if (voiceCommandTarget && isClearlyDesktopForeground(voiceCommandTarget)) {
+    return false;
+  }
   return getStickyWebSurface() === "whatsapp";
 }
 
@@ -312,6 +519,43 @@ export function setFocusContext(ctx: FocusContext): void {
   saved = ctx;
 }
 
+/** Pin typing/focus target to the modal Save As window (not parent editor HWND). */
+export function adoptSaveDialogTarget(raw: ForegroundWindow): FocusContext {
+  const ctx = buildFocusContextFromRaw(raw);
+  voiceCommandTarget = ctx;
+  saved = ctx;
+  lastNonRippleFocus = ctx;
+  extendCommandFocusGrace(12_000);
+  console.info(
+    `[ripple-desktop] save dialog lock → ${ctx.processName} | "${ctx.windowTitle.slice(0, 40)}"`,
+  );
+  return ctx;
+}
+
+export async function adoptForegroundAsTypingTarget(): Promise<void> {
+  if (process.platform !== "win32") return;
+  try {
+    const raw = await getForegroundWindow();
+    if (!raw?.hwnd) return;
+    if (isRippleOwnWindow(raw.processName ?? "", raw.windowTitle ?? "")) return;
+    const ctx = buildFocusContextFromRaw(raw);
+    if (isSaveDialogContext(ctx)) {
+      adoptSaveDialogTarget(raw);
+      return;
+    }
+    if (isWeakFocusContext(ctx)) return;
+    voiceCommandTarget = ctx;
+    saved = ctx;
+    lastNonRippleFocus = ctx;
+    extendCommandFocusGrace(12_000);
+  } catch (e: unknown) {
+    console.warn(
+      "[ripple-desktop] adopt foreground focus failed:",
+      e instanceof Error ? e.message : e,
+    );
+  }
+}
+
 export function clearFocusContext(): void {
   saved = null;
 }
@@ -343,6 +587,86 @@ export function focusContextToMetadata(): Record<string, unknown> {
   };
 }
 
+export async function captureFocusFromForeground(
+  raw: ForegroundWindow,
+): Promise<FocusContext | null> {
+  if (process.platform !== "win32") return null;
+
+  try {
+    const ctx = buildFocusContextFromRaw(raw);
+
+    if (isSaveDialogContext(ctx)) {
+      const adopted = adoptSaveDialogTarget(raw);
+      rememberWebSurface(adopted);
+      return adopted;
+    }
+
+    if (focusCaptureLocked || voiceSessionFrozen || isCommandFocusGraceActive()) {
+      if (isSaveDialogModalLocked()) {
+        const saveTarget = voiceCommandTarget ?? saved;
+        if (saveTarget) return saveTarget;
+      }
+      if (
+        isCommandFocusGraceActive() &&
+        voiceCommandTarget &&
+        !isWeakFocusContext(voiceCommandTarget)
+      ) {
+        return voiceCommandTarget;
+      }
+      const keep = bestStableFocus();
+      if (keep) {
+        return keep;
+      }
+    }
+    if (isRippleOwnWindow(raw.processName ?? "", raw.windowTitle ?? "")) {
+      if (saved) {
+        console.info("[ripple-desktop] focus skip Ripple window — keeping prior context");
+        return saved;
+      }
+    }
+    if (isWeakFocusContext(ctx)) {
+      const keep = bestStableFocus();
+      if (keep) {
+        console.info(
+          `[ripple-desktop] focus skip weak window — keeping ${keep.processName}`,
+        );
+        return keep;
+      }
+      console.info(
+        `[ripple-desktop] focus skip weak: ${ctx.processName} | "${ctx.windowTitle.slice(0, 40)}"`,
+      );
+      return null;
+    }
+    const enriched = await enrichContextFromExtension(ctx);
+    if (isCommandFocusGraceActive() && !isSaveDialogModalLocked()) {
+      if (voiceCommandTarget && !isWeakFocusContext(voiceCommandTarget)) {
+        return voiceCommandTarget;
+      }
+      const keep = bestStableFocus();
+      if (keep) {
+        return keep;
+      }
+    }
+    saved = enriched;
+    rememberNonRippleFocus(enriched);
+    rememberWebSurface(enriched);
+    rememberPdfFromFocus(enriched);
+    rememberMediaFromFocus(enriched);
+    rememberFolderFromFocus(enriched);
+    console.info(
+      `[ripple-desktop] focus captured: ${enriched.processName} | "${enriched.windowTitle.slice(0, 60)}" | gmail=${enriched.isGmail} whatsapp=${enriched.isWhatsApp} notion=${enriched.isNotion} youtube=${enriched.isYouTube} linkedin=${enriched.isLinkedIn} instagram=${enriched.isInstagram}${enriched.activeTabUrl ? ` url=${enriched.activeTabUrl.slice(0, 50)}` : ""}`,
+    );
+    return enriched;
+  } catch (e: unknown) {
+    console.warn(
+      "[ripple-desktop] focus capture failed:",
+      e instanceof Error ? e.message : e,
+    );
+    saved = null;
+    return null;
+  }
+}
+
 export async function captureFocusContext(): Promise<FocusContext | null> {
   if (process.platform !== "win32") {
     saved = {
@@ -368,36 +692,7 @@ export async function captureFocusContext(): Promise<FocusContext | null> {
       saved = null;
       return null;
     }
-    if (isRippleOwnWindow(raw.processName ?? "", raw.windowTitle ?? "")) {
-      if (saved) {
-        console.info("[ripple-desktop] focus skip Ripple window — keeping prior context");
-        return saved;
-      }
-    }
-    const ctx: FocusContext = {
-      hwnd: Number(raw.hwnd) || 0,
-      processName: raw.processName ?? "",
-      windowTitle: raw.windowTitle ?? "",
-      capturedAt: Date.now(),
-      isGmail: detectGmail(raw.windowTitle ?? "", raw.processName ?? ""),
-      isWhatsApp: detectWhatsApp(raw.windowTitle ?? "", raw.processName ?? ""),
-      isSlack: detectSlack(raw.windowTitle ?? "", raw.processName ?? ""),
-      isNotion: detectNotion(raw.windowTitle ?? "", raw.processName ?? ""),
-      isYouTube: detectYouTube(raw.windowTitle ?? "", raw.processName ?? ""),
-      isLinkedIn: detectLinkedIn(raw.windowTitle ?? "", raw.processName ?? ""),
-      isInstagram: detectInstagram(raw.windowTitle ?? "", raw.processName ?? ""),
-      isBrowser: detectBrowser(raw.processName ?? ""),
-    };
-    const enriched = await enrichContextFromExtension(ctx);
-    saved = enriched;
-    rememberWebSurface(enriched);
-    rememberPdfFromFocus(enriched);
-    rememberMediaFromFocus(enriched);
-    rememberFolderFromFocus(enriched);
-    console.info(
-      `[ripple-desktop] focus captured: ${enriched.processName} | "${enriched.windowTitle.slice(0, 60)}" | gmail=${enriched.isGmail} whatsapp=${enriched.isWhatsApp} notion=${enriched.isNotion} youtube=${enriched.isYouTube} linkedin=${enriched.isLinkedIn} instagram=${enriched.isInstagram}${enriched.activeTabUrl ? ` url=${enriched.activeTabUrl.slice(0, 50)}` : ""}`,
-    );
-    return enriched;
+    return captureFocusFromForeground(raw);
   } catch (e: unknown) {
     console.warn(
       "[ripple-desktop] focus capture failed:",
@@ -410,6 +705,13 @@ export async function captureFocusContext(): Promise<FocusContext | null> {
 
 /** Re-read focus + extension tab URL before command routing. */
 export async function refreshFocusFromExtension(): Promise<FocusContext | null> {
+  if (voiceSessionFrozen || focusCaptureLocked || voiceCommandTarget) {
+    const base = voiceCommandTarget ?? saved;
+    if (!base) return null;
+    const enriched = await enrichContextFromExtension(base);
+    saved = enriched;
+    return enriched;
+  }
   await captureFocusContext();
   const ctx = saved;
   if (!ctx) return null;
@@ -424,6 +726,7 @@ export async function refreshFocusFromExtension(): Promise<FocusContext | null> 
 
 const P8_FOCUS_POLL_MS = 2000;
 const P8_FOCUS_BURST_MS = 500;
+const P8_FOCUS_SIDECAR_FALLBACK_MS = 10_000;
 const P8_BURST_DURATION_MS = 12_000;
 let p8FocusTimer: ReturnType<typeof setTimeout> | null = null;
 let p8BurstUntil = 0;
@@ -435,6 +738,13 @@ function isExplorerOrShellProcess(processName: string): boolean {
     p.includes("photos") ||
     p.includes("applicationframehost") ||
     p.includes("dllhost")
+  );
+}
+
+function sidecarForegroundEventsActive(): boolean {
+  return (
+    isNativeClientAuthenticated() &&
+    getSidecarCapabilities()?.foregroundEvents === true
   );
 }
 
@@ -450,8 +760,12 @@ function scheduleP8FocusPoll(intervalMs: number): void {
       } catch {
         /* ignore poll errors */
       } finally {
-        const delay =
-          Date.now() < p8BurstUntil ? P8_FOCUS_BURST_MS : intervalMs;
+        const sidecarEvents = sidecarForegroundEventsActive();
+        const delay = sidecarEvents
+          ? P8_FOCUS_SIDECAR_FALLBACK_MS
+          : Date.now() < p8BurstUntil
+            ? P8_FOCUS_BURST_MS
+            : intervalMs;
         scheduleP8FocusPoll(delay);
       }
     })();
@@ -461,24 +775,54 @@ function scheduleP8FocusPoll(intervalMs: number): void {
 /** Poll foreground — tracks pdf, image, video, folder views into activity_log (P8). */
 export function startMediaFocusWatcher(intervalMs = P8_FOCUS_POLL_MS): void {
   if (p8FocusTimer || process.platform !== "win32") return;
-  scheduleP8FocusPoll(intervalMs);
-  console.info(
-    `[ripple-desktop] P8 focus watcher → ${intervalMs}ms default, ${P8_FOCUS_BURST_MS}ms burst when Explorer/Photos active`,
-  );
+  const sidecarEvents = sidecarForegroundEventsActive();
+  const baseInterval = sidecarEvents ? P8_FOCUS_SIDECAR_FALLBACK_MS : intervalMs;
+  scheduleP8FocusPoll(baseInterval);
+  if (sidecarEvents) {
+    console.info(
+      `[ripple-desktop] P8 focus watcher → sidecar foreground events + ${P8_FOCUS_SIDECAR_FALLBACK_MS}ms fallback poll`,
+    );
+  } else {
+    console.info(
+      `[ripple-desktop] P8 focus watcher → ${intervalMs}ms default, ${P8_FOCUS_BURST_MS}ms burst when Explorer/Photos active`,
+    );
+  }
 }
 
 export async function restoreFocusContext(): Promise<boolean> {
-  if (!saved?.hwnd) return false;
+  if (isSaveDialogModalLocked()) {
+    if (process.platform !== "win32") return false;
+    try {
+      const raw = await getForegroundWindow();
+      if (raw?.hwnd && isSaveDialogTitle(raw.windowTitle)) {
+        await focusWindowByHwnd(Number(raw.hwnd), raw.windowTitle ?? "Save As");
+        adoptSaveDialogTarget(raw);
+        return true;
+      }
+    } catch {
+      /* keep save dialog lock — do not restore parent editor */
+    }
+    return false;
+  }
+
+  const target =
+    resolveTypingFocusTarget() ??
+    (voiceCommandTarget && !isWeakFocusContext(voiceCommandTarget)
+      ? voiceCommandTarget
+      : null);
+  if (!target?.hwnd || isDesktopShellForeground(target)) return false;
 
   if (process.platform !== "win32") {
     return false;
   }
 
   try {
-    await focusWindowByHwnd(saved.hwnd, saved.windowTitle);
+    await focusWindowByHwnd(target.hwnd, target.windowTitle);
     await new Promise((r) => setTimeout(r, 350));
+    saved = target;
+    lastNonRippleFocus = target;
     console.info(
-      `[ripple-desktop] focus restored → ${saved.processName} | "${saved.windowTitle.slice(0, 60)}"`,
+      `[ripple-desktop] focus restored → ${target.processName} | "${target.windowTitle.slice(0, 60)}"`,
     );
     return true;
   } catch (e: unknown) {

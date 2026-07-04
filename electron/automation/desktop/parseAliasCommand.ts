@@ -1,4 +1,5 @@
 import { normalizeTranscript } from "../voice/normalizeTranscript.js";
+import { isEditorClearTextPhrase } from "../../agent/parseDesktopInput.js";
 import { resolveAlias } from "./aliasRegistry.js";
 import type { UserAlias } from "./aliasRegistry.js";
 import { normalizeSpokenPath } from "./spokenPath.js";
@@ -87,7 +88,7 @@ export function parseAliasMetaCommand(
   const forget = cmd.match(
     /^\s*(?:forget|remove)\s+(?!workflow\b)(?:alias\s+)?(.+?)\s*\.?\s*$/i,
   );
-  if (forget?.[1]) {
+  if (forget?.[1] && !isEditorClearTextPhrase(cmd)) {
     return { kind: "remove_alias", name: sanitizeSpokenName(forget[1]) };
   }
 

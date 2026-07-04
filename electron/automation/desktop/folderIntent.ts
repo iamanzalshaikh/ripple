@@ -63,6 +63,38 @@ export function parseWellKnownFolderOpen(
     if (folder) return { kind: "folder", folder };
   }
 
+  const goFolder = cmd.match(
+    /^\s*go\s+to\s+(?:my\s+)?(?:the\s+)?(downloads?|documents?|desktop)\s*$/i,
+  );
+  if (goFolder?.[1]) {
+    const folder = normalizeFolderKey(goFolder[1]);
+    if (folder) return { kind: "folder", folder };
+  }
+
+  const showFolderExplicit = cmd.match(
+    /^\s*show\s+(?:me\s+)?(?:the\s+)?(?:my\s+)?(downloads?|documents?|desktop)\s+folder\s*$/i,
+  );
+  if (showFolderExplicit?.[1]) {
+    const folder = normalizeFolderKey(showFolderExplicit[1]);
+    if (folder) return { kind: "folder", folder };
+  }
+
+  const hinglishFolderOpen = cmd.match(
+    /^\s*(downloads?|documents?|desktop)\s+folder\s+open(?:\s+karo)?\s*$/i,
+  );
+  if (hinglishFolderOpen?.[1]) {
+    const folder = normalizeFolderKey(hinglishFolderOpen[1]);
+    if (folder) return { kind: "folder", folder };
+  }
+
+  const hinglishKholo = cmd.match(
+    /^\s*(downloads?|documents?|desktop)\s+kholo\s*$/i,
+  );
+  if (hinglishKholo?.[1]) {
+    const folder = normalizeFolderKey(hinglishKholo[1]);
+    if (folder) return { kind: "folder", folder };
+  }
+
   return null;
 }
 

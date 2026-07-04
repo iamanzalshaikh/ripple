@@ -1,5 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { getRippleDbPath } from "../config/ripplePaths.js";
+import { tryLoadSqliteVec } from "./sqliteVec.js";
 
 let db: DatabaseSync | null = null;
 
@@ -233,6 +234,7 @@ export function initRippleDb(): void {
   db.exec("PRAGMA busy_timeout=5000");
   db.exec(SCHEMA);
   migrateRippleSchema(db);
+  tryLoadSqliteVec();
   console.info(`[ripple-desktop] Local DB ready → ${path}`);
 }
 

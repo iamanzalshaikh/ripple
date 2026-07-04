@@ -1,5 +1,7 @@
 import { app, ipcMain } from "electron";
 import { loadDesktopEnv, getSocketUrl } from "../config/env.js";
+import { logPhaseBBootLine } from "../agent/planner/phaseBConfig.js";
+import { logPlannerV2BootLine } from "../agent/planner/v2/plannerV2Config.js";
 import { API_BASE } from "../services/api.js";
 import { rippleSocket } from "../socket/rippleSocket.js";
 import { runDesktopCommand } from "../services/commandOrchestrator.js";
@@ -31,6 +33,8 @@ import {
 } from "../windows/overlay.js";
 
 loadDesktopEnv();
+logPhaseBBootLine();
+logPlannerV2BootLine();
 import {
   clearTokens,
   getAccessToken,
@@ -69,10 +73,15 @@ import {
 import { startSemanticIndexBackfill } from "../storage/recordFileTouch.js";
 import { pruneActivityLogOlderThan } from "../storage/activityLog.js";
 import { ingestCrossAppReference } from "../storage/crossAppIngest.js";
-import { probeP8bSearch, seedP8bTestData } from "../storage/p8bTestSeed.js";
+import { probeP8bSearch, seedP8bTestData, P8B_VOICE_COMMANDS } from "../storage/p8bTestSeed.js";
 import { startMediaFocusWatcher } from "../focus/focusContext.js";
 import { buildObservabilitySummary, buildCiGateSummary, exportTelemetryCsv } from "../telemetry/observabilityDashboard.js";
-import { getNativeCapabilities, initNativeHost } from "../native/nativeHost.js";
+import { buildPlannerDashboardSummary } from "../agent/planner/planMetricsDashboard.js";
+import {
+  exportPlannerShadowCsv,
+  getRecentExecutionObservations,
+} from "../agent/planner/index.js";
+import { getNativeCapabilities, initNativeHost, shutdownNativeHost } from "../native/nativeHost.js";
 import { bootstrapDemoSeeds } from "../storage/bootstrapSeeds.js";
 import { runPreflightHealth } from "../services/preflightHealth.js";
 
@@ -541,6 +550,34 @@ function registerIpc(): void {
     }
   });
 
+  ipcMain.handle("telemetry:p85", async () => {
+    try {
+      return {
+        ok: true,
+        dashboard: {
+          ...buildPlannerDashboardSummary(500),
+          recentObservations: getRecentExecutionObservations(15),
+        },
+      };
+    } catch (e: unknown) {
+      return {
+        ok: false,
+        message: e instanceof Error ? e.message : "P8.5 metrics unavailable",
+      };
+    }
+  });
+
+  ipcMain.handle("telemetry:p85:export", async () => {
+    try {
+      return { ok: true, csv: exportPlannerShadowCsv(500) };
+    } catch (e: unknown) {
+      return {
+        ok: false,
+        message: e instanceof Error ? e.message : "P8.5 export failed",
+      };
+    }
+  });
+
   ipcMain.handle("telemetry:summary", async () => {
     try {
       return { ok: true, summary: buildObservabilitySummary() };
@@ -651,12 +688,7 @@ function registerIpc(): void {
         ok: true,
         data: {
           ...data,
-          voiceCommands: [
-            "Open PDF I discussed with Ahmed",
-            "Open that thing Sarah sent",
-            "Remember my Goa trip was March 15 2025",
-            "Open pdf before my Goa trip",
-          ],
+          voiceCommands: [...P8B_VOICE_COMMANDS],
         },
       };
     } catch (e: unknown) {
@@ -694,6 +726,11 @@ app.whenReady().then(async () => {
     );
   }
   initRippleDb();
+  const { ensureP85ToolsRegistered } = await import(
+    "../agent/planner/toolExecutorBridge.js"
+  );
+  ensureP85ToolsRegistered();
+  console.info("[ripple-p85] P8.5 tools registered — voice testing ready");
   await initNativeHost();
   initNativeAppRegistry();
   startFileIndexBackground();
@@ -761,6 +798,7 @@ app.on("before-quit", () => {
 });
 
 app.on("will-quit", () => {
+  shutdownNativeHost();
   stopWhatsAppExtensionBridge();
   unregisterGlobalShortcuts();
   destroyTray();

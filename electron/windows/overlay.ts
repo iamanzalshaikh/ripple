@@ -1,7 +1,11 @@
 import { BrowserWindow, screen } from "electron";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { captureFocusContext } from "../focus/focusContext.js";
+import {
+  extendCommandFocusGrace,
+  setVoiceSessionFrozen,
+  snapshotPreVoiceTarget,
+} from "../focus/focusContext.js";
 import { resolvePreloadPath } from "../utils/preloadPath.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -24,6 +28,7 @@ export function isVoiceSessionActive(): boolean {
 
 export function setVoiceSessionActive(active: boolean): void {
   voiceSessionActive = active;
+  setVoiceSessionFrozen(active);
 }
 
 function positionIndicator(win: BrowserWindow): void {
@@ -127,7 +132,10 @@ export function expandOverlayForDisambiguation(itemCount: number): void {
   const display = screen.getPrimaryDisplay();
   const area = display.workArea;
   const width = 380;
-  const height = Math.min(300, 72 + Math.max(1, itemCount) * 40);
+  const height =
+    itemCount <= 0
+      ? 88
+      : Math.min(300, 72 + Math.max(1, itemCount) * 40);
   const x = Math.round(area.x + (area.width - width) / 2);
   const y = Math.round(area.y + area.height - height - BOTTOM_MARGIN);
   overlayWindow.setBounds({ x, y, width, height });
@@ -144,11 +152,20 @@ export function setOverlayState(state: string): void {
   sendToOverlay("overlay:state", state);
 }
 
+export function showClarifyQuestionOnOverlay(question: string): void {
+  const q = question.trim().slice(0, 200);
+  if (!q) return;
+  showOverlay();
+  expandOverlayForDisambiguation(0);
+  sendToOverlay("overlay:clarify", { question: q });
+}
+
 export function dismissOverlay(delayMs = 1500): void {
   setTimeout(() => {
     hideOverlay();
     setOverlayState("idle");
     setVoiceSessionActive(false);
+    extendCommandFocusGrace();
   }, delayMs);
 }
 
@@ -170,8 +187,8 @@ export async function handleShortcutPress(): Promise<void> {
     return;
   }
 
-  // Capture before overlay; skip if foreground is Ripple — we find Chrome WhatsApp at execute time
-  await captureFocusContext();
+  // Snapshot target app before overlay steals attention (do not re-capture FG here)
+  await snapshotPreVoiceTarget();
   showOverlay();
   setVoiceSessionActive(true);
   setOverlayState("listening");

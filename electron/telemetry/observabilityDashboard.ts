@@ -7,6 +7,7 @@ import {
 import { evaluateCiGate, type CiGateResult } from "./ciGateStatus.js";
 import { listTopAppsForDashboard } from "../storage/knowledgeGraph.js";
 import { listTopWorkflowsForDashboard } from "../storage/workflowGraph.js";
+import { buildPlannerDashboardSummary } from "../agent/planner/planMetricsDashboard.js";
 
 export type ObservabilitySummary = {
   total: number;
@@ -24,6 +25,7 @@ export type ObservabilitySummary = {
   topApps: Array<{ appId: string; openCount: number; score: number }>;
   avgLatencyMs: number;
   ciGate?: CiGateResult;
+  plannerP85?: ReturnType<typeof buildPlannerDashboardSummary>;
 };
 
 export function buildCiGateSummary(): CiGateResult {
@@ -128,6 +130,7 @@ export function buildObservabilitySummary(): ObservabilitySummary {
     topWorkflows: listTopWorkflowsForDashboard(6),
     topApps: listTopAppsForDashboard(6),
     avgLatencyMs: avgLatency(events),
+    plannerP85: buildPlannerDashboardSummary(300),
   };
 }
 

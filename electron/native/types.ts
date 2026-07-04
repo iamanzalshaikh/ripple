@@ -15,12 +15,23 @@ export type A11yFocusedElement = {
   className: string;
 };
 
+export type ScreenshotOcrResult = {
+  text: string;
+  width: number;
+  height: number;
+  lineCount: number;
+};
+
 export type NativeCapabilities = {
   platform: NodeJS.Platform;
   win32Bridge: boolean;
   globalHotkeys: boolean;
   sendInput: boolean;
   accessibility: boolean;
+  ocr?: boolean;
+  sidecarConnected?: boolean;
+  sidecarProtocol?: number;
+  sidecarVersion?: string;
 };
 
 export type Win32Action =
@@ -31,4 +42,10 @@ export type Win32Action =
   | "enumWindows"
   | "sendKeys"
   | "runSequence"
-  | "getFocusedA11y";
+  | "getFocusedA11y"
+  | "getScreenMetrics"
+  | "getWindowAtPoint"
+  | "getCursorPosition"
+  | "mouseMove"
+  | "mouseClick"
+  | "mouseScroll";

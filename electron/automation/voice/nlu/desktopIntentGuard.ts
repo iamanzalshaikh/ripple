@@ -1,4 +1,5 @@
 import { guidedNotFound } from "../../planner/guidedResponses.js";
+import { parseDesktopInputFallback } from "../../../agent/parseDesktopInput.js";
 import { isDesktopIntent } from "./pipeline.js";
 import { preprocessForNlu } from "./preprocess.js";
 import {
@@ -34,10 +35,14 @@ const HINGLISH_FOLDER_VERBS =
 const REGIONAL_DESKTOP_VERBS =
   /(?:खोल|दिख|भेज|सर्च|डाउन|फाइल|फोल्डर|रिज्यूम|کھولو|ڈاؤن|فائل|ریزیوم|විවෘත|ඕපන්|ඩවුන්|திற|பதிவிறக்க)/u;
 
+const DESKTOP_INPUT_VERBS =
+  /^\s*(?:move\s+(?:the\s+)?mouse|scroll|page\s+(?:up|down)|click|double\s+click|select\s+all|paste|copy|cut|delete|undo|redo)\b/i;
+
 /**
  * True when the utterance is probably a desktop command — should never go to backend navigation.
  */
 export function isLikelyDesktopCommand(command?: string | null): boolean {
+  if (parseDesktopInputFallback(command ?? "")) return true;
   if (isDesktopIntent(command)) return true;
 
   const { raw, nlu } = preprocessForNlu(command);
@@ -49,6 +54,7 @@ export function isLikelyDesktopCommand(command?: string | null): boolean {
 
   const text = `${raw} ${nlu}`.toLowerCase();
 
+  if (DESKTOP_INPUT_VERBS.test(text)) return true;
   if (DESKTOP_RECALL.test(text)) return true;
   if (DESKTOP_UNDO.test(text)) return true;
   if (HINGLISH_DESKTOP.test(text)) return true;

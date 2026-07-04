@@ -21,6 +21,8 @@ export async function fetchDesktopIntentFromLlm(
   command: string,
   nlu?: string,
   session?: DesktopIntentSession,
+  worldModel?: Record<string, unknown>,
+  intentHint?: string,
 ): Promise<DesktopIntentPlan | null> {
   const rawOnly = !nlu?.trim();
   console.info(
@@ -45,6 +47,8 @@ export async function fetchDesktopIntentFromLlm(
         recent_turns: session?.recentTurns?.length
           ? session.recentTurns
           : undefined,
+        world_model: worldModel,
+        intent_hint: intentHint,
       }),
     });
 

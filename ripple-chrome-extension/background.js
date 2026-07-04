@@ -3,6 +3,14 @@ let nativePort = null;
 let reconnectTimer = null;
 let reconnectDelayMs = 3000;
 const MAX_RECONNECT_MS = 30_000;
+const pendingDownloads = new Map();
+
+function sanitizeFileName(name) {
+  return String(name ?? "attachment")
+    .replace(/[<>:"/\\|?*]+/g, "_")
+    .replace(/\s+/g, "_")
+    .slice(0, 120);
+}
 
 async function runOnWhatsAppTab(tabId, payload) {
   try {
@@ -151,7 +159,7 @@ function connectNative() {
       try {
         let tab = await pickTab("https://web.whatsapp.com/*");
         if (!tab?.id) {
-          throw new Error("WhatsApp tab not found — open web.whatsapp.com in Chrome");
+          throw new Error("WhatsApp tab not found — open web.whatsapp.com in Chrome or Edge");
         }
         await focusTab(tab);
         await new Promise((r) => setTimeout(r, 350));
@@ -437,7 +445,7 @@ function connectNative() {
         type: "WHATSAPP_RESULT",
         id: msg.id,
         ok: false,
-        error: "Open https://web.whatsapp.com in this Chrome first",
+        error: "Open https://web.whatsapp.com in Chrome or Edge first",
       });
       return;
     }
@@ -488,6 +496,27 @@ function connectNative() {
 }
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (msg?.type === "RIPPLE_DOWNLOAD_GMAIL_ATTACHMENT") {
+    const fileName = sanitizeFileName(msg.fileName);
+    chrome.downloads.download(
+      {
+        url: msg.url,
+        filename: `Ripple/attachments/${fileName}`,
+        conflictAction: "uniquify",
+        saveAs: false,
+      },
+      (downloadId) => {
+        if (chrome.runtime.lastError) {
+          sendResponse?.({ ok: false, error: chrome.runtime.lastError.message });
+          return;
+        }
+        pendingDownloads.set(downloadId, msg);
+        sendResponse?.({ ok: true, downloadId });
+      },
+    );
+    return true;
+  }
+
   if (msg?.type !== "RIPPLE_CROSS_APP_INGEST") return;
   if (!nativePort) {
     sendResponse?.({ ok: false, error: "Native port not connected" });
@@ -502,6 +531,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       command: msg.command,
       path: msg.path,
       externalUrl: msg.externalUrl,
+      attachments: msg.attachments,
     });
     sendResponse?.({ ok: true });
   } catch (e) {
@@ -511,3 +541,30 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 });
 
 connectNative();
+
+if (chrome.downloads?.onChanged) {
+  chrome.downloads.onChanged.addListener((delta) => {
+    if (delta.state?.current !== "complete" || !nativePort) return;
+    const meta = pendingDownloads.get(delta.id);
+    if (!meta) return;
+    chrome.downloads.search({ id: delta.id }, (items) => {
+      const item = items?.[0];
+      if (!item?.filename) return;
+      pendingDownloads.delete(delta.id);
+      try {
+        nativePort.postMessage({
+          type: "CROSS_APP_INGEST_PUSH",
+          appId: meta.appId || "gmail",
+          summary: meta.summary || `Attachment: ${meta.fileName}`,
+          contact: meta.contact,
+          path: item.filename,
+          externalUrl: meta.pageUrl,
+          attachments: [meta.fileName],
+          command: `Gmail attachment: ${meta.fileName}`,
+        });
+      } catch (e) {
+        console.warn("[ripple-ext] attachment ingest failed", e);
+      }
+    });
+  });
+}

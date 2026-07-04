@@ -4,6 +4,7 @@ import type { SmartSearchIntent } from "../../desktop/parseSmartSearchCommand.js
 import type { SystemActionId } from "../../desktop/systemActions.js";
 import { resolveNativeApp } from "../../desktop/nativeAppRegistry.js";
 import type { RecallTarget } from "../../desktop/parseSessionMemoryCommand.js";
+import type { TypeTextIntent } from "../../desktop/parseNativeCommand.js";
 
 export type DesktopIntentPlan = {
   action: string;
@@ -19,8 +20,17 @@ export type DesktopIntentPlan = {
     time?: "yesterday" | "today" | "last_week";
     recall_target?: RecallTarget | "workspace";
     system_action?: string;
+    text?: string;
+    keys?: string;
+    replace_all?: boolean;
   };
   confidence: number;
+  /** Optional multi-step plan from GPT (P8.5 Wave 1). */
+  steps?: Array<{
+    tool: string;
+    args: Record<string, unknown>;
+    reason?: string;
+  }>;
 };
 
 function systemActionId(raw?: string): SystemActionId | null {
@@ -218,6 +228,28 @@ export function nativeIntentFromLlmPlan(
       const action = systemActionId(e.system_action);
       if (!action) return null;
       return { kind: "system_action", action };
+    }
+
+    case "type_text": {
+      const text = e.text?.trim();
+      if (text) {
+        return {
+          kind: "type_text",
+          text,
+          replaceAll: e.replace_all === true,
+        } satisfies TypeTextIntent;
+      }
+      const keys = e.keys?.trim();
+      if (keys) {
+        return { kind: "type_text", keys } satisfies TypeTextIntent;
+      }
+      return null;
+    }
+
+    case "press_keys": {
+      const keys = e.keys?.trim();
+      if (!keys) return null;
+      return { kind: "type_text", keys } satisfies TypeTextIntent;
     }
 
     default:

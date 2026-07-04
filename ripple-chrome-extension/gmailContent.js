@@ -15,6 +15,34 @@
     }
   }
 
+  function collectAttachments(root) {
+    const attachments = [];
+    const seen = new Set();
+    const push = (name) => {
+      const n = (name || "").trim();
+      if (n.length < 3) return;
+      const key = n.toLowerCase();
+      if (seen.has(key)) return;
+      const looksLikeFile =
+        /\.(pdf|doc|docx|xls|xlsx|ppt|pptx|zip|png|jpe?g|csv|txt)\b/i.test(n) ||
+        /\b(pdf|document|spreadsheet|presentation)\b/i.test(n);
+      if (!looksLikeFile && n.length < 8) return;
+      seen.add(key);
+      attachments.push(n.slice(0, 120));
+    };
+
+    for (const el of root.querySelectorAll(
+      "span.aZo, span.aV3, [download_url], [data-tooltip], [aria-label]",
+    )) {
+      const t =
+        el.getAttribute?.("data-tooltip") ||
+        el.getAttribute?.("aria-label") ||
+        el.textContent?.trim();
+      if (t) push(t);
+    }
+    return attachments.slice(0, 8);
+  }
+
   function readOpenThreadContext() {
     const subject =
       document.querySelector("h2.hP")?.textContent?.trim() ||
@@ -33,17 +61,7 @@
       fromEl?.textContent?.trim() ||
       "";
 
-    const attachmentEls = document.querySelectorAll(
-      "span.aZo, span.aV3, [download_url], [data-tooltip*='.pdf'], [data-tooltip*='.doc']",
-    );
-    const attachments = [];
-    for (const el of attachmentEls) {
-      const t =
-        el.getAttribute?.("data-tooltip") ||
-        el.getAttribute?.("aria-label") ||
-        el.textContent?.trim();
-      if (t && t.length >= 3) attachments.push(t.slice(0, 120));
-    }
+    const attachments = collectAttachments(document);
 
     const resolvedSubject =
       subject || document.title.replace(/\s*-\s*Gmail.*/i, "").trim();
@@ -66,6 +84,7 @@
       contact,
       subject: resolvedSubject || fromName,
       url: location.href,
+      attachments,
     };
   }
 
@@ -122,6 +141,34 @@
     return readOpenThreadContext() || readInboxRowContext();
   }
 
+  function queueAttachmentDownloads(ctx) {
+    if (!ctx?.attachments?.length) return;
+    const seen = new Set();
+    for (const el of document.querySelectorAll("[download_url]")) {
+      const url = el.getAttribute("download_url");
+      const name =
+        el.getAttribute("data-tooltip") ||
+        el.getAttribute("aria-label") ||
+        el.textContent?.trim() ||
+        "";
+      if (!url || !name || seen.has(url)) continue;
+      seen.add(url);
+      try {
+        chrome.runtime.sendMessage({
+          type: "RIPPLE_DOWNLOAD_GMAIL_ATTACHMENT",
+          url,
+          fileName: name.slice(0, 120),
+          appId: "gmail",
+          contact: ctx.contact,
+          pageUrl: ctx.url,
+          summary: ctx.summary,
+        });
+      } catch (e) {
+        console.warn(LOG, "download queue failed", e);
+      }
+    }
+  }
+
   function maybeIngest() {
     const ctx = readThreadContext();
     if (!ctx) return;
@@ -133,9 +180,11 @@
       appId: "gmail",
       summary: ctx.summary,
       contact: ctx.contact || undefined,
+      attachments: ctx.attachments?.length ? ctx.attachments : undefined,
       command: `Gmail thread: ${ctx.subject || "message"}`,
       externalUrl: ctx.url,
     });
+    queueAttachmentDownloads(ctx);
     console.info(LOG, "ingest queued", ctx.summary.slice(0, 80));
   }
 

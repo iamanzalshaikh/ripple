@@ -3,6 +3,7 @@ import {
   cancelVoiceSession,
   handleShortcutPress,
 } from "../windows/overlay.js";
+import { getSidecarCapabilities, isNativeClientAuthenticated } from "./nativeClient.js";
 
 export type HotkeyBinding = {
   accelerator: string;
@@ -26,10 +27,24 @@ function runHotkeyAction(action: HotkeyBinding["action"]): void {
   }
 }
 
-/** P7 — register global hotkeys (Electron + fallback accelerator). */
+function sidecarOwnsHotkeys(): boolean {
+  return (
+    isNativeClientAuthenticated() &&
+    getSidecarCapabilities()?.globalHotkey === true
+  );
+}
+
+/** P7 — register global hotkeys (sidecar RegisterHotKey preferred; Electron fallback). */
 export function registerNativeHotkeys(
   bindings: HotkeyBinding[] = DEFAULT_BINDINGS,
-): { registered: string[]; failed: string[] } {
+): { registered: string[]; failed: string[]; source: "sidecar" | "electron" } {
+  if (sidecarOwnsHotkeys()) {
+    console.info(
+      "[ripple-native] using sidecar hotkeys (RegisterHotKey — Ctrl+Space, Alt+Shift+Space, Escape)",
+    );
+    return { registered: [], failed: [], source: "sidecar" };
+  }
+
   const ok: string[] = [];
   const failed: string[] = [];
 
@@ -43,14 +58,16 @@ export function registerNativeHotkeys(
     if (success) {
       registered.push(binding.accelerator);
       ok.push(binding.accelerator);
-      console.info(`[ripple-native] hotkey registered: ${binding.accelerator} (${binding.label})`);
+      console.info(
+        `[ripple-native] hotkey registered: ${binding.accelerator} (${binding.label}) [Electron fallback]`,
+      );
     } else {
       failed.push(binding.accelerator);
       console.warn(`[ripple-native] hotkey failed: ${binding.accelerator}`);
     }
   }
 
-  return { registered: ok, failed };
+  return { registered: ok, failed, source: "electron" };
 }
 
 export function unregisterNativeHotkeys(): void {
@@ -59,5 +76,8 @@ export function unregisterNativeHotkeys(): void {
 }
 
 export function listRegisteredHotkeys(): string[] {
+  if (sidecarOwnsHotkeys()) {
+    return DEFAULT_BINDINGS.map((b) => b.accelerator);
+  }
   return [...registered];
 }

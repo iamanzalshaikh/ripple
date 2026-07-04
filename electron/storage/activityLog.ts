@@ -198,6 +198,120 @@ export function searchActivityPathsInRangeByKind(
   return out;
 }
 
+const CROSS_APP_ATTACHMENT_APP_IDS = [
+  "gmail",
+  "slack",
+  "email",
+  "whatsapp",
+  "teams",
+  "outlook",
+];
+
+function isRippleAttachmentPath(path: string): boolean {
+  const lower = path.toLowerCase().replace(/\\/g, "/");
+  return (
+    lower.includes("/ripple/attachments/") ||
+    lower.includes("/downloads/ripple/attachments/")
+  );
+}
+
+/** P8c — local paths from cross-app attachment ingest (Gmail download, etc.). */
+export function searchCrossAppAttachmentPaths(
+  phrase: string,
+  options?: { extension?: string; contact?: string; limit?: number },
+): string[] {
+  ensureTable();
+  const limit = options?.limit ?? 8;
+  const ext = options?.extension?.trim().toLowerCase().replace(/^\./, "");
+  const explicitContact = options?.contact?.trim().toLowerCase() ?? "";
+  const contactNeedles = [
+    ...new Set([
+      explicitContact,
+      ...contactNeedlesFromPhrase(phrase),
+    ]),
+  ].filter((c) => c.length >= 2);
+  const phraseLower = phrase.trim().toLowerCase();
+  const phraseTokens = phraseLower
+    .split(/\s+/)
+    .filter((t) => t.length >= 3 && !/^(pdf|doc|file|attachment|gmail|email)$/.test(t));
+
+  const placeholders = CROSS_APP_ATTACHMENT_APP_IDS.map(() => "?").join(", ");
+  const rows = getRippleDb()
+    .prepare(
+      `SELECT path, contact, command, summary, app_id, created_at
+       FROM activity_log
+       WHERE path IS NOT NULL
+         AND (
+           app_id IN (${placeholders})
+           OR lower(command) LIKE '%attachment%'
+           OR lower(summary) LIKE '%attachment:%'
+           OR lower(path) LIKE '%ripple%attachments%'
+         )
+       ORDER BY id DESC
+       LIMIT ?`,
+    )
+    .all(...CROSS_APP_ATTACHMENT_APP_IDS, limit * 8) as Array<{
+    path: string;
+    contact: string | null;
+    command: string;
+    summary: string | null;
+    app_id: string | null;
+  }>;
+
+  const seen = new Set<string>();
+  const scored: Array<{ path: string; score: number }> = [];
+
+  for (const row of rows) {
+    if (!existsSync(row.path)) continue;
+    const key = row.path.toLowerCase();
+    if (seen.has(key)) continue;
+
+    const lowerPath = key;
+    const fileName = basename(row.path).toLowerCase();
+    const contact = row.contact?.toLowerCase() ?? "";
+    const summary = (row.summary ?? "").toLowerCase();
+    const command = row.command.toLowerCase();
+
+    let score = isRippleAttachmentPath(row.path) ? 4 : 1;
+    if (row.app_id && CROSS_APP_ATTACHMENT_APP_IDS.includes(row.app_id)) {
+      score += 1;
+    }
+    if (summary.includes("attachment:") || command.includes("attachment")) {
+      score += 2;
+    }
+
+    if (ext) {
+      if (lowerPath.endsWith(`.${ext}`) || fileName.includes(ext)) score += 5;
+      else continue;
+    }
+
+    for (const c of contactNeedles) {
+      if (contact.includes(c) || summary.includes(c) || command.includes(c)) {
+        score += 4;
+      }
+    }
+
+    for (const t of phraseTokens) {
+      if (
+        fileName.includes(t) ||
+        summary.includes(t) ||
+        command.includes(t) ||
+        contact.includes(t)
+      ) {
+        score += 2;
+      }
+    }
+
+    seen.add(key);
+    scored.push({ path: row.path, score });
+  }
+
+  return scored
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map((s) => s.path);
+}
+
 export function searchActivityByPhrase(phrase: string, limit = 12): string[] {
   ensureTable();
   const needle = phrase.trim().toLowerCase();

@@ -97,6 +97,7 @@ function onSocketData(chunk: Buffer): void {
         contact?: string;
         command?: string;
         externalUrl?: string;
+        attachments?: string[];
       };
       const appId = ingest.appId?.trim().toLowerCase();
       const summary = ingest.summary?.trim();
@@ -117,6 +118,9 @@ function onSocketData(chunk: Buffer): void {
             contact: ingest.contact ?? null,
             command: ingest.command ?? null,
             externalUrl: ingest.externalUrl ?? null,
+            attachments: Array.isArray(ingest.attachments)
+              ? ingest.attachments
+              : null,
           });
         }
       }

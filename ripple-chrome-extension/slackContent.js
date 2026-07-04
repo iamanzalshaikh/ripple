@@ -60,7 +60,7 @@
       ? `${latestSender || "Someone"} shared file: ${latestFile}`
       : `${latestSender || "Someone"}: ${latestText}`.slice(0, 480);
 
-    return { summary, contact, channel, url: location.href };
+    return { summary, contact, channel, url: location.href, latestFile };
   }
 
   function maybeIngest() {
@@ -74,6 +74,7 @@
       appId: "slack",
       summary: ctx.summary,
       contact: ctx.contact || undefined,
+      attachments: ctx.latestFile ? [ctx.latestFile] : undefined,
       command: `Slack${ctx.channel ? ` #${ctx.channel}` : ""}: ${ctx.summary.slice(0, 120)}`,
       externalUrl: ctx.url,
     });

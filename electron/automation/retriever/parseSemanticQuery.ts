@@ -5,6 +5,10 @@ export function isSemanticQuery(phrase: string): boolean {
   const p = phrase.trim().toLowerCase();
   if (!p) return false;
   if (isLastOpenedRecallQuery(p)) return false;
+  if (/\b(?:open\s+)?gmail\s+thread\b/i.test(p)) return false;
+  if (/\bgmail\b.*\b(?:attachment|attached)\b/i.test(p)) return false;
+  if (/\bopen\s+email\s+from\b/i.test(p)) return false;
+  if (/\bopen\s+(?:the\s+)?\w+\s+email\b/i.test(p)) return false;
 
   const patterns = [
     /\bdiscussed\s+with\b/,
@@ -22,6 +26,9 @@ export function isSemanticQuery(phrase: string): boolean {
     /\bproject\s+i\b/,
     /\bfile\s+i\b/,
     /\bresume\s+i\b/,
+    /\battachment\b/,
+    /\bwhatsapp\b.*\b(sent|shared)\b/,
+    /\b(sent|shared)\b.*\b(on\s+)?whatsapp\b/,
     /\bmera\s+.+\s+(jo|wali)\b/,
     /\bjo\s+maine\b/,
     /\bbefore\s+my\b/,

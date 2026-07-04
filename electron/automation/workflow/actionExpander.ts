@@ -27,6 +27,7 @@ import {
 import { isGmailVoiceCommand } from "../commandIntent.js";
 import { parseNativeCommand } from "../desktop/parseNativeCommand.js";
 import { desktopBatchPayload } from "../desktop/desktopCommand.js";
+import { insertTextDataFromTypeIntent } from "../../agent/typingPayload.js";
 
 function isWhatsAppTarget(target: string | undefined): boolean {
   if (!target) return false;
@@ -193,13 +194,25 @@ function expandDesktopWorkflow(cmd: string): WorkflowStep[] | null {
     console.info(
       `[ripple-desktop] WORKFLOW expand → Desktop compound (${desktop.steps.length} steps)`,
     );
-    return desktop.steps.map((step) => ({
-      kind: "local" as const,
-      action: {
-        type: "NOOP" as const,
-        data: desktopBatchPayload(step, cmd),
-      },
-    }));
+    return desktop.steps.map((step) => {
+      if (step.kind === "type_text") {
+        return {
+          kind: "backend" as const,
+          action: {
+            type: "INSERT_TEXT" as const,
+            status: "pending" as const,
+            data: insertTextDataFromTypeIntent(step),
+          },
+        };
+      }
+      return {
+        kind: "local" as const,
+        action: {
+          type: "NOOP" as const,
+          data: desktopBatchPayload(step, cmd),
+        },
+      };
+    });
   }
 
   let localType: LocalAction["type"] = "OPEN_FOLDER";
@@ -517,6 +530,10 @@ function expandPrebuiltDesktopBatches(
 
 export function expandWorkflowSteps(steps: RippleAction[]): WorkflowStep[] {
   if (steps.length === 0) return [];
+
+  if (steps.every((s) => s.type === "INSERT_TEXT")) {
+    return steps.map((action) => ({ kind: "backend" as const, action }));
+  }
 
   const prebuilt = expandPrebuiltDesktopBatches(steps);
   if (prebuilt) return prebuilt;

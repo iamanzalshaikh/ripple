@@ -56,6 +56,20 @@ export function parseSemanticOpenCommand(
     };
   }
 
+  const attachmentSent = cmd.match(
+    /\bopen\s+(?:the\s+)?(?:pdf|file|document|doc|attachment)\b.*\b(?:from|sent\s+by|on\s+whatsapp|on\s+gmail)\b/i,
+  );
+  if (attachmentSent) {
+    const contact = cmd.match(
+      /\b(?:from|sent\s+by|with)\s+([A-Za-z][A-Za-z0-9_-]{1,24})\b/i,
+    );
+    return {
+      phrase: cmd,
+      extension,
+      contactTopic: contact?.[1]?.trim(),
+    };
+  }
+
   if (
     /\b(?:discussed|meeting|talked|sent|from)\s+(?:with|to|by|from)\b/i.test(
       cmd,

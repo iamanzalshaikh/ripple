@@ -1,5 +1,9 @@
 import type { NativeCommandIntent } from "../../desktop/parseNativeCommand.js";
 import { isGmailComposeFocused } from "../../../focus/focusContext.js";
+import {
+  normalizeDesktopVoiceCommand,
+  parseDesktopInputFallback,
+} from "../../../agent/parseDesktopInput.js";
 import { isRegionalLanguageCommand } from "./desktopIntentGuard.js";
 import { isLikelyDesktopCommand } from "./desktopIntentGuard.js";
 import { parseDesktopIntent } from "./pipeline.js";
@@ -45,6 +49,9 @@ export function shouldUseGptRawOnly(command?: string | null): boolean {
   const raw = (command ?? "").trim();
   if (!raw) return false;
   if (isGmailComposeFocused()) return false;
+
+  if (parseDesktopInputFallback(normalizeDesktopVoiceCommand(raw))) return false;
+  if (parseDesktopInputFallback(raw)) return false;
 
   const { nlu } = preprocessForNlu(command);
 

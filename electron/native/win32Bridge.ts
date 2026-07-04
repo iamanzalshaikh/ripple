@@ -3,9 +3,15 @@ import { promisify } from "node:util";
 import type {
   A11yFocusedElement,
   ForegroundWindow,
+  ScreenshotOcrResult,
   VisibleWindow,
   Win32Action,
 } from "./types.js";
+import {
+  callNativeRpc,
+  getSidecarCapabilities,
+  isNativeClientAuthenticated,
+} from "./nativeClient.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -35,6 +41,14 @@ public class RippleNative {
   [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
   [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
   [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern bool SetCursorPos(int X, int Y);
+  [DllImport("user32.dll")] public static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, UIntPtr dwExtraInfo);
+  [DllImport("user32.dll")] public static extern int GetSystemMetrics(int nIndex);
+  [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(POINT Point);
+  [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr hwnd, uint gaFlags);
+  [DllImport("user32.dll")] public static extern IntPtr MonitorFromPoint(POINT pt, uint dwFlags);
+  [StructLayout(LayoutKind.Sequential)]
+  public struct POINT { public int X; public int Y; }
   public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 }
 "@
@@ -158,6 +172,54 @@ switch ($Action) {
       className = $el.Current.ClassName
     } | ConvertTo-Json -Compress
   }
+  'getScreenMetrics' {
+    @{ width = [RippleNative]::GetSystemMetrics(0); height = [RippleNative]::GetSystemMetrics(1) } | ConvertTo-Json -Compress
+  }
+  'getWindowAtPoint' {
+    $pt = New-Object RippleNative+POINT
+    $pt.X = [int]$args.x
+    $pt.Y = [int]$args.y
+    $h = [RippleNative]::WindowFromPoint($pt)
+    if ($h -eq [IntPtr]::Zero) { '{}' | Write-Output; break }
+    $root = [RippleNative]::GetAncestor($h, 2)
+    if ($root -ne [IntPtr]::Zero) { $h = $root }
+    $mon = [RippleNative]::MonitorFromPoint($pt, 2)
+    @{
+      hwnd = [int64]$h
+      processName = (Get-ProcName $h)
+      windowTitle = (Get-Title $h)
+      monitorHandle = [int64]$mon
+    } | ConvertTo-Json -Compress
+  }
+  'getCursorPosition' {
+    $p = [System.Windows.Forms.Cursor]::Position
+    @{ ok = $true; x = $p.X; y = $p.Y } | ConvertTo-Json -Compress
+  }
+  'mouseMove' {
+    [void][RippleNative]::SetCursorPos([int]$args.x, [int]$args.y)
+    @{ ok = $true; x = [int]$args.x; y = [int]$args.y } | ConvertTo-Json -Compress
+  }
+  'mouseClick' {
+    [void][RippleNative]::SetCursorPos([int]$args.x, [int]$args.y)
+    $btn = if ($args.button) { [string]$args.button } else { 'left' }
+    $down = switch ($btn.ToLower()) { 'right' { 0x0008 } 'middle' { 0x0020 } default { 0x0002 } }
+    $up = switch ($btn.ToLower()) { 'right' { 0x0010 } 'middle' { 0x0040 } default { 0x0004 } }
+    [RippleNative]::mouse_event($down, 0, 0, 0, [UIntPtr]::Zero)
+    [RippleNative]::mouse_event($up, 0, 0, 0, [UIntPtr]::Zero)
+    if ($args.double) {
+      Start-Sleep -Milliseconds 50
+      [RippleNative]::mouse_event($down, 0, 0, 0, [UIntPtr]::Zero)
+      [RippleNative]::mouse_event($up, 0, 0, 0, [UIntPtr]::Zero)
+    }
+    @{ ok = $true; x = [int]$args.x; y = [int]$args.y } | ConvertTo-Json -Compress
+  }
+  'mouseScroll' {
+    [void][RippleNative]::SetCursorPos([int]$args.x, [int]$args.y)
+    $delta = [int]$args.delta
+    $flags = if ($args.horizontal) { 0x1000 } else { 0x0800 }
+    [RippleNative]::mouse_event($flags, 0, 0, [uint32][int32]$delta, [UIntPtr]::Zero)
+    @{ ok = $true; x = [int]$args.x; y = [int]$args.y } | ConvertTo-Json -Compress
+  }
   default { throw "Unknown action: $Action" }
 }
 }
@@ -204,6 +266,19 @@ export async function invokeWin32<T>(
 
 export async function getForegroundWindow(): Promise<ForegroundWindow | null> {
   if (!isWin32NativeAvailable()) return null;
+
+  if (isNativeClientAuthenticated()) {
+    try {
+      const row = (await callNativeRpc("get_foreground", {})) as ForegroundWindow;
+      return row?.hwnd ? row : null;
+    } catch (e: unknown) {
+      console.warn(
+        "[ripple-native] get_foreground RPC failed:",
+        e instanceof Error ? e.message : e,
+      );
+    }
+  }
+
   try {
     const row = await invokeWin32<ForegroundWindow>("getForeground");
     return row?.hwnd ? row : null;
@@ -220,10 +295,32 @@ export async function focusWindowByHwnd(
   hwnd: number,
   titleHint?: string,
 ): Promise<void> {
+  if (isNativeClientAuthenticated()) {
+    try {
+      await callNativeRpc("focus_window", { hwnd, titleHint });
+      return;
+    } catch (e: unknown) {
+      console.warn(
+        "[ripple-native] focus_window RPC failed:",
+        e instanceof Error ? e.message : e,
+      );
+    }
+  }
   await invokeWin32("focusHwnd", { hwnd, titleHint });
 }
 
 export async function closeWindowByHwnd(hwnd: number): Promise<void> {
+  if (isNativeClientAuthenticated()) {
+    try {
+      await callNativeRpc("close_window", { hwnd });
+      return;
+    } catch (e: unknown) {
+      console.warn(
+        "[ripple-native] close_window RPC failed:",
+        e instanceof Error ? e.message : e,
+      );
+    }
+  }
   await invokeWin32("closeHwnd", { hwnd });
 }
 
@@ -234,6 +331,19 @@ export async function minimizeAllWindowsNative(): Promise<number> {
 
 export async function listVisibleWindowsNative(): Promise<VisibleWindow[]> {
   if (!isWin32NativeAvailable()) return [];
+
+  if (isNativeClientAuthenticated()) {
+    try {
+      const rows = (await callNativeRpc("list_windows", {})) as VisibleWindow[];
+      return Array.isArray(rows) ? rows : [];
+    } catch (e: unknown) {
+      console.warn(
+        "[ripple-native] list_windows RPC failed:",
+        e instanceof Error ? e.message : e,
+      );
+    }
+  }
+
   try {
     const parsed = await invokeWin32<VisibleWindow | VisibleWindow[]>("enumWindows");
     return Array.isArray(parsed) ? parsed : parsed ? [parsed] : [];
@@ -253,6 +363,23 @@ export async function sendKeysNative(args: {
   text?: string;
   delayMs?: number;
 }): Promise<{ ok: boolean; foregroundHwnd?: number; foregroundTitle?: string }> {
+  if (
+    isNativeClientAuthenticated() &&
+    getSidecarCapabilities()?.sendInput === true
+  ) {
+    try {
+      return (await callNativeRpc("send_keys", args)) as {
+        ok: boolean;
+        foregroundHwnd?: number;
+        foregroundTitle?: string;
+      };
+    } catch (e: unknown) {
+      console.warn(
+        "[ripple-native] send_keys RPC failed:",
+        e instanceof Error ? e.message : e,
+      );
+    }
+  }
   return invokeWin32("sendKeys", args);
 }
 
@@ -266,11 +393,45 @@ export async function runInputSequenceNative(args: {
   delayMs?: number;
   steps: InputSequenceStep[];
 }): Promise<{ ok: boolean; foregroundHwnd?: number; foregroundTitle?: string }> {
+  if (
+    isNativeClientAuthenticated() &&
+    getSidecarCapabilities()?.sendInput === true
+  ) {
+    try {
+      return (await callNativeRpc("run_input_sequence", args)) as {
+        ok: boolean;
+        foregroundHwnd?: number;
+        foregroundTitle?: string;
+      };
+    } catch (e: unknown) {
+      console.warn(
+        "[ripple-native] run_input_sequence RPC failed:",
+        e instanceof Error ? e.message : e,
+      );
+    }
+  }
   return invokeWin32("runSequence", args);
 }
 
 export async function getFocusedA11yElement(): Promise<A11yFocusedElement | null> {
   if (!isWin32NativeAvailable()) return null;
+
+  if (
+    isNativeClientAuthenticated() &&
+    getSidecarCapabilities()?.uia === true
+  ) {
+    try {
+      const el = (await callNativeRpc("get_focused_a11y", {})) as A11yFocusedElement;
+      if (!el?.name && !el?.controlType) return null;
+      return el;
+    } catch (e: unknown) {
+      console.warn(
+        "[ripple-native] get_focused_a11y RPC failed:",
+        e instanceof Error ? e.message : e,
+      );
+    }
+  }
+
   try {
     const el = await invokeWin32<A11yFocusedElement>("getFocusedA11y");
     if (!el?.name && !el?.controlType) return null;
@@ -282,4 +443,267 @@ export async function getFocusedA11yElement(): Promise<A11yFocusedElement | null
     );
     return null;
   }
+}
+
+export async function screenshotOcrNative(args: {
+  hwnd?: number;
+} = {}): Promise<ScreenshotOcrResult | null> {
+  if (!isWin32NativeAvailable()) return null;
+
+  if (
+    isNativeClientAuthenticated() &&
+    getSidecarCapabilities()?.ocr === true
+  ) {
+    try {
+      return (await callNativeRpc("screenshot_ocr", args)) as ScreenshotOcrResult;
+    } catch (e: unknown) {
+      console.warn(
+        "[ripple-native] screenshot_ocr RPC failed:",
+        e instanceof Error ? e.message : e,
+      );
+    }
+  }
+
+  return null;
+}
+
+export async function getWindowRectCenter(
+  hwnd: number,
+): Promise<{ x: number; y: number } | null> {
+  if (!isWin32NativeAvailable() || !hwnd) return null;
+  if (isNativeClientAuthenticated() && getSidecarCapabilities()?.windowOps === true) {
+    try {
+      const rect = (await callNativeRpc("get_window_rect", { hwnd })) as {
+        centerX?: number;
+        centerY?: number;
+      };
+      if (typeof rect?.centerX === "number" && typeof rect?.centerY === "number") {
+        return { x: rect.centerX, y: rect.centerY };
+      }
+    } catch (e: unknown) {
+      console.warn(
+        "[ripple-native] get_window_rect RPC failed:",
+        e instanceof Error ? e.message : e,
+      );
+    }
+  }
+  return null;
+}
+
+export type WindowAtPointResult = ForegroundWindow & {
+  monitorHandle?: number;
+};
+
+/** Top-level window at screen coordinates (PowerShell / user32). */
+export async function getWindowAtPointNative(
+  x: number,
+  y: number,
+): Promise<WindowAtPointResult | null> {
+  if (!isWin32NativeAvailable()) return null;
+  try {
+    const raw = await invokeWin32<{
+      hwnd?: number;
+      processName?: string;
+      windowTitle?: string;
+      monitorHandle?: number;
+    }>("getWindowAtPoint", { x, y });
+    if (!raw?.hwnd) return null;
+    return {
+      hwnd: Number(raw.hwnd),
+      processName: raw.processName ?? "",
+      windowTitle: raw.windowTitle ?? "",
+      monitorHandle:
+        typeof raw.monitorHandle === "number" ? raw.monitorHandle : undefined,
+    };
+  } catch (e: unknown) {
+    console.warn(
+      "[ripple-win32] getWindowAtPoint failed:",
+      e instanceof Error ? e.message : e,
+    );
+  }
+  return null;
+}
+
+/** Window under the physical mouse cursor (hybrid targeting aid). */
+export async function getWindowUnderCursorNative(): Promise<WindowAtPointResult | null> {
+  const pos = await getCursorPositionNative();
+  if (!pos) return null;
+  return getWindowAtPointNative(pos.x, pos.y);
+}
+
+/** Primary monitor center via GetSystemMetrics (works without native sidecar). */
+export async function getPrimaryScreenCenter(): Promise<{ x: number; y: number } | null> {
+  if (!isWin32NativeAvailable()) return null;
+  try {
+    const m = await invokeWin32<{ width: number; height: number }>("getScreenMetrics", {});
+    if (typeof m?.width === "number" && typeof m?.height === "number" && m.width > 0 && m.height > 0) {
+      return { x: Math.round(m.width / 2), y: Math.round(m.height / 2) };
+    }
+  } catch (e: unknown) {
+    console.warn(
+      "[ripple-win32] getScreenMetrics failed:",
+      e instanceof Error ? e.message : e,
+    );
+  }
+  return null;
+}
+
+/** Screen center fallback when HWND rect is unavailable. */
+export async function getWindowCenterNative(): Promise<{ x: number; y: number } | null> {
+  const fg = await getForegroundWindow();
+  if (fg?.hwnd) {
+    const c = await getWindowRectCenter(fg.hwnd);
+    if (c) return c;
+  }
+  return getPrimaryScreenCenter();
+}
+
+export async function mouseClickNative(args: {
+  x: number;
+  y: number;
+  button?: "left" | "right" | "middle";
+  double?: boolean;
+}): Promise<{ ok: boolean; x: number; y: number } | null> {
+  if (!isWin32NativeAvailable()) return null;
+  if (isNativeClientAuthenticated() && getSidecarCapabilities()?.mouse === true) {
+    try {
+      return (await callNativeRpc("mouse_click", args)) as {
+        ok: boolean;
+        x: number;
+        y: number;
+      };
+    } catch (e: unknown) {
+      console.warn(
+        "[ripple-native] mouse_click RPC failed:",
+        e instanceof Error ? e.message : e,
+      );
+    }
+  }
+  try {
+    return await invokeWin32<{ ok: boolean; x: number; y: number }>("mouseClick", args);
+  } catch (e: unknown) {
+    console.warn(
+      "[ripple-win32] mouseClick fallback failed:",
+      e instanceof Error ? e.message : e,
+    );
+  }
+  return null;
+}
+
+export async function mouseScrollNative(args: {
+  x: number;
+  y: number;
+  delta: number;
+  horizontal?: boolean;
+}): Promise<{ ok: boolean; x: number; y: number } | null> {
+  if (!isWin32NativeAvailable()) return null;
+  if (isNativeClientAuthenticated() && getSidecarCapabilities()?.mouse === true) {
+    try {
+      return (await callNativeRpc("mouse_scroll", args)) as {
+        ok: boolean;
+        x: number;
+        y: number;
+      };
+    } catch (e: unknown) {
+      console.warn(
+        "[ripple-native] mouse_scroll RPC failed:",
+        e instanceof Error ? e.message : e,
+      );
+    }
+  }
+  try {
+    return await invokeWin32<{ ok: boolean; x: number; y: number }>("mouseScroll", args);
+  } catch (e: unknown) {
+    console.warn(
+      "[ripple-win32] mouseScroll fallback failed:",
+      e instanceof Error ? e.message : e,
+    );
+  }
+  return null;
+}
+
+export async function mouseDragNative(args: {
+  fromX: number;
+  fromY: number;
+  toX: number;
+  toY: number;
+  button?: "left" | "right" | "middle";
+}): Promise<{ ok: boolean; x: number; y: number } | null> {
+  if (!isWin32NativeAvailable()) return null;
+  if (isNativeClientAuthenticated() && getSidecarCapabilities()?.mouse === true) {
+    try {
+      return (await callNativeRpc("mouse_drag", args)) as {
+        ok: boolean;
+        x: number;
+        y: number;
+      };
+    } catch (e: unknown) {
+      console.warn(
+        "[ripple-native] mouse_drag RPC failed:",
+        e instanceof Error ? e.message : e,
+      );
+    }
+  }
+  return null;
+}
+
+export async function mouseMoveNative(args: {
+  x: number;
+  y: number;
+}): Promise<{ ok: boolean; x: number; y: number } | null> {
+  if (!isWin32NativeAvailable()) return null;
+  if (isNativeClientAuthenticated() && getSidecarCapabilities()?.mouse === true) {
+    try {
+      return (await callNativeRpc("mouse_move", args)) as {
+        ok: boolean;
+        x: number;
+        y: number;
+      };
+    } catch (e: unknown) {
+      console.warn(
+        "[ripple-native] mouse_move RPC failed:",
+        e instanceof Error ? e.message : e,
+      );
+    }
+  }
+  try {
+    return await invokeWin32<{ ok: boolean; x: number; y: number }>("mouseMove", args);
+  } catch (e: unknown) {
+    console.warn(
+      "[ripple-win32] mouseMove fallback failed:",
+      e instanceof Error ? e.message : e,
+    );
+  }
+  return null;
+}
+
+export async function getCursorPositionNative(): Promise<{
+  ok: boolean;
+  x: number;
+  y: number;
+} | null> {
+  if (!isWin32NativeAvailable()) return null;
+  if (isNativeClientAuthenticated() && getSidecarCapabilities()?.mouse === true) {
+    try {
+      return (await callNativeRpc("get_cursor_position", {})) as {
+        ok: boolean;
+        x: number;
+        y: number;
+      };
+    } catch (e: unknown) {
+      console.warn(
+        "[ripple-native] get_cursor_position RPC failed:",
+        e instanceof Error ? e.message : e,
+      );
+    }
+  }
+  try {
+    return await invokeWin32<{ ok: boolean; x: number; y: number }>("getCursorPosition", {});
+  } catch (e: unknown) {
+    console.warn(
+      "[ripple-win32] getCursorPosition fallback failed:",
+      e instanceof Error ? e.message : e,
+    );
+  }
+  return null;
 }

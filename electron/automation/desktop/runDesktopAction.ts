@@ -65,7 +65,13 @@ import {
 } from "../safety/undoRunner.js";
 import { describeUndoAction } from "../safety/undoDescribe.js";
 import { upsertLifeEvent } from "../../storage/lifeEvents.js";
-import { openGmailEmailFromSender } from "../gmail/openGmailEmail.js";
+import {
+  openGmailEmailBySubject,
+  openGmailEmailFromSender,
+  openGmailThreadWithAttachment,
+} from "../gmail/openGmailEmail.js";
+import { openCrossAppAttachment } from "../gmail/openCrossAppAttachment.js";
+import { tryOpenCrossAppSemanticRef } from "../gmail/openCrossAppRef.js";
 
 async function requireDestructiveConfirm(
   kind: string,
@@ -168,10 +174,18 @@ async function executeDesktopOpenBatch(
     if (!query || typeof query !== "object" || !("type" in query)) {
       throw new Error("Smart search query missing");
     }
-    const path = await resolveSmartSearch(query, label);
-    const result = await openSmartSearchResult(path);
-    if (data) data.resolvedPath = path;
-    return result;
+    try {
+      const path = await resolveSmartSearch(query, label);
+      const result = await openSmartSearchResult(path);
+      if (data) data.resolvedPath = path;
+      return result;
+    } catch (err) {
+      if (query.type === "semantic_topic") {
+        const crossApp = await tryOpenCrossAppSemanticRef(label);
+        if (crossApp) return crossApp;
+      }
+      throw err;
+    }
   }
 
   if (kind === "remember_life_event") {
@@ -189,12 +203,43 @@ async function executeDesktopOpenBatch(
   }
 
   if (kind === "open_gmail_email") {
+    const attachmentQuery =
+      typeof data?.gmailAttachmentQuery === "string"
+        ? data.gmailAttachmentQuery
+        : "";
+    const subjectQuery =
+      typeof data?.gmailSubjectQuery === "string" ? data.gmailSubjectQuery : "";
     const senderQuery =
       typeof data?.gmailSenderQuery === "string" ? data.gmailSenderQuery : "";
-    if (!senderQuery.trim()) {
-      throw new Error("Gmail sender query missing");
+    if (attachmentQuery.trim()) {
+      return openGmailThreadWithAttachment(attachmentQuery.trim());
     }
-    return openGmailEmailFromSender(senderQuery.trim());
+    if (subjectQuery.trim()) {
+      return openGmailEmailBySubject(subjectQuery.trim());
+    }
+    if (senderQuery.trim()) {
+      return openGmailEmailFromSender(senderQuery.trim());
+    }
+    throw new Error("Gmail sender, subject, or attachment query missing");
+  }
+
+  if (kind === "open_cross_app_attachment") {
+    const phrase =
+      typeof data?.crossAppAttachmentPhrase === "string"
+        ? data.crossAppAttachmentPhrase
+        : "";
+    const extension =
+      typeof data?.crossAppAttachmentExt === "string"
+        ? data.crossAppAttachmentExt
+        : undefined;
+    const contact =
+      typeof data?.crossAppAttachmentContact === "string"
+        ? data.crossAppAttachmentContact
+        : undefined;
+    if (!phrase.trim()) {
+      throw new Error("Cross-app attachment phrase missing");
+    }
+    return openCrossAppAttachment(phrase.trim(), { extension, contact });
   }
 
   if (kind === "recall_memory") {

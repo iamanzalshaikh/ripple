@@ -31,3 +31,13 @@ export function getContactsFilePath(): string {
 export function getRippleDbPath(): string {
   return join(getRippleDataDir(), "ripple.db");
 }
+
+export function getRippleAttachmentsDir(): string {
+  const dir = join(getRippleDataDir(), "attachments");
+  mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+export function getNativeSessionFilePath(): string {
+  return join(getRippleDataDir(), "ripple-native.session");
+}

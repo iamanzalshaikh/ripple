@@ -41,6 +41,11 @@ describe("AI-first routing (P4)", () => {
     expect(shouldUseGptRawOnly(raw)).toBe(false);
   });
 
+  it("does not GPT-route Urdu Arabic select all and copy", () => {
+    const urdu = "سیلیکٹ اول اینڈ کاپی";
+    expect(shouldUseGptRawOnly(urdu)).toBe(false);
+  });
+
   it("does not send half-Hinglish NLU to GPT", () => {
     const raw = "Create karo new folder, download ke anda name b2";
     const partial = "Create new folder, downloads ke anda name b2";

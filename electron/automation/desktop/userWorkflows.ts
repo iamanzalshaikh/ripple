@@ -106,11 +106,42 @@ export function resolveStepTarget(spoken: string): WorkflowStepDef {
   return { type: "workspace", target: normalizeKey(name) };
 }
 
+/** STT tail noise — not real workflow steps. */
+const WORKFLOW_STEP_NOISE = /^(?:pinned?|pin)\.?$/i;
+
+/** When STT glues workspace + app without a comma ("YouTube Calculator"). */
+const GLUED_WORKSPACE_PREFIXES: Array<{ prefix: string; workspace: string }> = [
+  { prefix: "youtube", workspace: "youtube" },
+  { prefix: "notion", workspace: "notion" },
+  { prefix: "gmail", workspace: "gmail" },
+  { prefix: "whatsapp", workspace: "whatsapp" },
+  { prefix: "linkedin", workspace: "linkedin" },
+  { prefix: "instagram", workspace: "instagram" },
+];
+
+function expandGluedWorkflowStep(part: string): string[] {
+  const trimmed = part.trim();
+  if (!trimmed) return [];
+
+  const lower = trimmed.toLowerCase();
+  for (const { prefix, workspace } of GLUED_WORKSPACE_PREFIXES) {
+    if (lower.startsWith(prefix) && trimmed.length > prefix.length) {
+      const rest = trimmed.slice(prefix.length).trim();
+      if (rest && !WORKFLOW_STEP_NOISE.test(rest)) {
+        return [workspace, rest];
+      }
+    }
+  }
+
+  return [trimmed];
+}
+
 export function parseWorkflowStepList(raw: string): WorkflowStepDef[] {
   return raw
     .split(/\s*,\s*|\s+and\s+/i)
+    .flatMap(expandGluedWorkflowStep)
     .map((part) => part.trim())
-    .filter(Boolean)
+    .filter((part) => part && !WORKFLOW_STEP_NOISE.test(part))
     .map((part) => resolveStepTarget(part));
 }
 

@@ -29,6 +29,28 @@ const PHRASE_MAP: [RegExp, string][] = [
   [/موو\s*کرو/gi, "move"],
 ];
 
+/** Urdu/Arabic-script editor commands — STT transliterations of English edit keys. */
+const URDU_EDIT_PHRASE_MAP: [RegExp, string][] = [
+  [
+    /س[یيئ]?ل[یيئ]?ک[ٹت]?\s+(?:اول|ال)\s+(?:ا[یيئ]?ن[ڈد]?|اینڈ|ایند)\s+کاپ[یيئ]?/gu,
+    "select all and copy",
+  ],
+  [/س[یيئ]?ل[یيئ]?ک[ٹت]?\s+اور\s+کاپ[یيئ]?/gu, "select all and copy"],
+  [/س[یيئ]?ل[یيئ]?ک[ٹت]?\s+سب/gu, "select all"],
+  [/سب\s+س[یيئ]?ل[یيئ]?ک/gu, "select all"],
+  [/کاپ[یيئ]?\s+کرو/gu, "copy"],
+  [/یہاں\s+پےسٹ/gu, "paste here"],
+  [/پےسٹ\s+کرو/gu, "paste here"],
+  [/یہاں\s+چپکاؤ/gu, "paste here"],
+  [/چپکاؤ/gu, "paste here"],
+  [/سکرول\s+نیچے/gu, "scroll down"],
+  [/سکرول\s+اوپر/gu, "scroll up"],
+  [/ماؤس\s+نیچے/gu, "move mouse down"],
+  [/ماؤس\s+اوپر/gu, "move mouse up"],
+  [/ماؤس\s+بائیں/gu, "move mouse left"],
+  [/ماؤس\s+دائیں/gu, "move mouse right"],
+];
+
 /** Roman Urdu (Latin script) — distinct from Hinglish where patterns differ. */
 const ROMAN_PHRASE_MAP: [RegExp, string][] = [
   [/^\s*mera\s+rizume\s+kholo\s*$/i, "open my resume"],
@@ -48,6 +70,11 @@ const ROMAN_PHRASE_MAP: [RegExp, string][] = [
     "open pdf 3 months ago",
   ],
   [/^\s*dobara\s+kholo\s*$/i, "open it again"],
+  [/^\s*select\s+all\s+copy\s*$/i, "select all and copy"],
+  [/^\s*sab\s+select\s+karo\s+aur\s+copy\s*$/i, "select all and copy"],
+  [/^\s*paste\s+karo\s*$/i, "paste here"],
+  [/^\s*yahan\s+paste\s*$/i, "paste here"],
+  [/^\s*copy\s+karo\s*$/i, "copy"],
 ];
 
 const ROMAN_WORD_MAP: [RegExp, string][] = [
@@ -83,6 +110,14 @@ const WORD_MAP: [RegExp, string][] = [
   [/\bفاطما\b/gu, "Fatima"],
 ];
 
+export function normalizeUrduEditCommands(text: string): string {
+  let s = text.trim().replace(/\s+/g, " ");
+  for (const [re, rep] of URDU_EDIT_PHRASE_MAP) {
+    s = s.replace(re, rep);
+  }
+  return s.trim();
+}
+
 export function isUrduRoman(text: string): boolean {
   return /\b(?:mujhe|mujhko|kholiye|rizume|dastavez|zaroor|aapka|tumhe)\b/i.test(
     text,
@@ -92,7 +127,8 @@ export function isUrduRoman(text: string): boolean {
 export function normalizeUrduRoman(text: string): string {
   if (!text.trim() || containsArabicScript(text)) return text;
 
-  let s = text.trim().replace(/\s+/g, " ");
+  let s = normalizeUrduEditCommands(text);
+  s = s.trim().replace(/\s+/g, " ");
   for (const [re, rep] of ROMAN_PHRASE_MAP) {
     s = s.replace(re, rep);
   }
@@ -106,7 +142,7 @@ export function normalizeUrdu(text: string): string {
   const roman = normalizeUrduRoman(text);
   if (!containsArabicScript(roman)) return roman;
 
-  let s = roman.trim().replace(/\s+/g, " ");
+  let s = normalizeUrduEditCommands(roman).trim().replace(/\s+/g, " ");
   for (const [re, rep] of PHRASE_MAP) {
     s = s.replace(re, rep);
   }

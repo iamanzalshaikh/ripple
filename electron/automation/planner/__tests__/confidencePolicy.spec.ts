@@ -7,13 +7,19 @@ describe("confidencePolicy", () => {
     expect(policyFor(0.9, 0)).toBe("execute");
   });
 
-  it("clarifies in mid confidence band", () => {
-    expect(policyFor(0.75, 3)).toBe("clarify");
-    expect(policyFor(0.6, 0)).toBe("clarify");
+  it("clarifies only below 0.2", () => {
+    expect(policyFor(0.75, 3)).toBe("execute");
+    expect(policyFor(0.6, 0)).toBe("execute");
+    expect(policyFor(0.4, 0)).toBe("execute");
   });
 
-  it("rephrases below 0.6", () => {
-    expect(policyFor(0.59, 1)).toBe("rephrase");
+  it("rephrases in low-mid band (fallback route)", () => {
+    expect(policyFor(0.39, 1)).toBe("rephrase");
     expect(policyFor(0.2, 0)).toBe("rephrase");
+  });
+
+  it("clarifies only when very uncertain", () => {
+    expect(policyFor(0.19, 1)).toBe("clarify");
+    expect(policyFor(0.1, 0)).toBe("clarify");
   });
 });

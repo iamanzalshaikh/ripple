@@ -1,4 +1,5 @@
 import { BrowserWindow } from "electron";
+import { setFocusCaptureLocked, restoreFocusContext, extendCommandFocusGrace } from "../focus/focusContext.js";
 import { dismissOverlay } from "../windows/overlay.js";
 import { enforceCommandPermission } from "./safety/permissionGate.js";
 import { executeSingleAction } from "./executeAction.js";
@@ -41,7 +42,9 @@ export async function runCommandActions(
   enforceCommandPermission(result);
 
   const records: ActionRunRecord[] = [];
+  setFocusCaptureLocked(true);
 
+  try {
   for (let index = 0; index < actions.length; index++) {
     const action = actions[index]!;
     try {
@@ -78,6 +81,11 @@ export async function runCommandActions(
         error,
       });
     }
+  }
+  } finally {
+    extendCommandFocusGrace();
+    void restoreFocusContext();
+    setFocusCaptureLocked(false);
   }
 
   const summary: ActionRunSummary = {

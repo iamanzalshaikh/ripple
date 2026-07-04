@@ -4,6 +4,7 @@ import {
   permissionForDesktopKind,
 } from "../tools/toolRegistry.js";
 import type { CommandResultPayload } from "../types.js";
+import { isEditorClearTextPhrase } from "../../agent/parseDesktopInput.js";
 
 export type PermissionResult = {
   level: PermissionLevel;
@@ -88,11 +89,13 @@ export function permissionForCommand(
   payload?: CommandResultPayload | null,
 ): PermissionResult {
   const text = command.trim();
+  const editorClear = isEditorClearTextPhrase(text);
 
   if (
-    BULK_DELETE.test(text) ||
-    BULK_DELETE_HINGLISH.test(text) ||
-    WILDCARD_DELETE.test(text)
+    !editorClear &&
+    (BULK_DELETE.test(text) ||
+      BULK_DELETE_HINGLISH.test(text) ||
+      WILDCARD_DELETE.test(text))
   ) {
     return { level: "blocked", reason: "Bulk delete is not allowed." };
   }

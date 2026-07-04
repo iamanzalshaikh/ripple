@@ -4,6 +4,12 @@ import {
   normalizeFolderKey,
   parseWellKnownFolderOpen,
 } from "./folderIntent.js";
+import { hasCompoundTailAfterFirstClause, COMPOUND_CLAUSE_VERBS } from "../voice/nlu/compoundParse.js";
+
+const COMPOUND_TAIL_IN_ITEM = new RegExp(
+  `,\\s*(?=(?:${COMPOUND_CLAUSE_VERBS})\\b)`,
+  "i",
+);
 
 export type WellKnownFolder = "downloads" | "documents" | "desktop";
 
@@ -16,9 +22,15 @@ export type DesktopOpenIntent =
 const WEB_OR_APP_OPEN =
   /\bopen\s+(?:the\s+)?(?:app\s+)?(gmail|google\s*mail|whatsapp|notion|youtube|linkedin|instagram|chrome|firefox|edge|browser|slack|discord|spotify|facebook|twitter|mail|email)\b/i;
 
-/** Gmail sender search — handled by open_gmail_email intent. */
+/** Gmail sender/subject search — handled by open_gmail_email intent. */
 const GMAIL_EMAIL_FROM =
   /^\s*open\s+(?:a\s+|an\s+|the\s+)?(?:mail|email)s?\s+from\s+/i;
+
+const GMAIL_EMAIL_SUBJECT =
+  /^\s*open\s+(?:the\s+|a\s+|an\s+)?(?:(?:mail|email)s?\s+(?:about|on|regarding|with\s+subject)\s+|.+?\s+(?:mail|email)s?\s*)$/i;
+
+const GMAIL_ATTACHMENT =
+  /^\s*open\s+.*\b(?:gmail|mail|email)\b.*\b(?:attachment|attached|attach|thread)\b/i;
 
 const ITEM_IN_FOLDER =
   /^\s*open\s+(?:my\s+)?(.+?)\s+(?:in|on)\s+(?:my\s+)?(downloads?|documents?|desktop)\s*\.?\s*$/i;
@@ -34,7 +46,15 @@ const FOLDER_IN_LOCATION =
  */
 export function parseDesktopCommand(command?: string | null): DesktopOpenIntent | null {
   const cmd = normalizeTranscript(command ?? "");
-  if (!cmd || WEB_OR_APP_OPEN.test(cmd) || GMAIL_EMAIL_FROM.test(cmd)) return null;
+  if (
+    !cmd ||
+    WEB_OR_APP_OPEN.test(cmd) ||
+    GMAIL_EMAIL_FROM.test(cmd) ||
+    GMAIL_EMAIL_SUBJECT.test(cmd) ||
+    GMAIL_ATTACHMENT.test(cmd)
+  ) {
+    return null;
+  }
 
   const folderIntent = parseWellKnownFolderOpen(cmd);
   if (folderIntent) return folderIntent;
@@ -84,6 +104,9 @@ export function parseDesktopCommand(command?: string | null): DesktopOpenIntent 
   const openItem = cmd.match(/^\s*open\s+(?:my\s+)?(.+?)\s*\.?\s*$/i);
   if (openItem?.[1]?.trim()) {
     const name = openItem[1].trim();
+    if (hasCompoundTailAfterFirstClause(name) || COMPOUND_TAIL_IN_ITEM.test(name)) {
+      return null;
+    }
     if (/^(?:today|yesterday|tomorrow)'?s?\s+pdf$/i.test(name)) {
       return null;
     }

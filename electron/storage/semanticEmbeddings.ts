@@ -7,6 +7,7 @@ import {
   embeddingToJson,
   EMBEDDING_DIMS,
 } from "../automation/retriever/localEmbedding.js";
+import { searchPathVectorIndex } from "./sqliteVec.js";
 
 function ensureTables(): void {
   getRippleDb();
@@ -99,20 +100,10 @@ export function searchPathEmbeddings(
   limit = 15,
 ): Array<{ path: string; score: number }> {
   ensureTables();
-  const query = embedText(phrase);
-  const rows = getRippleDb()
-    .prepare(`SELECT path, embedding FROM semantic_embeddings LIMIT 1200`)
-    .all() as Array<{ path: string; embedding: string }>;
-
-  const scored: Array<{ path: string; score: number }> = [];
-  for (const row of rows) {
-    const vec = embeddingFromJson(row.embedding);
-    if (!vec) continue;
-    const score = cosineSimilarity(query, vec);
-    if (score >= 0.25) scored.push({ path: row.path, score });
-  }
-
-  return scored.sort((a, b) => b.score - a.score).slice(0, limit);
+  return searchPathVectorIndex(phrase, limit).map((h) => ({
+    path: h.id,
+    score: h.score,
+  }));
 }
 
 export function searchSemanticRefs(
