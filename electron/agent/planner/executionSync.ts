@@ -2,17 +2,22 @@ import { delay } from "../../automation/delay.js";
 import {
   adoptForegroundAsTypingTarget,
   extendCommandFocusGrace,
+  isRippleApplicationWindow,
   restoreFocusContext,
 } from "../../focus/focusContext.js";
 import {
   isSaveDialogModalLocked,
   runSaveFileDialogFlow,
+  type SaveFlowOptions,
 } from "../../focus/saveDialogMode.js";
 import { getFocusedA11yElement } from "../../native/win32Bridge.js";
 import { captureObservation } from "../observe.js";
+
 export const LAUNCH_FOCUS_SETTLE_MS = 500;
 export const TYPE_PREFLIGHT_WAIT_MS = 300;
 export const COMPOUND_STEP_GAP_MS = 200;
+export const PAINT_FOCUS_STABLE_MS = 350;
+export const PAINT_FOCUS_MAX_WAIT_MS = 3500;
 
 const POST_LAUNCH_TOOLS = new Set([
   "desktop.launch_app",
@@ -24,6 +29,12 @@ const INPUT_READY_TOOLS = new Set([
   "desktop.save_file",
   "desktop.press_keys",
   "desktop.paste",
+]);
+
+const PAINT_STEP_TOOLS = new Set([
+  "desktop.mouse_move",
+  "desktop.mouse_drag",
+  "desktop.paint_op",
 ]);
 
 /** UIA control types that accept keyboard text input. */
@@ -41,6 +52,68 @@ export async function isEditableFocused(): Promise<boolean> {
   const el = await getFocusedA11yElement();
   if (!el?.controlType) return false;
   return isEditableControlType(el.controlType);
+}
+
+function isPaintForeground(
+  processName?: string | null,
+  windowTitle?: string | null,
+): boolean {
+  const proc = (processName ?? "").toLowerCase();
+  const title = windowTitle ?? "";
+  return proc === "mspaint" || /paint/i.test(title);
+}
+
+/**
+ * Phase 1 — block until Paint is stable foreground (not Ripple/Cursor).
+ * Paint canvas steps do not need an editable UIA field.
+ */
+export async function waitForPaintForeground(): Promise<{
+  ok: boolean;
+  reason?: string;
+}> {
+  const started = Date.now();
+  let stableSince = 0;
+  let lastHwnd: number | undefined;
+
+  while (Date.now() - started < PAINT_FOCUS_MAX_WAIT_MS) {
+    await restoreFocusContext();
+    await delay(90);
+    const obs = await captureObservation();
+    const proc = obs.foreground?.processName ?? "";
+    const title = obs.foreground?.windowTitle ?? "";
+
+    if (isRippleApplicationWindow(proc, title)) {
+      stableSince = 0;
+      lastHwnd = undefined;
+      await delay(120);
+      continue;
+    }
+
+    if (!isPaintForeground(proc, title)) {
+      stableSince = 0;
+      lastHwnd = undefined;
+      await delay(120);
+      continue;
+    }
+
+    const hwnd = obs.foreground?.hwnd;
+    if (hwnd && hwnd === lastHwnd) {
+      if (stableSince === 0) stableSince = Date.now();
+      if (Date.now() - stableSince >= PAINT_FOCUS_STABLE_MS) {
+        return { ok: true };
+      }
+    } else {
+      lastHwnd = hwnd;
+      stableSince = hwnd ? Date.now() : 0;
+    }
+    await delay(100);
+  }
+
+  const obs = await captureObservation();
+  return {
+    ok: false,
+    reason: `paint_focus_timeout:${obs.foreground?.processName ?? "?"}`,
+  };
 }
 
 /** P8.5 — verify foreground has an edit-like control before typing. */
@@ -63,12 +136,22 @@ export async function verifyInputFocusReady(options?: {
 /**
  * After launch_app / focus_window — settle, pin focus, verify input when possible.
  */
-export async function focusLockAfterAppLaunch(): Promise<void> {
+export async function focusLockAfterAppLaunch(nextTool?: string): Promise<void> {
   if (isSaveDialogModalLocked()) return;
 
   await delay(LAUNCH_FOCUS_SETTLE_MS);
   await adoptForegroundAsTypingTarget();
   extendCommandFocusGrace(12_000);
+
+  if (nextTool && PAINT_STEP_TOOLS.has(nextTool)) {
+    const paint = await waitForPaintForeground();
+    if (process.env.RIPPLE_P85_TRACE !== "0") {
+      console.info(
+        `[ripple-p85] focus-barrier paint ${paint.ok ? "ok" : paint.reason}`,
+      );
+    }
+    return;
+  }
 
   let check = await verifyInputFocusReady({ settleMs: 80 });
   if (check.ok) return;
@@ -112,12 +195,28 @@ export async function syncCompoundStepBoundary(
     return;
   }
 
+  if (PAINT_STEP_TOOLS.has(nextTool)) {
+    if (
+      prevTool &&
+      POST_LAUNCH_TOOLS.has(prevTool)
+    ) {
+      await focusLockAfterAppLaunch(nextTool);
+    } else {
+      const paint = await waitForPaintForeground();
+      if (process.env.RIPPLE_P85_TRACE !== "0" && !paint.ok) {
+        console.warn(`[ripple-p85] focus-barrier warn ${paint.reason}`);
+      }
+    }
+    await delay(COMPOUND_STEP_GAP_MS);
+    return;
+  }
+
   if (
     prevTool &&
     POST_LAUNCH_TOOLS.has(prevTool) &&
     INPUT_READY_TOOLS.has(nextTool)
   ) {
-    await focusLockAfterAppLaunch();
+    await focusLockAfterAppLaunch(nextTool);
     await safeTypingPreflight();
     return;
   }
@@ -134,6 +233,9 @@ export function stepNeedsInputReadyGate(tool: string): boolean {
 /**
  * Strict Save As flow — see runSaveFileDialogFlow in saveDialogMode.ts.
  */
-export async function submitSaveDialog(fullPath: string): Promise<void> {
-  await runSaveFileDialogFlow(fullPath);
+export async function submitSaveDialog(
+  fullPath: string,
+  opts?: SaveFlowOptions,
+): Promise<void> {
+  await runSaveFileDialogFlow(fullPath, opts);
 }

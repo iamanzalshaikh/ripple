@@ -17,7 +17,7 @@ import { readInstagramComposerText } from "../automation/adapters/instagram/read
 import { readWhatsAppComposerText } from "../automation/adapters/whatsapp/readComposer.js";
 import { readFocusedFieldText } from "../automation/desktop/readFocusedField.js";
 import { isEditOrRephraseCommand } from "../automation/commandIntent.js";
-import { isGmailComposeFocused, isInstagramTabActive, isWhatsAppTabActive, restoreFocusContext } from "../focus/focusContext.js";
+import { isGmailComposeFocused, isInstagramTabActive, isWhatsAppTabActive, restoreFocusContext, startMediaFocusWatcher } from "../focus/focusContext.js";
 import { extractRephraseSourceText } from "../automation/rephraseParse.js";
 import { normalizeTranscript } from "../automation/voice/normalizeTranscript.js";
 import {
@@ -74,7 +74,7 @@ import { startSemanticIndexBackfill } from "../storage/recordFileTouch.js";
 import { pruneActivityLogOlderThan } from "../storage/activityLog.js";
 import { ingestCrossAppReference } from "../storage/crossAppIngest.js";
 import { probeP8bSearch, seedP8bTestData, P8B_VOICE_COMMANDS } from "../storage/p8bTestSeed.js";
-import { startMediaFocusWatcher } from "../focus/focusContext.js";
+import { startOsTestBridge } from "../osTestBridge.js";
 import { buildObservabilitySummary, buildCiGateSummary, exportTelemetryCsv } from "../telemetry/observabilityDashboard.js";
 import { buildPlannerDashboardSummary } from "../agent/planner/planMetricsDashboard.js";
 import {
@@ -82,11 +82,16 @@ import {
   getRecentExecutionObservations,
 } from "../agent/planner/index.js";
 import { getNativeCapabilities, initNativeHost, shutdownNativeHost } from "../native/nativeHost.js";
+import { listRegisteredHotkeys } from "../native/hotkeyRegistry.js";
 import { bootstrapDemoSeeds } from "../storage/bootstrapSeeds.js";
 import { runPreflightHealth } from "../services/preflightHealth.js";
 
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
 if (!gotSingleInstanceLock) {
+  console.error(
+    "[ripple-desktop] Another Ripple instance is already running — focus that window, " +
+      "or stop stale dev servers with: npm run dev:stop",
+  );
   app.quit();
 } else {
   app.on("second-instance", () => {
@@ -763,6 +768,37 @@ app.whenReady().then(async () => {
   console.info(`[ripple-desktop] API base: ${API_BASE}`);
   console.info(`[ripple-desktop] Socket URL: ${getSocketUrl()}`);
   registerIpc();
+  startOsTestBridge(async (command) => {
+    if (command === "__ripple_os_bridge_ping__") {
+      return { ok: true, message: "pong", actionsOk: 0, actionsTotal: 0 };
+    }
+    const result = await runDesktopCommand({
+      command,
+      getAccessToken: ensureValidAccessToken,
+    });
+    const exec = result.data?.execution as
+      | { records?: Array<{ status: string }> }
+      | undefined;
+    const records = exec?.records ?? [];
+    const actionsOk = records.filter((r) => r.status === "executed").length;
+    const dragFromDetail = records.filter(
+      (r) =>
+        r.status === "executed" &&
+        typeof r.detail === "string" &&
+        /Drew\s+\w+\s+in\s+Paint/i.test(r.detail),
+    ).length;
+    const dragSteps =
+      dragFromDetail > 0
+        ? dragFromDetail
+        : Math.max(0, Math.floor((actionsOk - 1) / 2));
+    return {
+      ok: result.ok,
+      message: result.message,
+      actionsOk,
+      actionsTotal: records.length,
+      dragSteps,
+    };
+  });
   createOverlayWindow();
 
   const loggedIn = await restoreAuth();

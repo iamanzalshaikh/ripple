@@ -263,6 +263,51 @@ export function parseDesktopInputFallback(
     return { mode: "keys", keys: "^v" };
   }
 
+  if (
+    /^copy(?:\s+(?:this(?:\s+text)?|that(?:\s+text)?|the\s+selected\s+content|selected\s+content|text))?$/i.test(
+      normalized,
+    )
+  ) {
+    return { mode: "keys", keys: "^c" };
+  }
+  if (
+    /^cut(?:\s+(?:this(?:\s+text)?|that(?:\s+text)?|the\s+selected\s+content|selected\s+content|text|everything))?$/i.test(
+      normalized,
+    )
+  ) {
+    return { mode: "keys", keys: "^x" };
+  }
+  if (
+    /^(?:take|grab)\s+(?:this|that)\s+text\s+and\s+copy\s+it$/i.test(normalized)
+  ) {
+    return { mode: "keys", keys: "^c" };
+  }
+  if (
+    /^(?:remove|delete)\s+(?:this|that)\s+text\s+and\s+copy\s+it$/i.test(
+      normalized,
+    )
+  ) {
+    return { mode: "keys", keys: "^x" };
+  }
+  if (/^select all and copy(?:\s+(?:this(?:\s+text)?|text))?$/i.test(normalized)) {
+    return {
+      mode: "sequence",
+      sequence: [
+        { value: "^a", delayMs: 150 },
+        { value: "^c", delayMs: 120 },
+      ],
+    };
+  }
+  if (/^select all and cut(?:\s+(?:this(?:\s+text)?|text|everything))?$/i.test(normalized)) {
+    return {
+      mode: "sequence",
+      sequence: [
+        { value: "^a", delayMs: 40 },
+        { value: "^x", delayMs: 40 },
+      ],
+    };
+  }
+
   if (isComposeTopicOnlyCommand(raw)) {
     return null;
   }
@@ -442,14 +487,65 @@ export function parseDesktopInputFallback(
 export function isPasteClipboardCommand(normalized: string): boolean {
   return (
     /^paste(?:\s+the text)?\s+(?:which\s+)?you copied$/i.test(normalized) ||
-    /^paste(?:\s+(?:the|my))?\s+(?:clipboard|copied(?:\s+text)?|what i copied)$/i.test(
+    /^paste(?:\s+(?:the|my))?\s+(?:clipboard(?:\s+content)?|copied(?:\s+text)?|what i copied)$/i.test(
       normalized,
     ) ||
+    /^paste(?:\s+this(?:\s+text)?)?$/i.test(normalized) ||
     /^paste(?:\s+here)?$/i.test(normalized) ||
     /^paste(?:\s+this)?\s*(?:text\s+)?here$/i.test(normalized) ||
     /^paste\s+(?:hier|hear|hair|hare)$/i.test(normalized) ||
     /^paste\s+this\s+(?:hier|hear|hair|hare)$/i.test(normalized)
   );
+}
+
+const READ_CLIPBOARD_RE =
+  /^(?:please\s+)?(?:(?:read|show)\s+(?:me\s+)?(?:what(?:'s| is)\s+(?:on|in)\s+)?(?:my\s+)?clipboard|clipboard\s+(?:read|contents?))\s*$/i;
+const COPY_TO_CLIPBOARD_RE =
+  /^(?:please\s+)?(?:copy|put)\s+(.+?)\s+(?:to|on|into)\s+(?:the\s+)?clipboard\s*$/i;
+
+export type ClipboardOpKind =
+  | "copy"
+  | "cut"
+  | "paste"
+  | "read"
+  | "write"
+  | "select_all"
+  | "select_all_copy"
+  | "select_all_cut";
+
+export function clipboardOpFromDesktopInput(
+  parsed: DesktopInputParsed,
+): ClipboardOpKind | null {
+  if (parsed.mode === "keys") {
+    if (parsed.keys === "^c") return "copy";
+    if (parsed.keys === "^x") return "cut";
+    if (parsed.keys === "^v") return "paste";
+    if (parsed.keys === "^a") return "select_all";
+  }
+  if (parsed.mode === "sequence" && parsed.sequence.length >= 2) {
+    const keys = parsed.sequence.map((s) => s.value);
+    if (keys[0] === "^a" && keys[1] === "^c") return "select_all_copy";
+    if (keys[0] === "^a" && keys[1] === "^x") return "select_all_cut";
+  }
+  return null;
+}
+
+/** Atomic clipboard utterances for planner v2 / L0. */
+export function parseClipboardCommand(
+  command: string,
+): { op: ClipboardOpKind; text?: string } | null {
+  const raw = normalizeDesktopVoiceCommand(command.trim());
+  if (!raw) return null;
+  const normalized = raw.toLowerCase().replace(/[,\s]+/g, " ").trim();
+
+  if (READ_CLIPBOARD_RE.test(raw)) return { op: "read" };
+  const copyTo = raw.match(COPY_TO_CLIPBOARD_RE);
+  if (copyTo?.[1]?.trim()) return { op: "write", text: copyTo[1].trim() };
+
+  const input = parseDesktopInputFallback(raw);
+  if (!input) return null;
+  const op = clipboardOpFromDesktopInput(input);
+  return op ? { op } : null;
 }
 
 export function desktopInputToTypeIntent(

@@ -12,7 +12,9 @@ export type ClauseType =
   | "FOLDER_OPEN"
   | "FILE_OPEN"
   | "TYPE_TEXT"
+  | "CLIPBOARD_OP"
   | "DRAW_SHAPE"
+  | "PAINT_OP"
   | "MOUSE_ACTION"
   | "SAVE_FILE"
   | "FILE_MUTATE"
@@ -32,7 +34,21 @@ export type ClauseEntities = {
   itemName?: string;
   parentFolder?: string;
   typeText?: string;
+  clipOp?:
+    | "copy"
+    | "cut"
+    | "paste"
+    | "read"
+    | "write"
+    | "select_all"
+    | "select_all_copy"
+    | "select_all_cut";
+  clipText?: string;
   drawShape?: string;
+  /** Repeat draw cycles in one clause (e.g. "draw 3 circles"). */
+  drawCount?: number;
+  paintOp?: "fill" | "erase" | "clear" | "label";
+  paintLabel?: string;
   saveFilename?: string;
   saveFolder?: string;
 };

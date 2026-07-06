@@ -4,8 +4,14 @@ import {
   stepNeedsInputReadyGate,
 } from "../planner/executionSync.js";
 import {
+  isConfirmSaveAsTitle,
   isSaveDialogContext,
   isSaveDialogTitle,
+  isUntitledEditorTitle,
+  matchesMainDocumentA11y,
+  matchesSaveFilenameA11y,
+  shouldUseSilentSave,
+  splitSavePath,
 } from "../../focus/saveDialogMode.js";
 import { parseWorkflowMetaCommand } from "../../automation/desktop/parseWorkflowCommand.js";
 import { parseWorkflowStepList } from "../../automation/desktop/userWorkflows.js";
@@ -18,6 +24,66 @@ describe("P8.5 execution sync", () => {
     expect(isSaveDialogTitle("Untitled - Notepad")).toBe(false);
     expect(isSaveDialogTitle("*hello - Notepad")).toBe(false);
     expect(isSaveDialogTitle("Notepad")).toBe(false);
+    expect(isSaveDialogTitle("Confirm Save As")).toBe(false);
+    expect(isConfirmSaveAsTitle("Confirm Save As")).toBe(true);
+    expect(isConfirmSaveAsTitle("Save as")).toBe(false);
+  });
+
+  it("detects untitled editor windows", () => {
+    expect(isUntitledEditorTitle("Untitled - Notepad")).toBe(true);
+    expect(isUntitledEditorTitle("*Untitled - Notepad")).toBe(true);
+    expect(isUntitledEditorTitle("user.txt - Notepad")).toBe(false);
+    expect(isUntitledEditorTitle("report.docx - Word")).toBe(false);
+  });
+
+  it("matches Win11/classic save filename UIA fields", () => {
+    expect(
+      matchesSaveFilenameA11y({
+        name: "File name:",
+        controlType: "ComboBox",
+        automationId: "",
+        className: "",
+      }),
+    ).toBe(true);
+    expect(
+      matchesSaveFilenameA11y({
+        name: "Text editor",
+        controlType: "Document",
+        automationId: "",
+        className: "",
+      }),
+    ).toBe(false);
+  });
+
+  it("detects main document vs save field for paste safety", () => {
+    expect(
+      matchesMainDocumentA11y({
+        name: "Text editor",
+        controlType: "Document",
+        automationId: "",
+        className: "",
+      }),
+    ).toBe(true);
+    expect(
+      matchesMainDocumentA11y({
+        name: "File name:",
+        controlType: "ComboBox",
+        automationId: "",
+        className: "",
+      }),
+    ).toBe(false);
+  });
+
+  it("silent save only when open file matches target basename", () => {
+    expect(shouldUseSilentSave("user.txt - Notepad", "C:\\Users\\x\\Downloads\\user.txt")).toBe(true);
+    expect(shouldUseSilentSave("notes.txt - Notepad", "C:\\Users\\x\\Downloads\\user.txt")).toBe(false);
+    expect(shouldUseSilentSave("Untitled - Notepad", "C:\\Users\\x\\Downloads\\user.txt")).toBe(false);
+  });
+
+  it("splits save path into folder + filename", () => {
+    const parts = splitSavePath("C:\\Users\\x\\Downloads\\user.txt");
+    expect(parts.filename).toBe("user.txt");
+    expect(parts.dir).toBe("C:\\Users\\x\\Downloads");
   });
   it("recognizes editable UIA control types", () => {
     expect(isEditableControlType("Edit")).toBe(true);

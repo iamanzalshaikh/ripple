@@ -13,6 +13,7 @@ import {
   hasPendingClarification,
   resolveClarificationFollowUp,
   classifyExecutionFailure,
+  isSaveStepFailure,
 } from "../planner/index.js";
 import type { ExecutionPlan, WorldModel } from "../planner/planTypes.js";
 
@@ -232,5 +233,18 @@ describe("P8.5 recovery engine", () => {
 
   it("classifies stale window errors", () => {
     expect(classifyExecutionFailure("Window not found")).toBe("stale_plan");
+  });
+
+  it("classifies save failures as transient even when message mentions foreground", () => {
+    expect(
+      classifyExecutionFailure(
+        'Save UI did not appear — foreground is "Untitled - Notepad"',
+      ),
+    ).toBe("transient");
+    expect(
+      classifyExecutionFailure("Save verification failed — file not found: C:\\x.txt"),
+    ).toBe("transient");
+    expect(isSaveStepFailure("Could not set save folder: C:\\x")).toBe(true);
+    expect(isSaveStepFailure("Could not confirm Save")).toBe(true);
   });
 });

@@ -23,10 +23,20 @@ import {
   getCursorPositionNative,
   getWindowCenterNative,
   getWindowRectCenter,
+  getWindowRectNative,
   getWindowUnderCursorNative,
 } from "../../native/win32Bridge.js";
 import { captureObservation, verifyTypingObservation } from "../../agent/observe.js";
 import { retryDesktopKeys } from "../../agent/retryTyping.js";
+import {
+  drawShapeInMspaint,
+  fillShapeInMspaint,
+  clearPaintCanvas,
+  eraseInMspaint,
+  labelTextInMspaint,
+  shouldUsePaintShapeDraw,
+  paintCanvasMetrics,
+} from "../desktop/paintShapeDraw.js";
 
 export async function runInsertText(data?: Record<string, unknown>): Promise<string> {
   const text = typeof data?.text === "string" ? data.text : "";
@@ -79,10 +89,36 @@ export async function runInsertText(data?: Record<string, unknown>): Promise<str
       assertMouseOk(result, "move");
       return "Moved mouse to window center";
     }
+    if (mouseAction === "paint_op") {
+      const op = String(data?.op ?? "");
+      if (op === "fill") return fillShapeInMspaint();
+      if (op === "erase") return eraseInMspaint();
+      if (op === "clear") return clearPaintCanvas();
+      if (op === "label") {
+        const labelText = typeof data?.text === "string" ? data.text.trim() : "";
+        if (!labelText) throw new Error("paint label requires text");
+        return labelTextInMspaint(labelText);
+      }
+      throw new Error(`Unknown paint operation: ${op}`);
+    }
     if (mouseAction === "drag") {
-      const center = await resolveMousePoint(data, target);
-      const radius = typeof data?.radius === "number" ? data.radius : 64;
       const shape = String(data?.shape ?? "line");
+      const radius = typeof data?.radius === "number" ? data.radius : 64;
+      const length = typeof data?.length === "number" ? data.length : 120;
+      const paintTarget = resolveTypingFocusTarget();
+      if (
+        paintTarget?.processName &&
+        shouldUsePaintShapeDraw(paintTarget.processName)
+      ) {
+        return drawShapeInMspaint({
+          shape,
+          radius,
+          length,
+          offsetX: typeof data?.offsetX === "number" ? data.offsetX : 0,
+        });
+      }
+
+      const center = await resolveMousePoint(data, target);
       let fromX = center.x;
       let fromY = center.y;
       let toX = center.x;
@@ -93,7 +129,6 @@ export async function runInsertText(data?: Record<string, unknown>): Promise<str
         toX = center.x + radius;
         toY = center.y + radius;
       } else {
-        const length = typeof data?.length === "number" ? data.length : 120;
         fromX = center.x - length / 2;
         toX = center.x + length / 2;
       }
@@ -147,7 +182,7 @@ export async function runInsertText(data?: Record<string, unknown>): Promise<str
   }
 
   if (keys) {
-    const clipboardOp = /^\^[cvcx]$/i.test(keys.trim());
+    const clipboardOp = /^\^[acvx]$/i.test(keys.trim());
     const { detail } = await retryDesktopKeys({
       keys,
       beforeObserve,
@@ -232,6 +267,13 @@ export async function runInsertText(data?: Record<string, unknown>): Promise<str
     });
   }
 
+  if (text.trim()) {
+    const paintTarget = resolveTypingFocusTarget();
+    if (paintTarget?.processName && shouldUsePaintShapeDraw(paintTarget.processName)) {
+      return labelTextInMspaint(text.trim());
+    }
+  }
+
   const msg = await smartInsertText(text, data);
   if (/^Gmail compose opened\b/i.test(msg)) {
     return msg;
@@ -279,6 +321,19 @@ async function resolveMousePoint(
   const ex = typeof data?.x === "number" ? data.x : undefined;
   const ey = typeof data?.y === "number" ? data.y : undefined;
   if (ex !== undefined && ey !== undefined) return { x: ex, y: ey };
+
+  const offsetX = typeof data?.offsetX === "number" ? data.offsetX : 0;
+  if (data?.moveToCenter && target?.hwnd) {
+    const proc = (target.processName ?? "").toLowerCase();
+    if (shouldUsePaintShapeDraw(proc)) {
+      const rect = await getWindowRectNative(target.hwnd);
+      if (rect) {
+        const canvas = paintCanvasMetrics(rect);
+        return { x: canvas.centerX + offsetX, y: canvas.centerY };
+      }
+    }
+  }
+
   const under = await getWindowUnderCursorNative();
   if (under?.hwnd && !isWeakFocusContext(under)) {
     const underCenter = await getWindowRectCenter(under.hwnd);

@@ -38,7 +38,12 @@ export function insertDataFromPlanStep(step: PlanStep): Record<string, unknown> 
       };
     case "desktop.mouse_move":
       if (step.args.moveToCenter) {
-        return { mouseAction: "move_to_center" };
+        return {
+          mouseAction: "move_to_center",
+          ...(typeof step.args.offsetX === "number"
+            ? { offsetX: step.args.offsetX }
+            : {}),
+        };
       }
       if (typeof step.args.x === "number" && typeof step.args.y === "number") {
         return {
@@ -68,8 +73,17 @@ export function insertDataFromPlanStep(step: PlanStep): Record<string, unknown> 
         ...(typeof step.args.radius === "number" ? { radius: step.args.radius } : {}),
         ...(typeof step.args.length === "number" ? { length: step.args.length } : {}),
         ...(step.args.moveToCenter === true ? { moveToCenter: true } : {}),
+        ...(typeof step.args.offsetX === "number"
+          ? { offsetX: step.args.offsetX }
+          : {}),
         ...(typeof step.args.x === "number" ? { x: step.args.x } : {}),
         ...(typeof step.args.y === "number" ? { y: step.args.y } : {}),
+      };
+    case "desktop.paint_op":
+      return {
+        mouseAction: "paint_op",
+        op: step.args.op,
+        ...(typeof step.args.text === "string" ? { text: step.args.text } : {}),
       };
     default:
       return null;

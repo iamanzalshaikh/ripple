@@ -165,11 +165,17 @@ switch ($Action) {
     Add-Type -AssemblyName UIAutomationTypes
     $el = [System.Windows.Automation.AutomationElement]::FocusedElement
     if (-not $el) { '{}' | Write-Output; break }
+    $value = ''
+    try {
+      $vp = $el.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+      if ($vp) { $value = [string]$vp.Current.Value }
+    } catch {}
     @{
       name = $el.Current.Name
       controlType = $el.Current.ControlType.ProgrammaticName
       automationId = $el.Current.AutomationId
       className = $el.Current.ClassName
+      value = $value
     } | ConvertTo-Json -Compress
   }
   'getScreenMetrics' {
@@ -219,6 +225,47 @@ switch ($Action) {
     $flags = if ($args.horizontal) { 0x1000 } else { 0x0800 }
     [RippleNative]::mouse_event($flags, 0, 0, [uint32][int32]$delta, [UIntPtr]::Zero)
     @{ ok = $true; x = [int]$args.x; y = [int]$args.y } | ConvertTo-Json -Compress
+  }
+  'clickUiaInWindow' {
+    Add-Type -AssemblyName UIAutomationClient
+    Add-Type -AssemblyName UIAutomationTypes
+    $hwnd = [IntPtr][int64]$args.hwnd
+    $root = [System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
+    if (-not $root) { @{ ok = $false; reason = 'no_root' } | ConvertTo-Json -Compress; break }
+    $found = $null
+    $matched = ''
+    foreach ($want in @($args.names)) {
+      if (-not $want) { continue }
+      $cond = New-Object System.Windows.Automation.PropertyCondition(
+        [System.Windows.Automation.AutomationElement]::NameProperty, [string]$want)
+      $el = $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $cond)
+      if ($el) { $found = $el; $matched = [string]$want; break }
+    }
+    if (-not $found -and $args.nameContains) {
+      $pat = [string]$args.nameContains
+      $queue = New-Object System.Collections.Generic.Queue[System.Windows.Automation.AutomationElement]
+      $queue.Enqueue($root)
+      while ($queue.Count -gt 0 -and -not $found) {
+        $node = $queue.Dequeue()
+        $nm = [string]$node.Current.Name
+        if ($nm -and $nm -match $pat) { $found = $node; $matched = $nm; break }
+        $child = [System.Windows.Automation.TreeWalker]::ControlViewWalker.GetFirstChild($node)
+        while ($child) {
+          $queue.Enqueue($child)
+          $child = [System.Windows.Automation.TreeWalker]::ControlViewWalker.GetNextSibling($child)
+        }
+      }
+    }
+    if (-not $found) { @{ ok = $false; reason = 'not_found' } | ConvertTo-Json -Compress; break }
+    $rect = $found.Current.BoundingRectangle
+    if ($rect.Width -lt 1 -or $rect.Height -lt 1) { @{ ok = $false; reason = 'no_rect' } | ConvertTo-Json -Compress; break }
+    $x = [int]($rect.X + $rect.Width / 2)
+    $y = [int]($rect.Y + $rect.Height / 2)
+    [void][RippleNative]::SetCursorPos($x, $y)
+    [RippleNative]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
+    Start-Sleep -Milliseconds 50
+    [RippleNative]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
+    @{ ok = $true; x = $x; y = $y; name = $matched } | ConvertTo-Json -Compress
   }
   default { throw "Unknown action: $Action" }
 }
@@ -470,15 +517,45 @@ export async function screenshotOcrNative(args: {
 export async function getWindowRectCenter(
   hwnd: number,
 ): Promise<{ x: number; y: number } | null> {
+  const rect = await getWindowRectNative(hwnd);
+  if (!rect) return null;
+  return {
+    x: rect.x + Math.floor(rect.width / 2),
+    y: rect.y + Math.floor(rect.height / 2),
+  };
+}
+
+export type WindowRectNative = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+export async function getWindowRectNative(
+  hwnd: number,
+): Promise<WindowRectNative | null> {
   if (!isWin32NativeAvailable() || !hwnd) return null;
   if (isNativeClientAuthenticated() && getSidecarCapabilities()?.windowOps === true) {
     try {
       const rect = (await callNativeRpc("get_window_rect", { hwnd })) as {
-        centerX?: number;
-        centerY?: number;
+        x?: number;
+        y?: number;
+        width?: number;
+        height?: number;
       };
-      if (typeof rect?.centerX === "number" && typeof rect?.centerY === "number") {
-        return { x: rect.centerX, y: rect.centerY };
+      if (
+        typeof rect?.x === "number" &&
+        typeof rect?.y === "number" &&
+        typeof rect?.width === "number" &&
+        typeof rect?.height === "number"
+      ) {
+        return {
+          x: rect.x,
+          y: rect.y,
+          width: rect.width,
+          height: rect.height,
+        };
       }
     } catch (e: unknown) {
       console.warn(
@@ -675,6 +752,33 @@ export async function mouseMoveNative(args: {
     );
   }
   return null;
+}
+
+export async function clickUiaInWindowNative(args: {
+  hwnd: number;
+  names?: string[];
+  nameContains?: string;
+}): Promise<{ ok: boolean; x?: number; y?: number; name?: string; reason?: string } | null> {
+  if (!isWin32NativeAvailable() || !args.hwnd) return null;
+  try {
+    return await invokeWin32<{
+      ok: boolean;
+      x?: number;
+      y?: number;
+      name?: string;
+      reason?: string;
+    }>("clickUiaInWindow", {
+      hwnd: args.hwnd,
+      names: args.names ?? [],
+      ...(args.nameContains ? { nameContains: args.nameContains } : {}),
+    });
+  } catch (e: unknown) {
+    console.warn(
+      "[ripple-win32] clickUiaInWindow failed:",
+      e instanceof Error ? e.message : e,
+    );
+    return null;
+  }
 }
 
 export async function getCursorPositionNative(): Promise<{

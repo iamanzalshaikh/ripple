@@ -126,6 +126,7 @@ export {
   classifyExecutionFailure,
   attemptP85Recovery,
   recoveryEnabled,
+  isSaveStepFailure,
 } from "./recoveryEngine.js";
 export {
   buildPlannerDashboardSummary,

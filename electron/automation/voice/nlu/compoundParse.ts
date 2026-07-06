@@ -27,7 +27,7 @@ const SENTENCE_SPLIT =
 
 /** Clause-start verbs after comma or conjunction boundaries. */
 export const COMPOUND_CLAUSE_VERBS =
-  "type|write|save|close|launch|open|switch|focus|search|paste|calculate|dictate|likho|enter|put|click|press|draw|sketch|erase|scroll|drag|select|move|fill|paint";
+  "type|write|save|close|launch|open|switch|focus|search|paste|copy|cut|calculate|dictate|likho|enter|put|click|press|draw|sketch|erase|scroll|drag|select|move|fill|paint|create|store";
 
 /** Comma between clauses — not commas inside dictated text ("hello, world"). */
 export const COMMA_CLAUSE_SPLIT = new RegExp(
@@ -54,22 +54,72 @@ export function hasCompoundTailAfterFirstClause(text: string): boolean {
   return first.length > 0 && first.length < normalized.length;
 }
 
+/** Do not split keyboard clipboard sequences into separate compound clauses. */
+export function isAtomicClipboardSequence(text: string): boolean {
+  const n = text.trim().toLowerCase().replace(/[,\s]+/g, " ");
+  return (
+    /^select all and copy(?:\s+(?:this(?:\s+text)?|text))?$/i.test(n) ||
+    /^select all and cut(?:\s+(?:this(?:\s+text)?|text|everything))?$/i.test(n)
+  );
+}
+
+const CLIP_SELECT_COPY = "\x1eselect_all_and_copy\x1e";
+const CLIP_SELECT_CUT = "\x1eselect_all_and_cut\x1e";
+
+function protectAtomicClipboardPhrases(text: string): string {
+  return text
+    .replace(
+      /\bselect all and copy(?:\s+(?:this(?:\s+text)?|text))?\b/gi,
+      CLIP_SELECT_COPY,
+    )
+    .replace(
+      /\bselect all and cut(?:\s+(?:this(?:\s+text)?|text|everything))?\b/gi,
+      CLIP_SELECT_CUT,
+    );
+}
+
+function restoreAtomicClipboardPhrases(text: string): string {
+  return text
+    .replace(new RegExp(CLIP_SELECT_COPY, "g"), "select all and copy")
+    .replace(new RegExp(CLIP_SELECT_CUT, "g"), "select all and cut");
+}
+
+/** Voice often reorders actions — normalize before split. */
+export function normalizeCompoundUtterance(text: string): string {
+  const t = text.trim();
+  const saveNamedAfterCopy = t.match(
+    /^\s*save\s+file\s+(\S+)\s+after\s+(?:copying|copy)\s+(.+?)\s*$/i,
+  );
+  if (saveNamedAfterCopy?.[1] && saveNamedAfterCopy[2]) {
+    return `copy ${saveNamedAfterCopy[2].trim()} and save file ${saveNamedAfterCopy[1]}`;
+  }
+  const saveAfterCopy = t.match(
+    /^\s*save\s+(?:file\s+)?after\s+(?:copying|copy)\s+(.+?)\s*$/i,
+  );
+  if (saveAfterCopy?.[1]) {
+    return `copy ${saveAfterCopy[1].trim()} and save file`;
+  }
+  return t;
+}
+
 /** "Downloads kholo aur latest PDF open karo" → two parseable steps. */
 export function splitCompoundParts(nlu: string): string[] | null {
-  const trimmed = nlu.trim();
+  const trimmed = normalizeCompoundUtterance(nlu.trim());
+  if (isAtomicClipboardSequence(trimmed)) return null;
+  const protectedText = protectAtomicClipboardPhrases(trimmed);
   if (
-    !COMPOUND_SPLIT.test(trimmed) &&
-    !SENTENCE_SPLIT.test(trimmed) &&
-    !COMMA_CLAUSE_SPLIT.test(trimmed)
+    !COMPOUND_SPLIT.test(protectedText) &&
+    !SENTENCE_SPLIT.test(protectedText) &&
+    !COMMA_CLAUSE_SPLIT.test(protectedText)
   ) {
     return null;
   }
 
-  const parts = trimmed
+  const parts = protectedText
     .split(SENTENCE_SPLIT)
     .flatMap((part) => part.split(COMPOUND_SPLIT))
     .flatMap((part) => part.split(COMMA_CLAUSE_SPLIT))
-    .map((p) => p.trim())
+    .map((p) => restoreAtomicClipboardPhrases(p.trim()))
     .filter((p) => p.length >= 3);
 
   return parts.length >= 2 ? parts : null;

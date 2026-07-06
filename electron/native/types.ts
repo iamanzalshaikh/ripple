@@ -13,6 +13,8 @@ export type A11yFocusedElement = {
   controlType: string;
   automationId: string;
   className: string;
+  /** UIA ValuePattern / edit text when available. */
+  value?: string;
 };
 
 export type ScreenshotOcrResult = {
@@ -48,4 +50,5 @@ export type Win32Action =
   | "getCursorPosition"
   | "mouseMove"
   | "mouseClick"
-  | "mouseScroll";
+  | "mouseScroll"
+  | "clickUiaInWindow";

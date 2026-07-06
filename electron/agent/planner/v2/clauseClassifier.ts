@@ -10,12 +10,19 @@ import { parseDesktopCommand } from "../../../automation/desktop/parseDesktopCom
 import {
   desktopInputToTypeIntent,
   parseCalculatorInput,
+  parseClipboardCommand,
   parseDesktopInputFallback,
 } from "../../parseDesktopInput.js";
 import { normalizeCompoundPart } from "../compoundClauseResolve.js";
 import type { ClauseRecord, ClauseType, ClauseEntities } from "./clauseTypes.js";
 
-const DRAW_SHAPE = /^(?:draw|sketch)\s+(?:a\s+)?(?:circle|oval|square|rectangle|rect|line)\b/i;
+const DRAW_SHAPE_NAMES =
+  "circles?|circle|oval|square|rectangle|rect|line|triangle|shape|star|heart|dot|house|smiley(?:\\s+face)?|box|random\\s+thing|something";
+const DRAW_SHAPE = new RegExp(
+  `^(?:draw|sketch|create\\s+drawing\\s+of)(?:\\s+(?:\\d+|a|an|multiple|something|random\\s+thing))?\\s*(?:${DRAW_SHAPE_NAMES})?\\b`,
+  "i",
+);
+const GRAPHICS_APP_IDS = new Set(["paint", "mspaint"]);
 
 /** Soft variants before giving up to UNKNOWN (voice phrasing drift). */
 function softParseVariants(raw: string, normalized: string): string[] {
@@ -69,6 +76,164 @@ function priorWorkspaceId(ctx: ClassifierContext): string | undefined {
     }
   }
   return undefined;
+}
+
+function priorLaunchAppId(ctx: ClassifierContext): string | undefined {
+  for (let i = ctx.priorRecords.length - 1; i >= 0; i--) {
+    const r = ctx.priorRecords[i];
+    if (r?.clauseType === "APP_LAUNCH" && r.entities.appId) {
+      return r.entities.appId;
+    }
+  }
+  return undefined;
+}
+
+/** Voice often says "type draw circle" — strip false type prefix before shape match. */
+function normalizeDrawClause(normalized: string): string {
+  return normalized
+    .replace(/^(?:please\s+)?(?:type|write|insert)\s+/i, "")
+    .trim();
+}
+
+function shapeFromDrawText(text: string): string | undefined {
+  const m = text.match(new RegExp(`\\b(${DRAW_SHAPE_NAMES})\\b`, "i"));
+  const raw = m?.[1]?.toLowerCase();
+  if (!raw) return undefined;
+  if (raw === "circles" || raw === "circle") return "circle";
+  return raw;
+}
+
+function drawCountFromText(text: string): number {
+  const num = text.match(
+    /\b(\d+)\s+(?:circles?|shapes?|squares?|ovals?|rectangles?|lines?|triangles?)\b/i,
+  );
+  if (num?.[1]) {
+    return Math.min(8, Math.max(1, parseInt(num[1], 10)));
+  }
+  if (/\bmultiple\b/i.test(text)) return 3;
+  return 1;
+}
+
+function drawShapeEntities(text: string): ClauseEntities {
+  return {
+    drawShape: shapeFromDrawText(text) ?? "circle",
+    drawCount: drawCountFromText(text),
+  };
+}
+
+function tryClassifyContextClose(
+  index: number,
+  raw: string,
+  normalized: string,
+  ctx: ClassifierContext,
+): ClauseRecord | null {
+  if (!/^\s*close\s+(?:the\s+)?(?:app|it)\s*$/i.test(normalized)) return null;
+  const priorApp = priorLaunchAppId(ctx);
+  if (!priorApp) return null;
+  return record(
+    index,
+    raw,
+    normalized,
+    "APP_CLOSE",
+    { appId: priorApp },
+    "context_close_app",
+    0.9,
+  );
+}
+
+function tryClassifyDrawShape(
+  index: number,
+  raw: string,
+  normalized: string,
+  ctx: ClassifierContext,
+): ClauseRecord | null {
+  const candidate = normalizeDrawClause(normalized);
+
+  if (DRAW_SHAPE.test(candidate)) {
+    return record(
+      index,
+      raw,
+      normalized,
+      "DRAW_SHAPE",
+      drawShapeEntities(candidate),
+      "draw_pattern",
+      0.88,
+    );
+  }
+
+  const priorApp = priorLaunchAppId(ctx);
+  if (priorApp && GRAPHICS_APP_IDS.has(priorApp)) {
+    const bareShape = candidate.match(
+      new RegExp(`^(?:a|an)\\s+(${DRAW_SHAPE_NAMES})\\b`, "i"),
+    );
+    if (bareShape) {
+      return record(
+        index,
+        raw,
+        normalized,
+        "DRAW_SHAPE",
+        drawShapeEntities(candidate),
+        "context_graphics_bare_shape",
+        0.88,
+      );
+    }
+    if (/\b(?:draw|sketch)\b/i.test(candidate)) {
+      return record(
+        index,
+        raw,
+        normalized,
+        "DRAW_SHAPE",
+        drawShapeEntities(candidate),
+        "context_graphics_draw",
+        0.9,
+      );
+    }
+    if (/^create\s+drawing(?:\s+of)?/i.test(candidate)) {
+      return record(
+        index,
+        raw,
+        normalized,
+        "DRAW_SHAPE",
+        drawShapeEntities(candidate),
+        "context_graphics_create_drawing",
+        0.88,
+      );
+    }
+  }
+
+  return null;
+}
+
+/** Upgrade misclassified TYPE_TEXT when prior clause opened a graphics app. */
+function applyContextBoost(
+  rec: ClauseRecord,
+  ctx: ClassifierContext,
+): ClauseRecord {
+  if (rec.clauseType !== "TYPE_TEXT") return rec;
+  const priorApp = priorLaunchAppId(ctx);
+  if (!priorApp || !GRAPHICS_APP_IDS.has(priorApp)) return rec;
+
+  const candidate = normalizeDrawClause(rec.normalized);
+  const typeText = rec.entities.typeText ?? "";
+  const drawCandidate = normalizeDrawClause(typeText);
+  const probe = /\b(?:draw|sketch)\b/i.test(candidate)
+    ? candidate
+    : drawCandidate;
+
+  if (!/\b(?:draw|sketch)\b/i.test(probe)) return rec;
+
+  const shape = shapeFromDrawText(probe);
+  if (!shape) return rec;
+
+  return record(
+    rec.index,
+    rec.raw,
+    rec.normalized,
+    "DRAW_SHAPE",
+    { drawShape: shape },
+    "context_boost_type_to_draw",
+    0.9,
+  );
 }
 
 function classifySearchClause(
@@ -137,6 +302,64 @@ function classifySearchClause(
   return null;
 }
 
+function tryClassifyClipboard(
+  index: number,
+  raw: string,
+  normalized: string,
+): ClauseRecord | null {
+  const clip = parseClipboardCommand(raw);
+  if (!clip) return null;
+  return record(
+    index,
+    raw,
+    normalized,
+    "CLIPBOARD_OP",
+    {
+      clipOp: clip.op,
+      ...(clip.text ? { clipText: clip.text } : {}),
+    },
+    "parseClipboardCommand",
+    0.92,
+  );
+}
+
+function tryClassifyPaintOp(
+  index: number,
+  raw: string,
+  normalized: string,
+  ctx: ClassifierContext,
+): ClauseRecord | null {
+  const priorApp = priorLaunchAppId(ctx);
+  const priorDraw = ctx.priorRecords.some((r) => r.clauseType === "DRAW_SHAPE");
+  const inPaint =
+    (priorApp && GRAPHICS_APP_IDS.has(priorApp)) || priorDraw;
+  if (!inPaint) return null;
+
+  if (/^\s*fill(?:\s+(?:the\s+)?(?:shape|it))?\s*$/i.test(normalized)) {
+    return record(index, raw, normalized, "PAINT_OP", { paintOp: "fill" }, "paint_fill", 0.9);
+  }
+  if (/^\s*erase(?:\s+(?:the\s+)?(?:shape|it))?\s*$/i.test(normalized)) {
+    return record(index, raw, normalized, "PAINT_OP", { paintOp: "erase" }, "paint_erase", 0.88);
+  }
+  if (/^\s*clear\s+(?:the\s+)?canvas\s*$/i.test(normalized)) {
+    return record(index, raw, normalized, "PAINT_OP", { paintOp: "clear" }, "paint_clear", 0.9);
+  }
+  const label = normalized.match(/^\s*label(?:\s+it)?(?:\s+(.+?))?\s*$/i);
+  if (label) {
+    const text = label[1]?.trim() || "label";
+    return record(
+      index,
+      raw,
+      normalized,
+      "PAINT_OP",
+      { paintOp: "label", paintLabel: text },
+      "paint_label",
+      0.85,
+    );
+  }
+  return null;
+}
+
 /** L2 — classify one compound clause with optional prior context. */
 export function classifyClause(
   raw: string,
@@ -165,19 +388,25 @@ export function classifyClause(
     }, "parseCalculatorInput", 0.9);
   }
 
+  const drawShape = tryClassifyDrawShape(index, raw, normalized, ctx);
+  if (drawShape) return drawShape;
+
+  const paintOp = tryClassifyPaintOp(index, raw, normalized, ctx);
+  if (paintOp) return paintOp;
+
+  const contextClose = tryClassifyContextClose(index, raw, normalized, ctx);
+  if (contextClose) return contextClose;
+
+  const clipboard = tryClassifyClipboard(index, raw, normalized);
+  if (clipboard) return clipboard;
+
   const input = parseDesktopInputFallback(normalized);
   if (input) {
     const intent = desktopInputToTypeIntent(input);
-    return record(index, raw, normalized, "TYPE_TEXT", {
+    const typeRec = record(index, raw, normalized, "TYPE_TEXT", {
       typeText: intent.text,
     }, "parseDesktopInputFallback", 0.9);
-  }
-
-  if (DRAW_SHAPE.test(normalized)) {
-    const shape = normalized.match(/\b(circle|oval|square|rectangle|rect|line)\b/i)?.[1];
-    return record(index, raw, normalized, "DRAW_SHAPE", {
-      drawShape: shape?.toLowerCase() ?? "circle",
-    }, "draw_pattern", 0.88);
+    return applyContextBoost(typeRec, ctx);
   }
 
   const app = parseNativeAppCommand(normalized);

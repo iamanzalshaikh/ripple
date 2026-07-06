@@ -9,6 +9,8 @@ pub struct A11yFocusedElement {
     pub automation_id: String,
     #[serde(rename = "className")]
     pub class_name: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub value: String,
 }
 
 pub fn get_focused_a11y_element() -> Result<Option<A11yFocusedElement>, String> {
@@ -60,6 +62,7 @@ unsafe fn read_focused_element() -> Result<Option<A11yFocusedElement>, String> {
         .unwrap_or_else(|_| "ControlType.Unknown".to_string());
     let automation_id = bstr_to_string(element.CurrentAutomationId().ok());
     let class_name = bstr_to_string(element.CurrentClassName().ok());
+    let value = read_element_value(&element);
 
     if name.is_empty() && control_type == "ControlType.Unknown" {
         return Ok(None);
@@ -70,7 +73,23 @@ unsafe fn read_focused_element() -> Result<Option<A11yFocusedElement>, String> {
         control_type,
         automation_id,
         class_name,
+        value,
     }))
+}
+
+#[cfg(windows)]
+fn read_element_value(element: &windows::Win32::UI::Accessibility::IUIAutomationElement) -> String {
+    use windows::Win32::UI::Accessibility::{IUIAutomationValuePattern, UIA_ValuePatternId};
+
+    unsafe {
+        if let Ok(pattern) = element.GetCurrentPatternAs::<IUIAutomationValuePattern>(UIA_ValuePatternId)
+        {
+            if let Ok(val) = pattern.CurrentValue() {
+                return bstr_to_string(Some(val));
+            }
+        }
+    }
+    String::new()
 }
 
 #[cfg(windows)]

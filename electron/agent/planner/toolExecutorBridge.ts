@@ -1,7 +1,12 @@
 import type { ActionRunSummary } from "../../automation/types.js";
 import type { WorldModel } from "../types.js";
 import type { ExecutionPlan } from "./planTypes.js";
-import { executePlan, type ToolExecutorSummary } from "./toolExecutor.js";
+import {
+  executePlan,
+  executePlanFromStep,
+  type StepExecutionRecord,
+  type ToolExecutorSummary,
+} from "./toolExecutor.js";
 import { hasRegisteredTool } from "./toolRegistry.js";
 import { registerPhase1DesktopTools } from "./tools/desktopTools.js";
 import { registerPhase1BrowserTools } from "./tools/browserTools.js";
@@ -51,22 +56,62 @@ export function planEligibleForToolExecutor(plan: ExecutionPlan): boolean {
   });
 }
 
+async function executorOptions(
+  plan: ExecutionPlan,
+  command: string,
+  world: WorldModel,
+  userOverride?: boolean,
+) {
+  ensureP85ToolsRegistered();
+  const capabilities =
+    getCachedCapabilitySnapshot() ?? (await getCapabilitySnapshot(world));
+  return { command, world, plan, capabilities, userOverride };
+}
+
 export async function runPlanViaToolExecutor(
   plan: ExecutionPlan,
   command: string,
   world: WorldModel,
   userOverride?: boolean,
 ): Promise<ToolExecutorSummary> {
-  ensurePhase1ToolsRegistered();
-  const capabilities =
-    getCachedCapabilitySnapshot() ?? (await getCapabilitySnapshot(world));
-  return executePlan(plan, {
-    command,
-    world,
+  return executePlan(
     plan,
-    capabilities,
-    userOverride,
-  });
+    await executorOptions(plan, command, world, userOverride),
+  );
+}
+
+/** Retry from a failed step — keeps prior successful step records. */
+export async function runPlanViaToolExecutorFromStep(
+  plan: ExecutionPlan,
+  startIndex: number,
+  command: string,
+  world: WorldModel,
+  priorRecords: StepExecutionRecord[] = [],
+  userOverride?: boolean,
+): Promise<ToolExecutorSummary> {
+  return executePlanFromStep(
+    plan,
+    startIndex,
+    await executorOptions(plan, command, world, userOverride),
+    priorRecords,
+  );
+}
+
+export function mergeExecutorSummaries(
+  prior: ToolExecutorSummary,
+  retry: ToolExecutorSummary,
+  fromIndex: number,
+): ToolExecutorSummary {
+  const kept = prior.records.filter(
+    (r) => r.index < fromIndex && r.result.ok,
+  );
+  const tail = retry.records.filter((r) => r.index >= fromIndex);
+  const records = [...kept, ...tail].sort((a, b) => a.index - b.index);
+  return {
+    ok: records.length > 0 && records.every((r) => r.result.ok),
+    records,
+    replanned: false,
+  };
 }
 
 export function toolExecutorSummaryToActionRunSummary(

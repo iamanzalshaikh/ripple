@@ -2,7 +2,7 @@ import { normalizeTranscript } from "../../automation/voice/normalizeTranscript.
 import { parseFileOperationCommand } from "../../automation/desktop/parseFileOperationCommand.js";
 import { parseWorkflowMetaCommand } from "../../automation/desktop/parseWorkflowCommand.js";
 import { isRememberWorkflowPhrase } from "../../automation/desktop/spokenName.js";
-import { splitCompoundParts } from "../../automation/voice/nlu/compoundParse.js";
+import { splitCompoundParts, isAtomicClipboardSequence } from "../../automation/voice/nlu/compoundParse.js";
 import {
   parseDesktopInputFallback,
   parseKeyboardCompoundSequence,
@@ -26,7 +26,9 @@ function normalizedForDesktopInput(normalized: string): string {
 function isAtomicDesktopInputCompound(normalized: string): boolean {
   const n = normalizedForDesktopInput(normalized);
   if (parseKeyboardCompoundSequence(n)) return true;
-  if (/^select all and copy$/i.test(n)) return true;
+  if (isAtomicClipboardSequence(n)) return true;
+  if (/^select all and copy(?:\s+(?:this(?:\s+text)?|text))?$/i.test(n)) return true;
+  if (/^select all and cut(?:\s+(?:this(?:\s+text)?|text|everything))?$/i.test(n)) return true;
   if (
     /^(?:delete|clear|remove)\s+all(?:\s+the)?\s+(?:text|content|everything)\s+and\s+(?:write|type|insert|put)\b/i.test(
       n,

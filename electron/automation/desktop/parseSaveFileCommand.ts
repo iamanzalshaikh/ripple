@@ -57,6 +57,48 @@ export function parseSaveFileCommand(
       re: /^\s*save\s+as\s+(.+?)\s*$/i,
       file: 1,
     },
+    {
+      re: /^\s*save\s+file\s+in\s+(downloads?|documents?|desktop)\s+(.+?)\s*$/i,
+      file: 2,
+      folder: 1,
+    },
+    {
+      re: /^\s*save\s+(?:the\s+)?file\s+(.+?)\s+(?:inside|in|to)\s+(?:my\s+)?(downloads?|documents?|desktop)\s*$/i,
+      file: 1,
+      folder: 2,
+    },
+    {
+      re: /^\s*save\s+(?:the\s+)?file\s+(.+?)\s*$/i,
+      file: 1,
+    },
+    {
+      re: /^\s*create\s+file\s+(.+?)\s*$/i,
+      file: 1,
+    },
+    {
+      re: /^\s*create\s+new\s+file\s+(.+?)\s*$/i,
+      file: 1,
+    },
+    {
+      re: /^\s*create\s+a\s+file\s+called\s+(.+?)\s*$/i,
+      file: 1,
+    },
+    {
+      re: /^\s*save\s+current\s+file\s+as\s+(.+?)\s*$/i,
+      file: 1,
+    },
+    {
+      re: /^\s*save\s+everything\s+as\s+(.+?)\s*$/i,
+      file: 1,
+    },
+    {
+      re: /^\s*store\s+(?:this\s+text\s+)?in\s+a\s+file\s+named\s+(.+?)\s*$/i,
+      file: 1,
+    },
+    {
+      re: /^\s*store\s+(?:it|this|everything)\s+as\s+(?:a\s+)?(?:file\s+)?(.+?)\s*$/i,
+      file: 1,
+    },
   ];
 
   for (const { re, file, folder } of patterns) {

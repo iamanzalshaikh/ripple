@@ -9,11 +9,16 @@ import { attemptP85Recovery } from "./recoveryEngine.js";
 import { logExecutionPlan } from "./planLogger.js";
 import {
   isToolExecutorRouteEnabled,
+  mergeExecutorSummaries,
   planEligibleForToolExecutor,
   runPlanViaToolExecutor,
   toolExecutorSummaryToActionRunSummary,
 } from "./toolExecutorBridge.js";
-import type { StepExecutionRecord } from "./toolExecutor.js";
+import type { StepExecutionRecord, ToolExecutorSummary } from "./toolExecutor.js";
+import { join } from "node:path";
+import { resolveFolderPath } from "../../automation/desktop/openFolder.js";
+import { submitSaveDialog } from "./executionSync.js";
+import { dismissExtraNotepadInstances } from "../../focus/saveDialogMode.js";
 
 /** Public planner → executor boundary (§4b.3). */
 export interface ExecutionRequest {
@@ -72,7 +77,10 @@ async function executeViaRoute(
   plan: ExecutionPlan,
   payload: CommandResultPayload,
   via: "executor" | "payload",
-): Promise<ActionRunSummary | null> {
+): Promise<{
+  actionSummary: ActionRunSummary | null;
+  executorSummary: ToolExecutorSummary | null;
+}> {
   if (via === "executor") {
     const execSummary = await runPlanViaToolExecutor(
       plan,
@@ -80,13 +88,19 @@ async function executeViaRoute(
       input.world,
       input.userOverride,
     );
-    return toolExecutorSummaryToActionRunSummary(
-      plan,
-      execSummary,
-      payload.command_id,
-    );
+    return {
+      executorSummary: execSummary,
+      actionSummary: toolExecutorSummaryToActionRunSummary(
+        plan,
+        execSummary,
+        payload.command_id,
+      ),
+    };
   }
-  return input.runPayload(payload);
+  return {
+    executorSummary: null,
+    actionSummary: await input.runPayload(payload),
+  };
 }
 
 function routeForPlan(
@@ -113,12 +127,9 @@ export async function runValidatedPlanExecution(
 
   logExecutionPlan(activePlan, "executor-in");
 
-  let actionSummary = await executeViaRoute(
-    input,
-    activePlan,
-    payload,
-    via,
-  );
+  const firstRun = await executeViaRoute(input, activePlan, payload, via);
+  let actionSummary = firstRun.actionSummary;
+  let lastExecutorSummary = firstRun.executorSummary;
 
   let recovery: Awaited<ReturnType<typeof attemptP85Recovery>> | undefined;
   if (actionSummary && !actionSummary.allSucceeded) {
@@ -126,7 +137,19 @@ export async function runValidatedPlanExecution(
       command: input.command,
       payload,
       initialSummary: actionSummary,
+      isSaveStepIndex: (failedIndex) =>
+        activePlan.steps[failedIndex]?.tool === "desktop.save_file",
       execute: async (retryPayload) => {
+        const failed = actionSummary?.records.find((r) => r.status === "failed");
+        if (
+          failed &&
+          activePlan.steps[failed.index]?.tool === "desktop.save_file"
+        ) {
+          console.warn(
+            "[ripple-p85] blocked full-plan retry for desktop.save_file failure",
+          );
+          return actionSummary;
+        }
         if (via === "executor" && planEligibleForToolExecutor(activePlan)) {
           const summary = await runPlanViaToolExecutor(
             activePlan,
@@ -134,13 +157,103 @@ export async function runValidatedPlanExecution(
             input.world,
             input.userOverride,
           );
-          return toolExecutorSummaryToActionRunSummary(
+          lastExecutorSummary = summary;
+          const bridged = toolExecutorSummaryToActionRunSummary(
             activePlan,
             summary,
             retryPayload.command_id,
           );
+          actionSummary = bridged;
+          return bridged;
         }
-        return input.runPayload(retryPayload);
+        const rerun = await input.runPayload(retryPayload);
+        if (rerun) actionSummary = rerun;
+        return rerun;
+      },
+      executeFromStep: async (failedIndex) => {
+        const step = activePlan.steps[failedIndex];
+        if (step?.tool !== "desktop.save_file") {
+          return null;
+        }
+
+        const filename =
+          typeof step.args.filename === "string" ? step.args.filename.trim() : "";
+        const folderKey =
+          typeof step.args.folder === "string" && step.args.folder.trim()
+            ? step.args.folder.trim()
+            : "downloads";
+        const fullPath = join(resolveFolderPath(folderKey), filename);
+
+        let saveOk = false;
+        let saveError: string | undefined;
+        try {
+          await submitSaveDialog(fullPath, { recoveryAttempt: true });
+          saveOk = true;
+        } catch (e: unknown) {
+          saveError = e instanceof Error ? e.message : "save_file_failed";
+        }
+
+        const saveDetail = saveOk ? `Saved to ${fullPath}` : undefined;
+
+        if (via === "executor" && planEligibleForToolExecutor(activePlan)) {
+          const priorOk = (lastExecutorSummary?.records ?? []).filter(
+            (r) => r.index < failedIndex && r.result.ok,
+          );
+
+          const retryRecord = {
+            index: failedIndex,
+            tool: step.tool,
+            result: {
+              ok: saveOk,
+              error: saveError,
+              output: saveDetail,
+            },
+          };
+
+          const merged = mergeExecutorSummaries(
+            lastExecutorSummary ?? { ok: false, records: priorOk, replanned: false },
+            {
+              ok: saveOk,
+              records: [...priorOk, retryRecord],
+              replanned: false,
+            },
+            failedIndex,
+          );
+          lastExecutorSummary = merged;
+          console.info(
+            `[ripple-p85] recovery save-fill-only index=${failedIndex} ok=${saveOk}`,
+          );
+          const bridged = toolExecutorSummaryToActionRunSummary(
+            activePlan,
+            merged,
+            payload.command_id,
+          );
+          actionSummary = bridged;
+          return bridged;
+        }
+
+        if (!actionSummary) return null;
+
+        const records = actionSummary.records.map((r) =>
+          r.index === failedIndex
+            ? {
+                ...r,
+                status: saveOk ? ("executed" as const) : ("failed" as const),
+                error: saveError,
+                detail: saveDetail,
+              }
+            : r,
+        );
+        const patched: ActionRunSummary = {
+          ...actionSummary,
+          records,
+          allSucceeded: records.every((r) => r.status === "executed"),
+        };
+        actionSummary = patched;
+        console.info(
+          `[ripple-p85] recovery save-fill-only index=${failedIndex} ok=${saveOk}`,
+        );
+        return patched;
       },
       replan: input.getAccessToken
         ? async () => {

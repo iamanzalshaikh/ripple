@@ -230,6 +230,23 @@ const DESKTOP_TOOLS: RegisteredTool[] = [
   },
   {
     definition: def({
+      name: "desktop.paint_op",
+      description: "Paint fill, erase, or clear canvas",
+      category: "desktop",
+      priority: 70,
+      cost: 3,
+      idempotent: false,
+      argsSchema: {
+        op: { type: "string", required: true },
+        text: { type: "string" },
+      },
+      examples: ["fill it", "erase it", "clear canvas", "label it Hello"],
+    }),
+    execute: async (_ctx, args) =>
+      runInsertStep({ tool: "desktop.paint_op", args }),
+  },
+  {
+    definition: def({
       name: "desktop.launch_app",
       description: "Launch or focus a desktop application",
       category: "desktop",
@@ -362,10 +379,14 @@ const DESKTOP_TOOLS: RegisteredTool[] = [
       const folderKey =
         typeof args.folder === "string" && args.folder.trim()
           ? args.folder.trim()
-          : "documents";
+          : "downloads";
       const fullPath = join(resolveFolderPath(folderKey), filename);
+      const recoveryAttempt = args._saveRecoveryAttempt === true;
+      console.info(
+        `[ripple-desktop] save target → ${fullPath}${recoveryAttempt ? " (recovery)" : ""}`,
+      );
       try {
-        await submitSaveDialog(fullPath);
+        await submitSaveDialog(fullPath, { recoveryAttempt });
         return { ok: true, output: `Saved to ${fullPath}` };
       } catch (e: unknown) {
         return {

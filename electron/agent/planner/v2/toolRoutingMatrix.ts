@@ -41,7 +41,9 @@ const MATRIX: Record<
   FOLDER_OPEN: { tool: "filesystem.open", forbidden: ["desktop.launch_app"], reason: "folder_open" },
   FILE_OPEN: { tool: "filesystem.open", forbidden: ["desktop.launch_app"], reason: "file_open" },
   TYPE_TEXT: { tool: "desktop.type_text", forbidden: [], reason: "type_text" },
+  CLIPBOARD_OP: { tool: null, forbidden: [], reason: "clipboard_op" },
   DRAW_SHAPE: { tool: "desktop.mouse_drag", forbidden: [], reason: "draw_shape" },
+  PAINT_OP: { tool: null, forbidden: [], reason: "paint_op" },
   MOUSE_ACTION: { tool: "desktop.mouse_click", forbidden: [], reason: "mouse_action" },
   SAVE_FILE: { tool: "desktop.save_file", forbidden: [], reason: "save_file" },
   FILE_MUTATE: { tool: null, forbidden: [], reason: "file_mutate" },
@@ -65,8 +67,15 @@ export function routeClause(record: ClauseRecord): RoutingDecision | null {
   if (record.status !== "resolved") return null;
 
   const entry = MATRIX[record.clauseType];
-  // FILE_MUTATE resolves tool dynamically from parseFileOperationCommand.
-  if (!entry.tool && record.clauseType !== "FILE_MUTATE") return null;
+  // FILE_MUTATE and CLIPBOARD_OP resolve tool dynamically.
+  if (
+    !entry.tool &&
+    record.clauseType !== "FILE_MUTATE" &&
+    record.clauseType !== "CLIPBOARD_OP" &&
+    record.clauseType !== "PAINT_OP"
+  ) {
+    return null;
+  }
 
   const blockedTools = [...entry.forbidden];
   const e = record.entities;
@@ -163,23 +172,142 @@ export function routeClause(record: ClauseRecord): RoutingDecision | null {
         reason: entry.reason,
         blockedTools,
       };
+    case "CLIPBOARD_OP": {
+      const op = e.clipOp;
+      if (!op) return null;
+      if (op === "read") {
+        return {
+          tool: "system.clipboard.read",
+          args: {},
+          reason: "read_clipboard",
+          blockedTools,
+        };
+      }
+      if (op === "write") {
+        const text = e.clipText?.trim();
+        if (!text) return null;
+        return {
+          tool: "system.clipboard.write",
+          args: { text },
+          reason: "write_clipboard",
+          blockedTools,
+        };
+      }
+      if (op === "copy") {
+        return {
+          tool: "desktop.copy",
+          args: {},
+          reason: "copy",
+          blockedTools,
+        };
+      }
+      if (op === "cut") {
+        return {
+          tool: "desktop.press_keys",
+          args: { keys: "^x" },
+          reason: "cut",
+          blockedTools,
+        };
+      }
+      if (op === "paste") {
+        return {
+          tool: "desktop.paste",
+          args: {},
+          reason: "paste",
+          blockedTools,
+        };
+      }
+      if (op === "select_all") {
+        return {
+          tool: "desktop.select_all",
+          args: {},
+          reason: "select_all",
+          blockedTools,
+        };
+      }
+      if (op === "select_all_copy" || op === "select_all_cut") {
+        const cut = op === "select_all_cut";
+        const steps: PlanStep[] = [
+          { tool: "desktop.select_all", args: {}, reason: "select_all" },
+          cut
+            ? { tool: "desktop.press_keys", args: { keys: "^x" }, reason: "cut" }
+            : { tool: "desktop.copy", args: {}, reason: "copy" },
+        ];
+        return {
+          tool: "__multi__",
+          args: { steps },
+          reason: entry.reason,
+          blockedTools,
+        };
+      }
+      return null;
+    }
+    case "PAINT_OP": {
+      const op = e.paintOp;
+      if (!op) return null;
+      if (op === "label") {
+        const text = e.paintLabel?.trim();
+        if (!text) return null;
+        return {
+          tool: "desktop.paint_op",
+          args: { op: "label", text },
+          reason: "paint_label",
+          blockedTools,
+        };
+      }
+      return {
+        tool: "desktop.paint_op",
+        args: { op },
+        reason: `paint_${op}`,
+        blockedTools,
+      };
+    }
     case "DRAW_SHAPE": {
+      const rawShape = e.drawShape ?? "circle";
       const shape =
-        e.drawShape === "circle" || e.drawShape === "oval"
+        rawShape === "circle" || rawShape === "oval" || rawShape === "circles"
           ? "ellipse"
-          : e.drawShape === "square" || e.drawShape === "rect" || e.drawShape === "rectangle"
+          : rawShape === "square" ||
+              rawShape === "rect" ||
+              rawShape === "rectangle" ||
+              rawShape === "box"
             ? "rect"
-            : e.drawShape === "line"
+            : rawShape === "line"
               ? "line"
-              : "ellipse";
-      const steps: PlanStep[] = [
-        { tool: "desktop.mouse_move", args: { moveToCenter: true }, reason: "canvas_center" },
-        {
-          tool: "desktop.mouse_drag",
-          args: { shape, radius: 72, moveToCenter: true },
-          reason: "draw_shape",
-        },
-      ];
+              : rawShape === "star"
+                ? "star"
+                : rawShape === "triangle"
+                  ? "triangle"
+                  : rawShape === "heart"
+                    ? "heart"
+                    : "ellipse";
+      const drawCount =
+        typeof e.drawCount === "number" && e.drawCount > 1
+          ? Math.min(8, e.drawCount)
+          : /\bmultiple\b/i.test(record.normalized)
+            ? 3
+            : 1;
+      const steps: PlanStep[] = [];
+      for (let i = 0; i < drawCount; i++) {
+        const offsetX = i * 36;
+        steps.push(
+          {
+            tool: "desktop.mouse_move",
+            args: { moveToCenter: true, offsetX },
+            reason: "canvas_center",
+          },
+          {
+            tool: "desktop.mouse_drag",
+            args: { shape, radius: 56, moveToCenter: true, offsetX },
+            reason: drawCount > 1 ? `draw_shape_${i + 1}` : "draw_shape",
+          },
+        );
+      }
+      if (drawCount > 1 && process.env.RIPPLE_P85_PLANNER_V2_TRACE !== "0") {
+        console.info(
+          `[planner-v2] draw_shape count=${drawCount} shape=${shape} steps=${steps.length}`,
+        );
+      }
       return {
         tool: "__multi__",
         args: { steps },

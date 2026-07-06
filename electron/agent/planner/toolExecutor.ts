@@ -62,16 +62,28 @@ export async function executePlan(
   plan: ExecutionPlan,
   options: ToolExecutorOptions,
 ): Promise<ToolExecutorSummary> {
+  return executePlanFromStep(plan, 0, options, []);
+}
+
+/** Run plan from a step index — used for save-step-only recovery. */
+export async function executePlanFromStep(
+  plan: ExecutionPlan,
+  startIndex: number,
+  options: ToolExecutorOptions,
+  priorRecords: StepExecutionRecord[] = [],
+): Promise<ToolExecutorSummary> {
   const ctx = createExecutionContext({
     world: options.world,
     resolved: options.resolved ?? {},
     capabilities: options.capabilities ?? emptyCapabilities(),
   });
 
-  const records: StepExecutionRecord[] = [];
-  const completedTools = new Set<string>();
+  const records: StepExecutionRecord[] = [...priorRecords];
+  const completedTools = new Set(
+    priorRecords.filter((r) => r.result.ok).map((r) => r.tool),
+  );
 
-  for (let index = 0; index < plan.steps.length; index++) {
+  for (let index = startIndex; index < plan.steps.length; index++) {
     const step = plan.steps[index]!;
     const toolCtx = {
       execution: ctx,
