@@ -418,7 +418,8 @@ describe("P8.5 GPT bridge", () => {
 
   it("classifies planner GPT candidates", () => {
     expect(isPlannerGptCandidate("open HRMS")).toBe(true);
-    expect(isMessagingAdapterCommand("send on whatsapp")).toBe(true);
+    expect(isMessagingAdapterCommand("message ahmed on instagram")).toBe(true);
+    expect(isMessagingAdapterCommand("message ahmed on linkedin")).toBe(false);
   });
 
   it("builds planner prompt with manifest", () => {

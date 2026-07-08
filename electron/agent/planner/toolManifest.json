@@ -31,10 +31,12 @@
     "browser": [
       "browser.search",
       "browser.open_workspace",
-      "browser.search_workspace"
+      "browser.search_workspace",
+      "browser.youtube.run"
     ],
     "communication": [
       "browser.whatsapp.send",
+      "browser.linkedin.run",
       "browser.gmail.compose"
     ],
     "system": [
@@ -292,8 +294,50 @@
           "type": "string"
         },
         "message": {
+          "type": "string"
+        }
+      },
+      "requiresPermission": "messaging"
+    },
+    {
+      "name": "browser.youtube.run",
+      "description": "Open, search, or play on YouTube",
+      "category": "browser",
+      "wave": 1,
+      "argsSchema": {
+        "kind": {
           "type": "string",
           "required": true
+        },
+        "query": {
+          "type": "string"
+        },
+        "rawCommand": {
+          "type": "string"
+        }
+      }
+    },
+    {
+      "name": "browser.linkedin.run",
+      "description": "Open, search people, or create post on LinkedIn",
+      "category": "communication",
+      "wave": 1,
+      "argsSchema": {
+        "kind": {
+          "type": "string",
+          "required": true
+        },
+        "query": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "publish": {
+          "type": "boolean"
+        },
+        "rawCommand": {
+          "type": "string"
         }
       },
       "requiresPermission": "messaging"
@@ -311,6 +355,9 @@
           "type": "string"
         },
         "body": {
+          "type": "string"
+        },
+        "rawCommand": {
           "type": "string"
         }
       },

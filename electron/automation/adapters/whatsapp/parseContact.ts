@@ -41,6 +41,41 @@ export function resolveWhatsAppSearchName(raw: string): string {
   return name;
 }
 
+/** Marker for pronoun contacts resolved via session memory at execution time. */
+export const LAST_CONTACT_MARKER = "__last_contact__";
+
+const PRONOUN_CONTACT = /^(?:him|her|them|he|she)$/i;
+
+const RELATIONAL_CONTACT =
+  /^my\s+(?:brother|sister|mother|father|mom|dad|mum|bhai|behen|ammi|anna|akka|beta|beti)\b/i;
+
+/** True when spoken name is a pronoun referring to last_contact memory. */
+export function isPronounContact(name: string): boolean {
+  return PRONOUN_CONTACT.test(name.trim());
+}
+
+/** True when contact is a relational phrase (my brother, my sister, …). */
+export function isRelationalContact(name: string): boolean {
+  return RELATIONAL_CONTACT.test(name.trim());
+}
+
+/** Resolve pronoun / __last_contact__ marker to a concrete contact name. */
+export function resolveWhatsAppContactRef(
+  contact: string,
+  lastContact: string | null,
+): string | null {
+  const raw = contact.trim();
+  if (!raw) return null;
+  if (raw === LAST_CONTACT_MARKER || isPronounContact(raw)) {
+    return lastContact?.trim() || null;
+  }
+  return raw;
+}
+
+function pronounMarker(contact: string): string {
+  return isPronounContact(contact) ? LAST_CONTACT_MARKER : contact;
+}
+
 function finalizeContact(name: string | null | undefined): string | null {
   if (!name?.trim()) return null;
   return resolveWhatsAppSearchName(name);
@@ -123,6 +158,117 @@ function parseSendMessageToContact(
   };
 }
 
+/**
+ * "send [a] [whatsapp] message to <contact> saying/telling/that/: <message>"
+ * Contact is everything up to the message separator (not up to first " to ").
+ * Without a message body → open chat only (message: "").
+ */
+function parseSendWaMessageTo(
+  cmd: string,
+): { message: string; contact: string } | null {
+  const withBody = cmd.match(
+    /^\s*send\s+(?:a\s+)?(?:whats?\s*app\s+)?(?:message|msg|text)\s+to\s+(.+?)(?:\s+(?:saying|asking|telling|say|ask|tell|that)\s+|\s*:\s*)(.+?)\.?\s*$/i,
+  );
+  if (withBody?.[1]?.trim() && withBody[2]?.trim()) {
+    return {
+      contact: finalizeContact(withBody[1])!,
+      message: withBody[2].trim(),
+    };
+  }
+  const openOnly = cmd.match(
+    /^\s*send\s+(?:a\s+)?(?:whats?\s*app\s+)?(?:message|msg|text)\s+to\s+(.+?)\.?\s*$/i,
+  );
+  if (openOnly?.[1]?.trim()) {
+    return { contact: finalizeContact(openOnly[1])!, message: "" };
+  }
+  return null;
+}
+
+/** "send <contact>: <message>" — short form without "whatsapp message to". */
+function parseSendContactColon(
+  cmd: string,
+): { message: string; contact: string } | null {
+  const m = cmd.match(/^\s*send\s+(.+?)\s*:\s*(.+?)\.?\s*$/i);
+  if (m?.[1]?.trim() && m[2]?.trim()) {
+    return {
+      contact: finalizeContact(m[1])!,
+      message: m[2].trim(),
+    };
+  }
+  return null;
+}
+
+/** "message my brother I reached home" — relational entity phrase as contact. */
+function parseMessageRelational(
+  cmd: string,
+): { message: string; contact: string } | null {
+  const m = cmd.match(
+    /^\s*message\s+(my\s+(?:brother|sister|mother|father|mom|dad|mum|bhai|behen|ammi|anna|akka|beta|beti))\s+(.+?)\.?\s*$/i,
+  );
+  if (m?.[1]?.trim() && m[2]?.trim()) {
+    return {
+      contact: finalizeContact(m[1])!,
+      message: m[2].trim(),
+    };
+  }
+  return null;
+}
+
+/** "message Ammi 1 I will come tomorrow" — contact name includes a digit. */
+function parseMessageNameWithDigit(
+  cmd: string,
+): { message: string; contact: string } | null {
+  const m = cmd.match(
+    /^\s*message\s+([A-Za-z][A-Za-z0-9'.-]*\s*\d+)\s+(.+?)\.?\s*$/i,
+  );
+  if (m?.[1]?.trim() && m[2]?.trim()) {
+    return {
+      contact: finalizeContact(m[1])!,
+      message: m[2].trim(),
+    };
+  }
+  return null;
+}
+
+/**
+ * "message Ammi I will come tomorrow" — split when remainder looks like message
+ * (starts with I/we/you/hello/good/the …), not a name continuation.
+ */
+function parseMessageContactMessageCue(
+  cmd: string,
+): { message: string; contact: string } | null {
+  const m = cmd.match(
+    /^\s*message\s+([A-Za-z][A-Za-z0-9'.\s(),-]*?)\s+((?:I\s|I'm|I am|I've|we\s|you\s|hello\b|hi\b|good\s|the\s|please\s).+?)\.?\s*$/i,
+  );
+  if (!m?.[1]?.trim() || !m[2]?.trim()) return null;
+  const rawContact = m[1].trim();
+  if (/^(?:dr|doctor|mr|mrs|ms|prof|my)\.?$/i.test(rawContact)) return null;
+  return {
+    contact: finalizeContact(rawContact)!,
+    message: m[2].trim(),
+  };
+}
+
+/** "message <contact>: <message>" — colon separates contact and body. */
+function parseMessageContactColon(
+  cmd: string,
+): { message: string; contact: string } | null {
+  const m = cmd.match(/^\s*(?:message|msg|text)\s+(.+?)\s*:\s*(.+?)\.?\s*$/i);
+  if (m?.[1]?.trim() && m[2]?.trim()) {
+    return { contact: finalizeContact(m[1])!, message: m[2].trim() };
+  }
+  return null;
+}
+
+/** "open [whatsapp] chat with <contact>" / "chat with <contact>" → open only. */
+function parseChatWithContact(cmd: string): { contact: string } | null {
+  const m = cmd.match(
+    /\bchat\s+with\s+([A-Za-z0-9][A-Za-z0-9'.\s(),-]{0,50}?)(?:\s+on\s+whats?\s*app)?\s*\.?\s*$/i,
+  );
+  if (m?.[1]?.trim()) return { contact: finalizeContact(m[1])! };
+  return null;
+}
+
 /** "send Noor good night" (no "to") → { contact: "Noor", message: "good night" } */
 function parseSendContactThenMessage(
   cmd: string,
@@ -132,8 +278,9 @@ function parseSendContactThenMessage(
     /^\s*send\s+([A-Za-z0-9][A-Za-z0-9'.\s(),-]{0,50}?)\s+(.+?)\.?\s*$/i,
   );
   if (!m?.[1]?.trim() || !m[2]?.trim()) return null;
+  const raw = finalizeContact(m[1])!;
   return {
-    contact: finalizeContact(m[1])!,
+    contact: pronounMarker(raw),
     message: m[2].trim(),
   };
 }
@@ -191,6 +338,18 @@ export function extractContactName(
   const urdu = parseUrduSearchAndMessage(cmd);
   if (urdu?.contact) return urdu.contact;
 
+  const waMsgTo = parseSendWaMessageTo(cmd);
+  if (waMsgTo?.contact) return waMsgTo.contact;
+
+  const sendColon = parseSendContactColon(cmd);
+  if (sendColon?.contact) return sendColon.contact;
+
+  const msgColon = parseMessageContactColon(cmd);
+  if (msgColon?.contact) return msgColon.contact;
+
+  const chatWith = parseChatWithContact(cmd);
+  if (chatWith?.contact) return chatWith.contact;
+
   const sendTo = parseSendMessageToContact(cmd);
   if (sendTo?.contact) return sendTo.contact;
 
@@ -205,6 +364,15 @@ export function extractContactName(
 
   const titledMessageOnly = parseMessageTitledNameOnly(cmd);
   if (titledMessageOnly?.contact) return titledMessageOnly.contact;
+
+  const relational = parseMessageRelational(cmd);
+  if (relational?.contact) return relational.contact;
+
+  const nameDigit = parseMessageNameWithDigit(cmd);
+  if (nameDigit?.contact) return nameDigit.contact;
+
+  const messageCue = parseMessageContactMessageCue(cmd);
+  if (messageCue?.contact) return messageCue.contact;
 
   const messageThen = parseMessageContactThenText(cmd);
   if (messageThen?.contact) return messageThen.contact;
@@ -301,13 +469,14 @@ export function isWhatsAppMessagingCommand(command?: string | null): boolean {
     return true;
   }
   if (/\bwhatsapp\b/i.test(cmd) && !isWhatsAppOpenOnly(cmd)) return true;
+  if (/^\s*send\s+.+\s*:\s*\S/i.test(cmd)) return true;
   const contact = extractContactName(cmd);
   if (contact && !/\b(gmail|google\s*mail|mail|email)\b/i.test(cmd)) {
     return true;
   }
   if (
     /\b(search|find)\b/i.test(cmd) &&
-    /\b(say|ask|tell|whatsapp)\b/i.test(cmd)
+    /\b(say|ask|tell|type|write|whatsapp)\b/i.test(cmd)
   ) {
     return true;
   }
@@ -341,6 +510,15 @@ export function extractMessageFromCommand(command?: string | null): string | nul
   const urdu = parseUrduSearchAndMessage(cmd);
   if (urdu?.message) return urdu.message;
 
+  const waMsgTo = parseSendWaMessageTo(cmd);
+  if (waMsgTo) return waMsgTo.message.trim() ? waMsgTo.message.trim() : null;
+
+  const sendColon = parseSendContactColon(cmd);
+  if (sendColon?.message) return sendColon.message;
+
+  const msgColon = parseMessageContactColon(cmd);
+  if (msgColon?.message) return msgColon.message;
+
   const sendTo = parseSendMessageToContact(cmd);
   if (sendTo?.message) return sendTo.message;
 
@@ -356,6 +534,15 @@ export function extractMessageFromCommand(command?: string | null): string | nul
   // "Message Dr. Fatima." is open-chat only (no message text).
   if (parseMessageTitledNameOnly(cmd)) return null;
 
+  const relational = parseMessageRelational(cmd);
+  if (relational?.message) return relational.message;
+
+  const nameDigit = parseMessageNameWithDigit(cmd);
+  if (nameDigit?.message) return nameDigit.message;
+
+  const messageCue = parseMessageContactMessageCue(cmd);
+  if (messageCue?.message) return messageCue.message;
+
   const messageThen = parseMessageContactThenText(cmd);
   if (messageThen?.message) return messageThen.message;
 
@@ -363,7 +550,8 @@ export function extractMessageFromCommand(command?: string | null): string | nul
     /\bwrite\s+(?:a\s+)?message\s+to\s+(.+?)\.?$/i,
     /\band\s+write\s+(?:a\s+)?message\s+to\s+(.+?)\.?$/i,
     /\bmessage\s+to\s+[A-Za-z][\w'.-]*\s+saying\s+(.+)$/i,
-    /\bsearch\s+.+?\s+and\s+(?:say|ask|tell)\s+(.+)$/i,
+    /\bsearch\s+.+?\s+and\s+(?:say|ask|tell|type|write)\s+(.+)$/i,
+    /\band\s+(?:type|write)\s+(.+)$/i,
     /\b(?:say|ask)\s+(.+)$/i,
     /\bsaying\s+(.+)$/i,
   ];

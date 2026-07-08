@@ -45,6 +45,7 @@ import {
 import { tryCompoundGate } from "./compoundGate.js";
 import { planFromNativeIntent } from "./planFromNativeIntent.js";
 import { browserWorkspacePlanFromDesktopPayload } from "./browserWorkspacePlan.js";
+import { tryL0WhatsAppPlan } from "./l0WhatsAppPlanner.js";
 import { plannerV2AtomicEnabled } from "./v2/plannerV2Config.js";
 import { planAtomicWithV2 } from "./v2/plannerV2.js";
 import { shouldBypassP85Planner } from "./gptFallbackPolicy.js";
@@ -239,6 +240,11 @@ export function runAtomicPlanner(
   world: WorldModel,
 ): L0PlannerResult {
   const raw = normalized;
+  const whatsappPlan = tryL0WhatsAppPlan(rawCommand, normalized);
+  if (whatsappPlan) {
+    tracePlannerBranch("atomic", "whatsapp_tool", "full");
+    return whatsappPlan;
+  }
   if (shouldBypassP85Planner(rawCommand)) {
     return { kind: "defer", reason: "adapter_owned" };
   }
@@ -558,6 +564,12 @@ export function runL0Planner(
 ): L0PlannerResult {
   const raw = normalized;
   if (!raw) return { kind: "defer", reason: "empty" };
+
+  const whatsappPlan = tryL0WhatsAppPlan(rawCommand, normalized);
+  if (whatsappPlan) {
+    tracePlannerBranch("l0", "whatsapp_tool", "full");
+    return whatsappPlan;
+  }
 
   if (shouldBypassP85Planner(rawCommand)) {
     tracePlannerBranch("l0", "adapter_owned", "full");

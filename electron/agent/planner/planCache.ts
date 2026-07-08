@@ -15,6 +15,8 @@ const NON_CACHEABLE_TOOLS = new Set([
   "desktop.close_window",
   "browser.whatsapp.send",
   "browser.gmail.compose",
+  "browser.youtube.run",
+  "browser.linkedin.run",
 ]);
 
 const COMMUNICATION_PREFIXES = ["browser.whatsapp.", "browser.gmail.", "communication."];

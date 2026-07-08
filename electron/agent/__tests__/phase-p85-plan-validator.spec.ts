@@ -77,6 +77,18 @@ describe("P8.5 plan validator", () => {
     expect(result.errors.some((e) => e.includes("clipboard_empty"))).toBe(true);
   });
 
+  it("allows paste after clipboard write in same compound plan", () => {
+    const result = validatePlan(
+      plan([
+        { tool: "system.clipboard.write", args: { text: "seed" } },
+        { tool: "desktop.launch_app", args: { app: "notepad" } },
+        { tool: "desktop.paste", args: {} },
+      ]),
+      emptyWorld(),
+    );
+    expect(result.valid).toBe(true);
+  });
+
   it("accepts bridged desktop.launch_app without app arg", () => {
     const result = validatePlan(
       plan([

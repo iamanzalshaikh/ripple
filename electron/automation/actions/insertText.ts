@@ -29,6 +29,10 @@ import {
 import { captureObservation, verifyTypingObservation } from "../../agent/observe.js";
 import { retryDesktopKeys } from "../../agent/retryTyping.js";
 import {
+  logInsertTextDiagnostics,
+  logVerificationFailure,
+} from "./insertTextDiagnostics.js";
+import {
   drawShapeInMspaint,
   fillShapeInMspaint,
   clearPaintCanvas,
@@ -48,6 +52,13 @@ export async function runInsertText(data?: Record<string, unknown>): Promise<str
   const mouseAction =
     typeof data?.mouseAction === "string" ? data.mouseAction : "";
   const hasKeyInput = Boolean(keys) || sequence.length > 0;
+
+  await logInsertTextDiagnostics("entry", {
+    textPreview: text,
+    keys: keys || undefined,
+    mouseAction: mouseAction || undefined,
+    sequenceSteps: sequence.length || undefined,
+  });
 
   if (hasKeyInput) {
     hideOverlay();
@@ -222,6 +233,7 @@ export async function runInsertText(data?: Record<string, unknown>): Promise<str
   if (replaceAll && text.trim()) {
     await restoreFocusContext();
     await new Promise((r) => setTimeout(r, 120));
+    await logInsertTextDiagnostics("pre_insert", { textPreview: text });
     await runInputSequenceNative({
       steps: [
         { type: "keys", value: "^a", delayMs: 40 },
@@ -243,6 +255,7 @@ export async function runInsertText(data?: Record<string, unknown>): Promise<str
     });
     void detail;
     await new Promise((r) => setTimeout(r, 180));
+    await logInsertTextDiagnostics("pre_insert", { textPreview: text });
     const msg = await smartInsertText(text, data);
     return finishTypingResult(msg, beforeObserve, text, true);
   }
@@ -274,6 +287,7 @@ export async function runInsertText(data?: Record<string, unknown>): Promise<str
     }
   }
 
+  await logInsertTextDiagnostics("pre_insert", { textPreview: text });
   const msg = await smartInsertText(text, data);
   if (/^Gmail compose opened\b/i.test(msg)) {
     return msg;
@@ -293,6 +307,8 @@ async function finishTypingResult(
     settleMs: 220,
   });
   if (!verified.ok) {
+    logVerificationFailure(verified, expectedText);
+    await logInsertTextDiagnostics("verify_fail", { textPreview: expectedText });
     console.warn(
       `[ripple-desktop] typing observe: ${verified.reason ?? "failed"} fg=${verified.after.foreground?.processName ?? "?"}`,
     );

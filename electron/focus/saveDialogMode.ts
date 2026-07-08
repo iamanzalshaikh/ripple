@@ -30,7 +30,7 @@ export type SaveFlowOptions = {
 };
 
 let saveChordSentThisFlow = false;
-const SAVE_CHORD_WAIT_MS = 1_200;
+const SAVE_CHORD_WAIT_MS = 2_000;
 const SAVE_VERIFY_MAX_AGE_MS = 20_000;
 const INLINE_FOLDER_POLL_MS = 100;
 const INLINE_FOLDER_POLL_TIMEOUT_MS = 3_000;

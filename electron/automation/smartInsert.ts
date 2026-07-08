@@ -1,5 +1,9 @@
 import { clipboard } from "electron";
 import { getFocusContext, restoreFocusContext } from "../focus/focusContext.js";
+import {
+  ensureEditorKeyboardFocus,
+  isClassicTextEditorProcess,
+} from "../agent/editorFocus.js";
 import { getLastVoiceCommand, isEditIntent } from "../state/lastCommand.js";
 import { isWhatsAppMessagingCommand } from "./adapters/whatsapp/parseContact.js";
 import { isContextualWhatsAppComposeCommand } from "./adapters/whatsapp/parseWhatsAppCommand.js";
@@ -247,6 +251,11 @@ export async function smartInsertText(
 
   await restoreFocusContext();
   await delay(isWhatsAppContext() ? 550 : 400);
+
+  if (focus && isClassicTextEditorProcess(focus.processName)) {
+    await ensureEditorKeyboardFocus();
+    await delay(200);
+  }
 
   const insertBody = isWhatsAppContext()
     ? formatMessageBody(parsed, text)

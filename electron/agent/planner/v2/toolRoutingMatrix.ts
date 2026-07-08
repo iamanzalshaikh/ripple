@@ -227,16 +227,20 @@ export function routeClause(record: ClauseRecord): RoutingDecision | null {
       }
       if (op === "select_all_copy" || op === "select_all_cut") {
         const cut = op === "select_all_cut";
-        const steps: PlanStep[] = [
-          { tool: "desktop.select_all", args: {}, reason: "select_all" },
-          cut
-            ? { tool: "desktop.press_keys", args: { keys: "^x" }, reason: "cut" }
-            : { tool: "desktop.copy", args: {}, reason: "copy" },
-        ];
         return {
-          tool: "__multi__",
-          args: { steps },
-          reason: entry.reason,
+          tool: "desktop.press_keys",
+          args: {
+            sequence: cut
+              ? [
+                  { type: "keys", value: "^a", delayMs: 80 },
+                  { type: "keys", value: "^x", delayMs: 120 },
+                ]
+              : [
+                  { type: "keys", value: "^a", delayMs: 80 },
+                  { type: "keys", value: "^c", delayMs: 120 },
+                ],
+          },
+          reason: op,
           blockedTools,
         };
       }

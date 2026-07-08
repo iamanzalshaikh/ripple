@@ -3,8 +3,9 @@ import {
   restoreFocusContext,
   resolveTypingFocusTarget,
 } from "../focus/focusContext.js";
-import { isSaveDialogModalLocked } from "../focus/saveDialogMode.js";
+import { isSaveDialogModalLocked, matchesMainDocumentA11y } from "../focus/saveDialogMode.js";
 import {
+  focusWindowByHwnd,
   getFocusedA11yElement,
   getForegroundWindow,
   getCursorPositionNative,
@@ -97,12 +98,33 @@ async function clickEditorBody(
 export async function ensureEditorKeyboardFocus(opts?: {
   keys?: string;
   steps?: Array<{ value: string }>;
+  /** Skip mouse click — hwnd activate only (copy/cut/select-all). */
+  clipboardOp?: boolean;
 }): Promise<void> {
   if (isSaveDialogModalLocked()) return;
 
-  await restoreFocusContext();
   const target = resolveTypingFocusTarget();
   if (!target?.hwnd || isWeakFocusContext(target)) return;
+
+  if (opts?.clipboardOp && isClassicTextEditorProcess(target.processName)) {
+    const fg = await getForegroundWindow();
+    const fgOnTarget =
+      hwndMatches(fg?.hwnd, target.hwnd) ||
+      (fg?.processName ?? "").toLowerCase() ===
+        (target.processName ?? "").toLowerCase();
+    if (!fgOnTarget) {
+      await restoreFocusContext();
+    }
+    await focusWindowByHwnd(target.hwnd, target.windowTitle);
+    await new Promise((r) => setTimeout(r, 500));
+    const a11y = await getFocusedA11yElement();
+    if (!a11y || !matchesMainDocumentA11y(a11y)) {
+      await clickEditorBody(target);
+    }
+    return;
+  }
+
+  await restoreFocusContext();
 
   const isNav = isNavigationInput(opts);
   const settleMs = isClassicTextEditorProcess(target.processName) ? 380 : 220;

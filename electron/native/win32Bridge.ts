@@ -2,7 +2,9 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type {
   A11yFocusedElement,
+  A11yNodeSnapshot,
   ForegroundWindow,
+  InsertTextA11yDiagnostics,
   ScreenshotOcrResult,
   VisibleWindow,
   Win32Action,
@@ -491,6 +493,34 @@ export async function getFocusedA11yElement(): Promise<A11yFocusedElement | null
     return null;
   }
 }
+
+/** UIA tree snapshot for INSERT_TEXT diagnostics (focused chain + editable fields). */
+export async function getInsertTextA11yDiagnostics(): Promise<InsertTextA11yDiagnostics | null> {
+  if (!isWin32NativeAvailable()) return null;
+
+  if (
+    isNativeClientAuthenticated() &&
+    getSidecarCapabilities()?.uia === true
+  ) {
+    try {
+      const diag = (await callNativeRpc(
+        "get_insert_text_a11y_diagnostics",
+        {},
+      )) as InsertTextA11yDiagnostics;
+      if (!diag?.hwnd) return null;
+      return diag;
+    } catch (e: unknown) {
+      console.warn(
+        "[ripple-native] get_insert_text_a11y_diagnostics RPC failed:",
+        e instanceof Error ? e.message : e,
+      );
+    }
+  }
+
+  return null;
+}
+
+export type { A11yNodeSnapshot, InsertTextA11yDiagnostics };
 
 export async function screenshotOcrNative(args: {
   hwnd?: number;

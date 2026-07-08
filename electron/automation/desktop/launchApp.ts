@@ -50,6 +50,9 @@ async function sendKeysToNotepad(
  * then Ctrl+N so the compound flow always types into a fresh Untitled doc.
  */
 async function openFreshNotepadDocument(): Promise<void> {
+  if (process.env.OS_TEST_LOCK_WINDOW?.toLowerCase() === "notepad") {
+    return;
+  }
   for (let round = 0; round < 6; round++) {
     const win = await findNotepadWindow();
     if (!win) return;
@@ -156,7 +159,11 @@ async function launchNotepadFresh(app: NativeAppEntry): Promise<string> {
   await openFreshNotepadDocument();
 
   const after = await findNotepadWindow();
-  if (after && !isUntitledNotepad(after.title)) {
+  if (
+    after &&
+    !isUntitledNotepad(after.title) &&
+    process.env.OS_TEST_LOCK_WINDOW?.toLowerCase() !== "notepad"
+  ) {
     console.warn(
       `[ripple-desktop] notepad still not untitled ("${after.title.slice(0, 40)}") — hard reset`,
     );

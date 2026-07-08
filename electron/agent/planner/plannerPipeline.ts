@@ -14,9 +14,59 @@ import { getCapabilitySnapshot } from "./capabilityService.js";
 import { ensureP85ToolsRegistered } from "./toolExecutorBridge.js";
 import { tracePipelineTier } from "./plannerTrace.js";
 import { tryCompoundGate } from "./compoundGate.js";
+import { tryL0WhatsAppPlan } from "./l0WhatsAppPlanner.js";
+import { tryL0YouTubePlan } from "./l0YouTubePlanner.js";
+import { tryL0GmailPlan } from "./l0GmailPlanner.js";
+import { tryL0LinkedInPlan } from "./l0LinkedInPlanner.js";
+import type { L0PlannerResult } from "./planTypes.js";
 
 function isCompoundDeferReason(reason: string): boolean {
   return reason.startsWith("compound_");
+}
+
+function applyDedicatedL0Plan(
+  l0: L0PlannerResult | null | undefined,
+  raw: string,
+  normalized: string,
+  world: PlannerPipelineInput["world"],
+  started: number,
+): PlannerPipelineResult | null {
+  if (!l0) return null;
+  if (l0.kind === "defer") {
+    const result: PlannerPipelineResult = {
+      kind: "defer",
+      reason: l0.reason,
+      normalizedUtterance: normalized,
+    };
+    shadowFromPipelineResult(raw, normalized, result, Date.now() - started);
+    return result;
+  }
+  if (l0.kind !== "plan") return null;
+
+  const validation = validatePlan(l0.plan, world, raw);
+  if (!validation.valid) return null;
+  const plan = validation.sanitizedPlan ?? l0.plan;
+  if (!passesConfidenceGate(plan)) {
+    const decision = evaluatePlanConfidence(plan);
+    const result: PlannerPipelineResult = {
+      kind: "clarify",
+      question:
+        plan.clarificationQuestion ??
+        "I'm not sure what you meant. Can you say that again more specifically?",
+      confidence: plan.confidence,
+      reason: decision.action === "clarify" ? decision.reason : "low_confidence",
+      plan,
+    };
+    shadowFromPipelineResult(raw, normalized, result, Date.now() - started);
+    return result;
+  }
+  const result: PlannerPipelineResult = {
+    kind: "execute",
+    plan: stampExecutionPlan(plan, world),
+    validation,
+  };
+  shadowFromPipelineResult(raw, normalized, result, Date.now() - started);
+  return result;
 }
 
 /**
@@ -39,6 +89,13 @@ export function runPlannerPipeline(
     shadowFromPipelineResult(raw, normalized, result, Date.now() - started);
     return result;
   }
+
+  const earlyL0 =
+    applyDedicatedL0Plan(tryL0WhatsAppPlan(raw, normalized), raw, normalized, input.world, started) ??
+    applyDedicatedL0Plan(tryL0YouTubePlan(raw, normalized), raw, normalized, input.world, started) ??
+    applyDedicatedL0Plan(tryL0GmailPlan(raw, normalized), raw, normalized, input.world, started) ??
+    applyDedicatedL0Plan(tryL0LinkedInPlan(raw, normalized), raw, normalized, input.world, started);
+  if (earlyL0) return earlyL0;
 
   const compoundGate = tryCompoundGate(raw, normalized);
   if (compoundGate) {

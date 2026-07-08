@@ -88,8 +88,7 @@ describe("P8.5 full suite — planner classification", () => {
       expect(atomic?.kind).toBe("plan");
       if (atomic?.kind !== "plan") return;
       expect(atomic.plan.steps.map((s) => s.tool)).toEqual([
-        "desktop.select_all",
-        "desktop.copy",
+        "desktop.press_keys",
       ]);
     });
 
@@ -138,7 +137,7 @@ describe("P8.5 full suite — planner classification", () => {
       },
       {
         cmd: "select all and copy then save as notes.txt",
-        tools: ["desktop.select_all", "desktop.copy", "desktop.save_file"],
+        tools: ["desktop.press_keys", "desktop.save_file"],
       },
       {
         cmd: "copy and save file test.txt",
@@ -156,6 +155,16 @@ describe("P8.5 full suite — planner classification", () => {
       expect(tools[0]).toBe("desktop.launch_app");
       expect(tools).toContain("desktop.mouse_drag");
       expect(tools).toContain("desktop.paint_op");
+    });
+    it("combines select_all+copy after type in notepad compound", () => {
+      const tools = planTools(
+        "open notepad and type hello and copy this text",
+      );
+      expect(tools).toEqual([
+        "desktop.launch_app",
+        "desktop.type_text",
+        "desktop.press_keys",
+      ]);
     });
     it("plans draw 3 circles with seven steps", () => {
       const tools = planTools("open paint and draw 3 circles");

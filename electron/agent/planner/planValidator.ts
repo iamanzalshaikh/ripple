@@ -31,6 +31,31 @@ function validateStepArgs(
     }
   }
 
+  if (step.tool === "browser.whatsapp.send") {
+    const sending = step.args.send === true;
+    const message =
+      typeof step.args.message === "string" ? step.args.message : "";
+    if (sending && !message.trim()) {
+      errors.push("missing_arg:browser.whatsapp.send.message");
+    }
+  }
+
+  if (step.tool === "browser.youtube.run") {
+    const kind = typeof step.args.kind === "string" ? step.args.kind : "";
+    const query = typeof step.args.query === "string" ? step.args.query : "";
+    if ((kind === "search" || kind === "play") && !query.trim()) {
+      errors.push("missing_arg:browser.youtube.run.query");
+    }
+  }
+
+  if (step.tool === "browser.linkedin.run") {
+    const kind = typeof step.args.kind === "string" ? step.args.kind : "";
+    const query = typeof step.args.query === "string" ? step.args.query : "";
+    if (kind === "search_people" && !query.trim()) {
+      errors.push("missing_arg:browser.linkedin.run.query");
+    }
+  }
+
   if (step.tool === "filesystem.delete") {
     const hasTarget =
       typeof step.args.path === "string" ||
@@ -64,15 +89,24 @@ function validateWorldConstraints(
   world: WorldModel,
   errors: string[],
 ): void {
-  for (const step of plan.steps) {
-    if (step.tool === "desktop.paste" && !world.clipboard.hasText) {
+  for (let i = 0; i < plan.steps.length; i++) {
+    const step = plan.steps[i]!;
+    const clipboardFilledEarlier = plan.steps
+      .slice(0, i)
+      .some((s) => s.tool === "system.clipboard.write");
+    if (
+      step.tool === "desktop.paste" &&
+      !world.clipboard.hasText &&
+      !clipboardFilledEarlier
+    ) {
       errors.push("desktop.paste:clipboard_empty");
     }
     if (
       step.tool === "desktop.press_keys" &&
       typeof step.args.keys === "string" &&
       /^\^v$/i.test(step.args.keys) &&
-      !world.clipboard.hasText
+      !world.clipboard.hasText &&
+      !clipboardFilledEarlier
     ) {
       errors.push("desktop.paste:clipboard_empty");
     }

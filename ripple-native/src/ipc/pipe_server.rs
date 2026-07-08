@@ -150,6 +150,15 @@ fn handle_rpc(
             Ok(None) => RpcResponse::ok(id, Value::Object(serde_json::Map::new())),
             Err(e) => RpcResponse::err(id, e),
         },
+        "get_insert_text_a11y_diagnostics" => {
+            match crate::uia::get_insert_text_a11y_diagnostics() {
+                Ok(diag) => {
+                    let value = serde_json::to_value(diag).unwrap_or(Value::Null);
+                    RpcResponse::ok(id, value)
+                }
+                Err(e) => RpcResponse::err(id, e),
+            }
+        }
         "list_windows" => {
             let rows = crate::window_list::list_visible_windows();
             let value = serde_json::to_value(rows).unwrap_or(Value::Null);

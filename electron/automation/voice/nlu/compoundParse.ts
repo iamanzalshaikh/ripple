@@ -84,9 +84,33 @@ function restoreAtomicClipboardPhrases(text: string): string {
     .replace(new RegExp(CLIP_SELECT_CUT, "g"), "select all and cut");
 }
 
+/** Next-clause verb — used in filler lookahead (no extra wrapping groups). */
+const CLAUSE_VERB =
+  "select|copy|cut|paste|save|close|type|write|open|launch|switch|focus|search|create|store|draw|press";
+
+/**
+ * Strip voice disfluencies before the next command (not dictated body text).
+ * e.g. "write hello world and second, select all" → "write hello world, select all"
+ */
+export function stripCommandFillers(text: string): string {
+  const v = CLAUSE_VERB;
+  let t = text;
+  t = t.replace(new RegExp(`\\band\\s+second\\b(?=\\s*,\\s*(?:${v})\\b)`, "gi"), "");
+  t = t.replace(/\band\s+then\b/gi, " then ");
+  t = t.replace(/\band\s+(?:after\s+that|next|finally)\b/gi, ", ");
+  t = t.replace(new RegExp(`\\bafter\\s+that\\b(?=\\s+(?:${v})\\b)`, "gi"), ", ");
+  t = t.replace(new RegExp(`\\bfinally\\b(?=\\s+(?:${v})\\b)`, "gi"), ", ");
+  return t
+    .replace(/\s+,/g, ",")
+    .replace(/,\s*,/g, ",")
+    .replace(/,\s+/g, ", ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 /** Voice often reorders actions — normalize before split. */
 export function normalizeCompoundUtterance(text: string): string {
-  const t = text.trim();
+  let t = stripCommandFillers(text.trim());
   const saveNamedAfterCopy = t.match(
     /^\s*save\s+file\s+(\S+)\s+after\s+(?:copying|copy)\s+(.+?)\s*$/i,
   );
@@ -102,11 +126,22 @@ export function normalizeCompoundUtterance(text: string): string {
   return t;
 }
 
+const CLIP_COMMA_BOUNDARY = "\x1ecomma_clause\x1e";
+
+/** Comma before protected clipboard phrase — protect hides "select" from COMMA_CLAUSE_SPLIT. */
+function markCommaBeforeClipboardPhrase(text: string): string {
+  return text.replace(
+    /,\s+(?=select all and (?:copy|cut)(?:\s+(?:this(?:\s+text)?|text|everything))?)/gi,
+    CLIP_COMMA_BOUNDARY,
+  );
+}
+
 /** "Downloads kholo aur latest PDF open karo" → two parseable steps. */
 export function splitCompoundParts(nlu: string): string[] | null {
   const trimmed = normalizeCompoundUtterance(nlu.trim());
   if (isAtomicClipboardSequence(trimmed)) return null;
-  const protectedText = protectAtomicClipboardPhrases(trimmed);
+  const commaMarked = markCommaBeforeClipboardPhrase(trimmed);
+  const protectedText = protectAtomicClipboardPhrases(commaMarked);
   if (
     !COMPOUND_SPLIT.test(protectedText) &&
     !SENTENCE_SPLIT.test(protectedText) &&
@@ -119,6 +154,7 @@ export function splitCompoundParts(nlu: string): string[] | null {
     .split(SENTENCE_SPLIT)
     .flatMap((part) => part.split(COMPOUND_SPLIT))
     .flatMap((part) => part.split(COMMA_CLAUSE_SPLIT))
+    .flatMap((part) => part.split(CLIP_COMMA_BOUNDARY))
     .map((p) => restoreAtomicClipboardPhrases(p.trim()))
     .filter((p) => p.length >= 3);
 

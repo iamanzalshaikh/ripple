@@ -42,13 +42,13 @@ describe("P8.5 messaging adapter gate", () => {
     else process.env.RIPPLE_P85_PHASE_B = prevPhaseB;
   });
 
-  it("bypasses P85 for whatsapp utterances", () => {
-    expect(shouldBypassP85Planner("Open WhatsApp")).toBe(true);
+  it("routes whatsapp through P85 tool planner", () => {
+    expect(shouldBypassP85Planner("Open WhatsApp")).toBe(false);
     expect(
       shouldBypassP85Planner(
         "Open WhatsApp and search Dr. Fatima and ask how are you",
       ),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it("does not bypass P85 for youtube workspace opens", () => {
@@ -57,31 +57,51 @@ describe("P8.5 messaging adapter gate", () => {
     expect(shouldBlockLegacyDesktopRouters("Open YouTube")).toBe(true);
   });
 
-  it("compound gate skips whatsapp compounds", () => {
+  it("compound gate processes whatsapp compounds as atomic whatsapp", () => {
     const gate = tryCompoundGate(
       "Open WhatsApp and search Dr. Fatima and ask how are you",
       "open whatsapp and search dr. fatima and ask how are you",
     );
     expect(gate).toBeNull();
+
+    const pipeline = runPlannerPipeline({
+      command: "Open WhatsApp and search Dr. Fatima and ask how are you",
+      world: stubWorld(),
+    });
+    expect(pipeline.kind).toBe("execute");
+    if (pipeline.kind === "execute") {
+      expect(pipeline.plan.steps[0]?.tool).toBe("browser.whatsapp.send");
+      expect(pipeline.plan.steps[0]?.args.contact).toBe("Dr. Fatima");
+    }
   });
 
-  it("pipeline defers open whatsapp instead of v2 clarify", () => {
+  it("pipeline executes open whatsapp via L0 tools", () => {
     const result = runPlannerPipeline({
       command: "Open WhatsApp",
       world: stubWorld(),
     });
-    expect(result.kind).toBe("defer");
-    if (result.kind === "defer") {
-      expect(result.reason).toBe("adapter_owned");
+    expect(result.kind).toBe("execute");
+    if (result.kind === "execute") {
+      expect(result.plan.steps[0]?.tool).toBe("browser.open_workspace");
     }
   });
 
-  it("bypasses P85 for gmail compose utterances", () => {
+  it("routes gmail compose through P85 tool planner", () => {
     expect(
       shouldBypassP85Planner(
         "Write a mail to sheikhanzal95 at gmail.com about full site developer application",
       ),
-    ).toBe(true);
+    ).toBe(false);
+
+    const pipeline = runPlannerPipeline({
+      command:
+        "Write a mail to sheikhanzal95 at gmail.com about full site developer application",
+      world: stubWorld(),
+    });
+    expect(pipeline.kind).toBe("execute");
+    if (pipeline.kind === "execute") {
+      expect(pipeline.plan.steps[0]?.tool).toBe("browser.gmail.compose");
+    }
   });
 
   it("routes session recall and remember workflow through P85 legacy bridge", () => {

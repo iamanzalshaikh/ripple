@@ -264,7 +264,7 @@ export function parseDesktopInputFallback(
   }
 
   if (
-    /^copy(?:\s+(?:this(?:\s+text)?|that(?:\s+text)?|the\s+selected\s+content|selected\s+content|text))?$/i.test(
+    /^copy(?:\s+(?:this(?:\s+text)?|that(?:\s+text)?|it|everything|the\s+selected\s+content|selected\s+content|text))?$/i.test(
       normalized,
     )
   ) {
@@ -396,7 +396,7 @@ export function parseDesktopInputFallback(
   if (/^(?:select all|highlight all|select everything)$/i.test(normalized)) {
     return { mode: "keys", keys: "^a" };
   }
-  if (/^copy(?:\s+(?:this|that|text))?$/i.test(normalized)) {
+  if (/^copy(?:\s+(?:this|that|it|everything|text))?$/i.test(normalized)) {
     return { mode: "keys", keys: "^c" };
   }
   if (/^cut(?:\s+(?:this|that|text))?$/i.test(normalized)) {

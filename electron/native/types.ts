@@ -17,6 +17,26 @@ export type A11yFocusedElement = {
   value?: string;
 };
 
+export type A11yNodeSnapshot = {
+  depth: number;
+  name: string;
+  controlType: string;
+  automationId: string;
+  className: string;
+  value: string;
+  hasKeyboardFocus: boolean;
+  enabled: boolean;
+};
+
+export type InsertTextA11yDiagnostics = {
+  windowTitle: string;
+  processName: string;
+  hwnd: number;
+  focused: A11yNodeSnapshot | null;
+  ancestorChain: A11yNodeSnapshot[];
+  editableElements: A11yNodeSnapshot[];
+};
+
 export type ScreenshotOcrResult = {
   text: string;
   width: number;

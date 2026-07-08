@@ -36,7 +36,8 @@ function recordsToSteps(records: ClauseRecord[]): {
   const resolved: ClauseRecord[] = [];
   const unresolved: ClauseRecord[] = [];
 
-  for (const record of records) {
+  for (let i = 0; i < records.length; i++) {
+    const record = records[i];
     if (record.status !== "resolved") {
       unresolved.push(record);
       continue;
@@ -45,10 +46,43 @@ function recordsToSteps(records: ClauseRecord[]): {
       unresolved.push({ ...record, status: "unsupported" });
       continue;
     }
-    const part = routeRecordToSteps(record);
+    let part = routeRecordToSteps(record);
     if (!part?.length) {
       unresolved.push({ ...record, status: "unsupported" });
       continue;
+    }
+    if (record.clauseType === "CLIPBOARD_OP") {
+      const op = record.entities.clipOp;
+      const priorTyped = records
+        .slice(0, i)
+        .some((r) => r.status === "resolved" && r.clauseType === "TYPE_TEXT");
+      if (priorTyped && op === "copy") {
+        part = [
+          {
+            tool: "desktop.press_keys",
+            args: {
+              sequence: [
+                { type: "keys", value: "^a", delayMs: 80 },
+                { type: "keys", value: "^c", delayMs: 120 },
+              ],
+            },
+            reason: "select_all_copy",
+          },
+        ];
+      } else if (priorTyped && op === "cut") {
+        part = [
+          {
+            tool: "desktop.press_keys",
+            args: {
+              sequence: [
+                { type: "keys", value: "^a", delayMs: 80 },
+                { type: "keys", value: "^x", delayMs: 120 },
+              ],
+            },
+            reason: "select_all_cut",
+          },
+        ];
+      }
     }
     resolved.push(record);
     steps.push(...part);

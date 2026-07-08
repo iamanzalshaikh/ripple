@@ -9,9 +9,12 @@ import {
 import {
   commandImpliesSend,
   extractContactName,
+  LAST_CONTACT_MARKER,
+  resolveWhatsAppContactRef,
   resolveWhatsAppMessageText,
 } from "./parseContact.js";
 import { rememberContact } from "./buildReferentialWhatsApp.js";
+import { getLastCommandContext } from "../../../storage/lastCommandState.js";
 import { recordWhatsAppSendTouch } from "../../../storage/recordFileTouch.js";
 import { runWhatsAppCdpPipeline } from "./whatsappCdpPipeline.js";
 import { WhatsAppPipelineError } from "./whatsappSteps.js";
@@ -34,12 +37,24 @@ const USE_CDP = process.env.RIPPLE_USE_CDP === "1";
 export async function runWhatsAppMessageFlow(
   input: WhatsAppMessageInput,
 ): Promise<string> {
-  const rawContact = extractContactName(input.command, input.recipient);
+  let rawContact = extractContactName(input.command, input.recipient);
   if (!rawContact) {
     throw new Error(
       'Contact name not found. Say e.g. "search Saaliq and say I will be back in 10 minutes"',
     );
   }
+
+  const lastContact = getLastCommandContext().last_contact;
+  const resolvedQuery =
+    rawContact === LAST_CONTACT_MARKER
+      ? resolveWhatsAppContactRef(LAST_CONTACT_MARKER, lastContact)
+      : resolveWhatsAppContactRef(rawContact, lastContact);
+  if (!resolvedQuery) {
+    throw new Error(
+      'No recent contact — open a chat first, then say e.g. "send him I am late"',
+    );
+  }
+  rawContact = resolvedQuery;
 
   const command = input.command ?? getLastVoiceCommand() ?? "";
   const text =

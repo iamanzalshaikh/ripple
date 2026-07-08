@@ -44,6 +44,12 @@ function tryFileOpClassify(
 
 export type ClassifierContext = {
   priorRecords: ClauseRecord[];
+  /**
+   * Live context-aware routing hint — the workspace/site the user is currently
+   * on (e.g. "youtube"), resolved from the foreground window. Biases a bare
+   * "search X" toward the current site when no in-utterance prior exists.
+   */
+  activeWorkspaceId?: string;
 };
 
 function record(
@@ -75,7 +81,9 @@ function priorWorkspaceId(ctx: ClassifierContext): string | undefined {
       return r.entities.workspaceId;
     }
   }
-  return undefined;
+  // No in-utterance workspace clause — fall back to the live foreground context
+  // (e.g. the user is already on youtube.com).
+  return ctx.activeWorkspaceId;
 }
 
 function priorLaunchAppId(ctx: ClassifierContext): string | undefined {
@@ -236,19 +244,32 @@ function applyContextBoost(
   );
 }
 
+/** Explicit spoken target ("on youtube" / "on google") overrides live context. */
+function explicitSearchEngine(command: string): "youtube" | "google" | undefined {
+  if (/\b(?:on|in|at|using|via)\s+youtube\b/i.test(command)) return "youtube";
+  if (/\b(?:on|in|at|using|via)\s+(?:google|the\s+web|internet|browser|chrome)\b/i.test(command)) {
+    return "google";
+  }
+  return undefined;
+}
+
 function classifySearchClause(
   normalized: string,
   ctx: ClassifierContext,
 ): ClauseRecord | null {
+  const explicit = explicitSearchEngine(normalized);
   const priorWs = priorWorkspaceId(ctx);
+  // Priority: explicit user target > current site/context.
+  const contextIsYouTube = explicit ? explicit === "youtube" : priorWs === "youtube";
 
   const media = parseMediaWorkspaceSearch(normalized);
   if (media) {
-    const engine = priorWs === "youtube" || !priorWs ? "youtube" : "google";
+    const engine =
+      explicit ?? (priorWs === "youtube" || !priorWs ? "youtube" : "google");
     return record(0, normalized, normalized, "MEDIA_SEARCH", {
       searchQuery: media.query,
       searchEngine: engine as "youtube" | "google",
-    }, "parseMediaWorkspaceSearch", 0.9);
+    }, explicit ? "explicit_target" : "parseMediaWorkspaceSearch", 0.9);
   }
 
   const fileSearch = parseSmartSearchCommand(normalized);
@@ -270,32 +291,32 @@ function classifySearchClause(
 
   const web = parseBrowserWorkspaceSearch(normalized);
   if (web) {
-    if (priorWs === "youtube") {
+    if (contextIsYouTube) {
       return record(0, normalized, normalized, "MEDIA_SEARCH", {
         searchQuery: web.query,
         searchEngine: "youtube",
-      }, "context_youtube_search", 0.88);
+      }, explicit ? "explicit_target=youtube" : "context_youtube_search", 0.88);
     }
     return record(0, normalized, normalized, "WEB_SEARCH", {
       searchQuery: web.query,
       searchEngine: "google",
-    }, "parseBrowserWorkspaceSearch", 0.88);
+    }, explicit === "google" ? "explicit_target=google" : "parseBrowserWorkspaceSearch", 0.88);
   }
 
   if (/^\s*search\b/i.test(normalized)) {
     const m = normalized.match(/^\s*search\s+(?:for\s+)?(.+?)\s*$/i);
     const q = m?.[1]?.trim();
     if (q) {
-      if (priorWs === "youtube") {
+      if (contextIsYouTube) {
         return record(0, normalized, normalized, "MEDIA_SEARCH", {
           searchQuery: q,
           searchEngine: "youtube",
-        }, "context_youtube_fallback", 0.75);
+        }, explicit ? "explicit_target=youtube" : "context_youtube_fallback", 0.75);
       }
       return record(0, normalized, normalized, "WEB_SEARCH", {
         searchQuery: q,
         searchEngine: "google",
-      }, "search_fallback", 0.7);
+      }, explicit === "google" ? "explicit_target=google" : "search_fallback", 0.7);
     }
   }
 
@@ -488,10 +509,14 @@ export function classifyClause(
 
 export function classifyClauses(
   parts: string[],
+  ctx?: Omit<ClassifierContext, "priorRecords">,
 ): ClauseRecord[] {
   const records: ClauseRecord[] = [];
   for (let i = 0; i < parts.length; i++) {
-    const rec = classifyClause(parts[i]!, i, { priorRecords: records });
+    const rec = classifyClause(parts[i]!, i, {
+      priorRecords: records,
+      activeWorkspaceId: ctx?.activeWorkspaceId,
+    });
     records.push(rec);
   }
   return records;

@@ -119,12 +119,23 @@ export function normalizeForClarifyCompare(command: string): string {
     .trim();
 }
 
-/** Loosen wording so retries like "and" vs "," or missing "a" still match. */
+/**
+ * Loosen wording so retries like "and" vs "," or missing "a" still match.
+ * Also drops file-type / media noise words ("pdf", "file", "folder", …) and
+ * "from" vs "in" so a re-statement with a minor STT wording change
+ * ("Send Phase 3.5 …" vs "Send Phase 3.5 PDF …") is still detected as a retry
+ * instead of being merged into a doubled command.
+ */
 function normalizeForClarifySimilarity(command: string): string {
   return normalizeForClarifyCompare(command)
     .replace(/,/g, " ")
     .replace(/\band\b/g, " ")
     .replace(/\b(?:a|an|the)\b/g, " ")
+    .replace(
+      /\b(?:pdf|file|folder|document|doc|photo|image|picture|video|screenshot|screen\s*recording)\b/g,
+      " ",
+    )
+    .replace(/\b(?:from|in)\b/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -241,6 +252,16 @@ function isSelfContainedDesktopCommand(command: string): boolean {
     return true;
   }
   if (/^\s*(?:open|launch)\s+\w+/i.test(t) && /\b(?:and|then)\b/i.test(t)) {
+    return true;
+  }
+  // Full "send <item> (from|in) <folder> to <contact>" restatement — a complete
+  // command, never a short disambiguating answer. Merging it into a pending
+  // clarify doubles the utterance and produces a garbage contact.
+  if (
+    /^\s*(?:send|share|whatsapp)\s+.+\s+(?:from|in)\s+(?:downloads?|documents?|desktop)\s+to\s+\S+/i.test(
+      t,
+    )
+  ) {
     return true;
   }
   return false;

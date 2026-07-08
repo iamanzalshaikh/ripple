@@ -13,6 +13,48 @@ pub struct A11yFocusedElement {
     pub value: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct A11yNodeSnapshot {
+    pub depth: u32,
+    pub name: String,
+    #[serde(rename = "controlType")]
+    pub control_type: String,
+    #[serde(rename = "automationId")]
+    pub automation_id: String,
+    #[serde(rename = "className")]
+    pub class_name: String,
+    pub value: String,
+    #[serde(rename = "hasKeyboardFocus")]
+    pub has_keyboard_focus: bool,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct InsertTextA11yDiagnostics {
+    #[serde(rename = "windowTitle")]
+    pub window_title: String,
+    #[serde(rename = "processName")]
+    pub process_name: String,
+    pub hwnd: i64,
+    pub focused: Option<A11yNodeSnapshot>,
+    #[serde(rename = "ancestorChain")]
+    pub ancestor_chain: Vec<A11yNodeSnapshot>,
+    #[serde(rename = "editableElements")]
+    pub editable_elements: Vec<A11yNodeSnapshot>,
+}
+
+pub fn get_insert_text_a11y_diagnostics() -> Result<InsertTextA11yDiagnostics, String> {
+    #[cfg(windows)]
+    {
+        ensure_com_initialized()?;
+        unsafe { read_insert_text_diagnostics() }
+    }
+    #[cfg(not(windows))]
+    {
+        Err("windows only".into())
+    }
+}
+
 pub fn get_focused_a11y_element() -> Result<Option<A11yFocusedElement>, String> {
     #[cfg(windows)]
     {
@@ -156,4 +198,111 @@ fn control_type_programmatic_name(
     };
 
     format!("ControlType.{label}")
+}
+
+#[cfg(windows)]
+fn is_editable_control_type(control_type: &str) -> bool {
+    let c = control_type.to_lowercase();
+    c.contains("edit") || c.contains("document") || c.contains("text")
+}
+
+#[cfg(windows)]
+unsafe fn snapshot_element(
+    element: &windows::Win32::UI::Accessibility::IUIAutomationElement,
+    depth: u32,
+) -> A11yNodeSnapshot {
+    let name = bstr_to_string(element.CurrentName().ok());
+    let control_type = element
+        .CurrentControlType()
+        .map(control_type_programmatic_name)
+        .unwrap_or_else(|_| "ControlType.Unknown".to_string());
+    let automation_id = bstr_to_string(element.CurrentAutomationId().ok());
+    let class_name = bstr_to_string(element.CurrentClassName().ok());
+    let value = read_element_value(element);
+    let has_keyboard_focus = element
+        .CurrentHasKeyboardFocus()
+        .map(|b| b.as_bool())
+        .unwrap_or(false);
+    let enabled = element
+        .CurrentIsEnabled()
+        .map(|b| b.as_bool())
+        .unwrap_or(false);
+
+    A11yNodeSnapshot {
+        depth,
+        name,
+        control_type,
+        automation_id,
+        class_name,
+        value,
+        has_keyboard_focus,
+        enabled,
+    }
+}
+
+#[cfg(windows)]
+unsafe fn read_insert_text_diagnostics(
+) -> Result<InsertTextA11yDiagnostics, String> {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_INPROC_SERVER};
+    use windows::Win32::UI::Accessibility::{
+        CUIAutomation, IUIAutomation, TreeScope_Descendants,
+    };
+
+    let fg = crate::foreground::read_current_foreground()
+        .ok_or_else(|| "no_foreground".to_string())?;
+
+    let automation: IUIAutomation =
+        CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER)
+            .map_err(|e| format!("uia_create_failed:{e}"))?;
+
+    let focused_el = automation
+        .GetFocusedElement()
+        .map_err(|e| format!("uia_focus_failed:{e}"))?;
+    let focused = Some(snapshot_element(&focused_el, 0));
+
+    let mut ancestor_chain = Vec::new();
+    let walker = automation
+        .RawViewWalker()
+        .map_err(|e| format!("uia_walker_failed:{e}"))?;
+    let mut current = focused_el;
+    for depth in 1..=12 {
+        let parent = match walker.GetParentElement(&current) {
+            Ok(p) => p,
+            Err(_) => break,
+        };
+        ancestor_chain.push(snapshot_element(&parent, depth));
+        current = parent;
+    }
+
+    let mut editable_elements = Vec::new();
+    let hwnd = HWND(fg.hwnd as *mut _);
+    if let Ok(root) = automation.ElementFromHandle(hwnd) {
+        if let Ok(true_cond) = automation.CreateTrueCondition() {
+            if let Ok(found) = root.FindAll(TreeScope_Descendants, &true_cond) {
+                let len = found.Length().unwrap_or(0);
+                let scan_cap = len.min(250);
+                for i in 0..scan_cap {
+                    if editable_elements.len() >= 40 {
+                        break;
+                    }
+                    if let Ok(el) = found.GetElement(i) {
+                        let snap = snapshot_element(&el, 0);
+                        if is_editable_control_type(&snap.control_type) {
+                            editable_elements.push(snap);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(InsertTextA11yDiagnostics {
+        window_title: fg.window_title,
+        process_name: fg.process_name,
+        hwnd: fg.hwnd,
+        focused,
+        ancestor_chain,
+        editable_elements,
+    })
 }

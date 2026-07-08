@@ -172,4 +172,78 @@ describe("P8.5 Planner v2", () => {
     if (result.kind !== "execute") return;
     expect(result.plan.steps[0]?.tool).toBe("browser.open_workspace");
   });
+
+  describe("E7 compound — filler words before clipboard (notepad)", () => {
+    function expectNotepadCopyCompound(cmd: string) {
+      const norm = cmd.toLowerCase();
+      const result = planCompoundWithV2(cmd, norm);
+      expect(result?.kind).toBe("plan");
+      if (result?.kind !== "plan") return;
+      expect(result.plan.steps.map((s) => s.tool)).toEqual([
+        "desktop.launch_app",
+        "desktop.type_text",
+        "desktop.press_keys",
+      ]);
+      expect(result.plan.steps[1]?.args.text).toMatch(/hello world/i);
+      expect(result.plan.steps[2]?.args.sequence).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ value: "^a" }),
+          expect.objectContaining({ value: "^c" }),
+        ]),
+      );
+    }
+
+    it("E7-C01 then boundary (working baseline)", () => {
+      expectNotepadCopyCompound(
+        "Open notepad and write hello world then select all and copy",
+      );
+    });
+
+    it("E7-C02 comma + then boundary", () => {
+      expectNotepadCopyCompound(
+        "Open notepad, write hello world, then select all and copy",
+      );
+    });
+
+    it("E7-C03 strips and second filler before select all", () => {
+      expectNotepadCopyCompound(
+        "Open notepad, write hello world and second, select all and copy",
+      );
+    });
+
+    it("E7-C04 and then copy it after type_text → select all copy", () => {
+      const result = planCompoundWithV2(
+        "Open notepad, write hello world and then copy it",
+        "open notepad, write hello world and then copy it",
+      );
+      expect(result?.kind).toBe("plan");
+      if (result?.kind !== "plan") return;
+      expect(result.plan.steps.map((s) => s.tool)).toEqual([
+        "desktop.launch_app",
+        "desktop.type_text",
+        "desktop.press_keys",
+      ]);
+      expect(result.plan.steps[2]?.args.sequence?.[1]?.value).toBe("^c");
+    });
+
+    it("E7-C05 after that select all", () => {
+      expectNotepadCopyCompound(
+        "Open notepad, type hello world after that select all and copy",
+      );
+    });
+
+    it("E7-C06 finally copy everything", () => {
+      const result = planCompoundWithV2(
+        "Open notepad, write hello world and finally copy everything",
+        "open notepad, write hello world and finally copy everything",
+      );
+      expect(result?.kind).toBe("plan");
+      if (result?.kind !== "plan") return;
+      expect(result.plan.steps.map((s) => s.tool)).toEqual([
+        "desktop.launch_app",
+        "desktop.type_text",
+        "desktop.press_keys",
+      ]);
+    });
+  });
 });

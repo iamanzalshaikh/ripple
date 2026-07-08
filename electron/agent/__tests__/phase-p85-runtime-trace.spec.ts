@@ -174,6 +174,41 @@ describe("P8.5 runtime trace — planner outcomes", () => {
     clearClarificationContext();
   });
 
+  it("grounded clarify does not merge a re-stated send command with STT noise", () => {
+    clearClarificationContext();
+    beginClarificationRound({
+      originalCommand: "Send Phase 3.5 in downloads to Dr. Fatima on WhatsApp",
+      normalizedUtterance:
+        "send phase 3.5 in downloads to dr. fatima on whatsapp",
+      question: "Which file did you mean?",
+      reason: "grounded_clarify",
+      world: stubWorld(),
+    });
+    // Same command, minor STT variation (adds "PDF") → treated as retry, not merged.
+    const followUp = resolveClarificationFollowUp(
+      "Send Phase 3.5 PDF in downloads to Dr. Fatima on WhatsApp",
+    );
+    expect(followUp).toBeNull();
+    clearClarificationContext();
+  });
+
+  it("grounded clarify supersedes a full send-to-contact restatement", () => {
+    clearClarificationContext();
+    beginClarificationRound({
+      originalCommand: "Send my resume to Noor",
+      normalizedUtterance: "send my resume to noor",
+      question: "Which file did you mean?",
+      reason: "grounded_clarify",
+      world: stubWorld(),
+    });
+    // A different, self-contained send-item command must not merge/double.
+    const followUp = resolveClarificationFollowUp(
+      "Send Phase 3.5 from downloads to Dr. Fatima on WhatsApp",
+    );
+    expect(followUp).toBeNull();
+    clearClarificationContext();
+  });
+
   it("T0-save: type notes and save as x.txt includes save_file", () => {
     const result = runPlannerPipeline({
       command: "type meeting notes, save as notes.txt",

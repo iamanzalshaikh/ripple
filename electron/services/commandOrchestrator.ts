@@ -3,12 +3,8 @@ import { applyWhatsAppVoiceOverride } from "../automation/adapters/whatsapp/what
 import { applyWhatsAppRephraseOverride } from "../automation/adapters/whatsapp/whatsappRephraseOverride.js";
 import { buildNotionCommandResult } from "../automation/adapters/notion/notionCommand.js";
 import { applyNotionVoiceOverride } from "../automation/adapters/notion/notionVoiceOverride.js";
-import { buildYouTubeCommandResult, buildYouTubeCommandFromPlan } from "../automation/adapters/youtube/youtubeCommand.js";
-import { fetchYouTubeSearchQueryFromLlm } from "../automation/adapters/youtube/youtubeSearchLlm.js";
-import { isLikelyYouTubeSearchCommand } from "../automation/adapters/youtube/parseYouTubeCommand.js";
 import { normalizeTranscript } from "../automation/voice/normalizeTranscript.js";
 import { applyYouTubeVoiceOverride } from "../automation/adapters/youtube/youtubeVoiceOverride.js";
-import { buildLinkedInCommandResult } from "../automation/adapters/linkedin/linkedinCommand.js";
 import { applyLinkedInVoiceOverride } from "../automation/adapters/linkedin/linkedinVoiceOverride.js";
 import { buildInstagramCommandResult } from "../automation/adapters/instagram/instagramCommand.js";
 import { applyInstagramVoiceOverride } from "../automation/adapters/instagram/instagramVoiceOverride.js";
@@ -43,8 +39,6 @@ import { showClarifyQuestionOnOverlay } from "../windows/overlay.js";
 import { confirmEntity, boostEntityFromOpen } from "../storage/knowledgeGraph.js";
 import { setCapabilityCacheEntry } from "../storage/capabilityCache.js";
 import { recordFileTouch } from "../storage/recordFileTouch.js";
-import { buildReferentialWhatsAppResult } from "../automation/adapters/whatsapp/buildReferentialWhatsApp.js";
-import { buildWhatsAppCommandResult } from "../automation/adapters/whatsapp/whatsappCommand.js";
 import { clearPreprocessCache } from "../automation/voice/nlu/preprocess.js";
 import { recordCommandEvent, type PlannerSource } from "../telemetry/commandTelemetry.js";
 import { parseGraphOpenCommand } from "../automation/desktop/parseGraphOpenCommand.js";
@@ -552,7 +546,10 @@ async function tryP85FastPath(
   }
 
   const deferReason = pipeline.kind === "defer" ? pipeline.reason : "no_match";
-  if (!shouldBlockLegacyDesktopRouters(effectiveCommand, normalizedForGate)) {
+  if (
+    legacyDesktopRoutersEnabled() &&
+    !shouldBlockLegacyDesktopRouters(effectiveCommand, normalizedForGate)
+  ) {
     logShadowLegacyDesktopRouters(command, deferReason);
   }
 
@@ -714,39 +711,6 @@ async function tryExecuteUniversalDesktopPlan(
   logConversationTurn(command, "success", { intent: universalPayload.intent });
   trackActionUse(universalPayload);
   return { ok: true, data: { ...universalPayload, execution } };
-}
-
-async function tryYouTubeLocal(
-  input: RunCommandInput,
-): Promise<CommandResultPayload | null> {
-  const normalized = normalizeTranscript(input.command);
-  const repaired = repairCorruptedTranscript(input.command);
-
-  if (isLikelyYouTubeSearchCommand(normalized) || isLikelyYouTubeSearchCommand(repaired)) {
-    const access = await input.getAccessToken();
-    if (access) {
-      const forLlm =
-        repaired !== normalized && repaired.length > 2
-          ? `${repaired}\n(raw transcript: ${input.command.trim()})`
-          : normalized;
-      const llm = await fetchYouTubeSearchQueryFromLlm(access, forLlm);
-      if (llm?.query) {
-        return buildYouTubeCommandFromPlan(llm, input.command);
-      }
-    }
-  }
-
-  return (
-    buildYouTubeCommandResult(normalized) ??
-    buildYouTubeCommandResult(repaired)
-  );
-}
-
-function tryLinkedInLocal(command: string): CommandResultPayload | null {
-  return (
-    buildLinkedInCommandResult(command) ??
-    buildLinkedInCommandResult(repairCorruptedTranscript(command))
-  );
 }
 
 function shouldRouteToBackendFirst(input: RunCommandInput): boolean {
@@ -919,47 +883,6 @@ export async function runDesktopCommand(
       };
     }
 
-    const referentialWa = buildReferentialWhatsAppResult(input.command);
-    if (referentialWa?.actions?.length && referentialWa.command_id) {
-      console.info(
-        `[ripple-desktop] command:result intent=workflow (referential-whatsapp) id=${referentialWa.command_id}`,
-      );
-      setLastCommandIntent(referentialWa.intent);
-      const execution = await runCommandActions(referentialWa, sendActionAckSafe);
-      recordExecutionTelemetry(
-        input.command,
-        referentialWa,
-        execution,
-        "fast",
-        { detail: "referential_whatsapp" },
-      );
-      logConversationTurn(input.command, "success", { intent: referentialWa.intent });
-      return { ok: true, data: { ...referentialWa, execution } };
-    }
-
-    const linkedinEarly = tryLinkedInLocal(input.command);
-    if (linkedinEarly?.actions?.length && linkedinEarly.command_id) {
-      console.info(
-        `[ripple-desktop] command:result intent=workflow actions=${linkedinEarly.actions.length} id=${linkedinEarly.command_id} (linkedin-local)`,
-      );
-      setLastCommandIntent(linkedinEarly.intent);
-      const execution = await runCommandActions(linkedinEarly, sendActionAckSafe);
-      if (execution) {
-        const ok = execution.records.filter((r) => r.status === "executed").length;
-        console.info(
-          `[ripple-desktop] actions done: ${ok}/${execution.records.length} succeeded`,
-        );
-      }
-      recordExecutionTelemetry(
-        input.command,
-        linkedinEarly,
-        execution,
-        "fast",
-        { detail: "linkedin-local" },
-      );
-      return { ok: true, data: { ...linkedinEarly, execution } };
-    }
-
     if (p85DesktopEntryEnabled()) {
       const p85Early = await tryP85FastPath(
         input.command,
@@ -984,97 +907,7 @@ export async function runDesktopCommand(
       }
     }
 
-    if (
-      isWhatsAppTabActive() &&
-      !isLikelyDesktopCommand(input.command) &&
-      !isDesktopAppForeground() &&
-      !parseDesktopInputFallback(input.command)
-    ) {
-      const waEarly =
-        buildWhatsAppCommandResult(input.command) ??
-        buildWhatsAppCommandResult(repairCorruptedTranscript(input.command));
-      if (waEarly?.actions?.length && waEarly.command_id) {
-        console.info(
-          `[ripple-desktop] command:result intent=workflow actions=${waEarly.actions.length} id=${waEarly.command_id} (whatsapp-early)`,
-        );
-        setLastCommandIntent(waEarly.intent);
-        const execution = await runCommandActions(waEarly, sendActionAckSafe);
-        if (execution) {
-          const ok = execution.records.filter((r) => r.status === "executed").length;
-          console.info(
-            `[ripple-desktop] actions done: ${ok}/${execution.records.length} succeeded`,
-          );
-        }
-        logConversationTurn(input.command, "success", { intent: waEarly.intent });
-        recordExecutionTelemetry(
-          input.command,
-          waEarly,
-          execution,
-          "fast",
-          { detail: "whatsapp-early" },
-        );
-        return { ok: true, data: { ...waEarly, execution } };
-      }
-    }
-
-    if (/\bwhatsapp\b/i.test(input.command)) {
-      const waMention =
-        buildWhatsAppCommandResult(input.command) ??
-        buildWhatsAppCommandResult(repairCorruptedTranscript(input.command));
-      if (waMention?.actions?.length && waMention.command_id) {
-        console.info(
-          `[ripple-desktop] command:result intent=workflow actions=${waMention.actions.length} id=${waMention.command_id} (whatsapp-mention)`,
-        );
-        setLastCommandIntent(waMention.intent);
-        const execution = await runCommandActions(waMention, sendActionAckSafe);
-        if (execution) {
-          const ok = execution.records.filter((r) => r.status === "executed").length;
-          console.info(
-            `[ripple-desktop] actions done: ${ok}/${execution.records.length} succeeded`,
-          );
-        }
-        logConversationTurn(input.command, "success", { intent: waMention.intent });
-        recordExecutionTelemetry(
-          input.command,
-          waMention,
-          execution,
-          "fast",
-          { detail: "whatsapp-mention" },
-        );
-        return { ok: true, data: { ...waMention, execution } };
-      }
-    }
-
     const cmdNorm = normalizeTranscript(input.command);
-    const isWorkflowTeach =
-      /^\s*(?:remember|replace)\s+/i.test(cmdNorm) &&
-      (Boolean(parseWorkflowMetaCommand(cmdNorm)) ||
-        isRememberWorkflowPhrase(cmdNorm));
-
-    if (!isWorkflowTeach && !shouldBlockLegacyDesktopRouters(input.command, cmdNorm)) {
-      const youtubeEarly = await tryYouTubeLocal(input);
-      if (youtubeEarly?.actions?.length && youtubeEarly.command_id) {
-        console.info(
-          `[ripple-desktop] command:result intent=workflow actions=${youtubeEarly.actions.length} id=${youtubeEarly.command_id} (youtube-local)`,
-        );
-        setLastCommandIntent(youtubeEarly.intent);
-        const execution = await runCommandActions(youtubeEarly, sendActionAckSafe);
-        if (execution) {
-          const ok = execution.records.filter((r) => r.status === "executed").length;
-          console.info(
-            `[ripple-desktop] actions done: ${ok}/${execution.records.length} succeeded`,
-          );
-        }
-        recordExecutionTelemetry(
-          input.command,
-          youtubeEarly,
-          execution,
-          "fast",
-          { detail: "youtube-local" },
-        );
-        return { ok: true, data: { ...youtubeEarly, execution } };
-      }
-    }
 
     const normForCompound = normalizeIntent(input.command);
     const compoundLegacyGate = tryCompoundGate(input.command, normForCompound);
@@ -1184,29 +1017,6 @@ export async function runDesktopCommand(
         );
         if (legacyFast) return legacyFast;
       }
-    }
-
-    const whatsappOnly = buildWhatsAppCommandResult(input.command);
-    if (whatsappOnly?.actions?.length && whatsappOnly.command_id) {
-      console.info(
-        `[ripple-desktop] command:result intent=workflow actions=${whatsappOnly.actions.length} id=${whatsappOnly.command_id} (whatsapp-local)`,
-      );
-      setLastCommandIntent(whatsappOnly.intent);
-      const execution = await runCommandActions(whatsappOnly, sendActionAckSafe);
-      if (execution) {
-        const ok = execution.records.filter((r) => r.status === "executed").length;
-        console.info(
-          `[ripple-desktop] actions done: ${ok}/${execution.records.length} succeeded`,
-        );
-      }
-      recordExecutionTelemetry(
-        input.command,
-        whatsappOnly,
-        execution,
-        "fast",
-        { detail: "whatsapp-local" },
-      );
-      return { ok: true, data: { ...whatsappOnly, execution } };
     }
 
     if (shouldRouteToBackendFirst(input)) {
@@ -1392,54 +1202,6 @@ export async function runDesktopCommand(
         { detail: "notion-local" },
       );
       return { ok: true, data: { ...notionOnly, execution } };
-    }
-
-    const youtubeOnly = shouldBlockLegacyDesktopRouters(input.command, cmdNorm)
-      ? null
-      : await tryYouTubeLocal(input);
-    if (youtubeOnly?.actions?.length && youtubeOnly.command_id) {
-      console.info(
-        `[ripple-desktop] command:result intent=workflow actions=${youtubeOnly.actions.length} id=${youtubeOnly.command_id} (youtube-local)`,
-      );
-      setLastCommandIntent(youtubeOnly.intent);
-      const execution = await runCommandActions(youtubeOnly, sendActionAckSafe);
-      if (execution) {
-        const ok = execution.records.filter((r) => r.status === "executed").length;
-        console.info(
-          `[ripple-desktop] actions done: ${ok}/${execution.records.length} succeeded`,
-        );
-      }
-      recordExecutionTelemetry(
-        input.command,
-        youtubeOnly,
-        execution,
-        "fast",
-        { detail: "youtube-local" },
-      );
-      return { ok: true, data: { ...youtubeOnly, execution } };
-    }
-
-    const linkedinOnly = tryLinkedInLocal(input.command);
-    if (linkedinOnly?.actions?.length && linkedinOnly.command_id) {
-      console.info(
-        `[ripple-desktop] command:result intent=workflow actions=${linkedinOnly.actions.length} id=${linkedinOnly.command_id} (linkedin-local)`,
-      );
-      setLastCommandIntent(linkedinOnly.intent);
-      const execution = await runCommandActions(linkedinOnly, sendActionAckSafe);
-      if (execution) {
-        const ok = execution.records.filter((r) => r.status === "executed").length;
-        console.info(
-          `[ripple-desktop] actions done: ${ok}/${execution.records.length} succeeded`,
-        );
-      }
-      recordExecutionTelemetry(
-        input.command,
-        linkedinOnly,
-        execution,
-        "fast",
-        { detail: "linkedin-local" },
-      );
-      return { ok: true, data: { ...linkedinOnly, execution } };
     }
 
     const igRephrase =

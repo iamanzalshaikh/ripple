@@ -99,7 +99,23 @@ export function matchContactWithConfidence(
     source: "transcript" as const,
   };
   const second = candidates[1]?.confidence;
-  const tier = pickTier(best.confidence, second);
+  let tier = pickTier(best.confidence, second);
+
+  // Autonomous agent: a clearly-spoken name should NOT block on a modal.
+  // The WhatsApp extension fuzzy-matches the real contact list itself, so we
+  // only confirm when we actually have session/override candidates to weigh
+  // AND the best guess is genuinely weak. A lone transcript stays auto.
+  const hasKnownCandidates = candidates.some(
+    (c) => c.source === "whatsapp_session" || c.source === "override",
+  );
+  if (!hasKnownCandidates) {
+    tier = "auto";
+  }
+  // Unresolved pronoun/relational token reaching here means memory was empty —
+  // don't silently message a fuzzy match; let the caller handle the miss.
+  if (/^(?:him|her|them|he|she|my)$/i.test(transcript)) {
+    tier = "ask";
+  }
 
   console.info(
     `[ripple-desktop] contact match: "${transcript}" → "${best.name}" ${best.confidence}% tier=${tier}` +

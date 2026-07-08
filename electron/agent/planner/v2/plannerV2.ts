@@ -13,6 +13,17 @@ import type { PlannerV2AtomicResult } from "./clauseTypes.js";
 import { classifyClause } from "./clauseClassifier.js";
 import { routeRecordToSteps } from "./toolRoutingMatrix.js";
 import { hasRegisteredTool } from "../toolRegistry.js";
+import { resolveRippleContext } from "../../context/contextResolver.js";
+import { activeSearchWorkspaceId } from "../../context/routingRules.js";
+
+/** Live foreground workspace hint for context-aware search routing. */
+function liveActiveWorkspaceId(rawCommand: string): string | undefined {
+  try {
+    return activeSearchWorkspaceId(resolveRippleContext(rawCommand));
+  } catch {
+    return undefined;
+  }
+}
 
 function isSemanticMemoryUtterance(rawCommand: string, normalized: string): boolean {
   const norm = normalizeTranscript(rawCommand) || normalized;
@@ -44,7 +55,9 @@ export function planCompoundWithV2(
   if (!parts || parts.length < 2) return null;
 
   logV2CompoundStart(parts.length, normalized);
-  let records = classifyClauses(parts);
+  let records = classifyClauses(parts, {
+    activeWorkspaceId: liveActiveWorkspaceId(rawCommand),
+  });
 
   const allUnknown = records.every(
     (r) =>
@@ -118,7 +131,10 @@ export function planAtomicWithV2(
     return null;
   }
 
-  const record = classifyClause(rawCommand, 0, { priorRecords: [] });
+  const record = classifyClause(rawCommand, 0, {
+    priorRecords: [],
+    activeWorkspaceId: liveActiveWorkspaceId(rawCommand),
+  });
 
   if (record.clauseType === "UNKNOWN" || record.status === "unsupported") {
     return null;

@@ -18,6 +18,10 @@ import {
 import { plannerV2CompoundEnabled } from "./v2/plannerV2Config.js";
 import { planCompoundWithV2 } from "./v2/plannerV2.js";
 import { shouldBypassP85Planner } from "./gptFallbackPolicy.js";
+import { isWhatsAppPlannerUtterance } from "./l0WhatsAppPlanner.js";
+import { isYouTubePlannerUtterance } from "./l0YouTubePlanner.js";
+import { isGmailPlannerUtterance } from "./l0GmailPlanner.js";
+import { isLinkedInPlannerUtterance } from "./l0LinkedInPlanner.js";
 
 /** True when utterance has ≥2 compound clauses (and/_then/comma boundaries). */
 export function isCompoundUtterance(
@@ -48,6 +52,10 @@ export function tryCompoundGate(
   normalized: string,
 ): PlannerPipelineResult | null {
   if (shouldBypassP85Planner(rawCommand)) return null;
+  if (isWhatsAppPlannerUtterance(rawCommand)) return null;
+  if (isYouTubePlannerUtterance(rawCommand, normalized)) return null;
+  if (isGmailPlannerUtterance(rawCommand, normalized)) return null;
+  if (isLinkedInPlannerUtterance(rawCommand, normalized)) return null;
   if (!compoundStickyEnabled()) return null;
   if (!isCompoundUtterance(rawCommand, normalized)) return null;
 

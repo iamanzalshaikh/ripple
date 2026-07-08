@@ -62,7 +62,7 @@ describe("P8.5 Phase 1 — desktop tools", () => {
     expect(names).toContain("desktop.launch_app");
     expect(names).toContain("desktop.focus_window");
     expect(names).toContain("desktop.mouse_scroll");
-    expect(names.length).toBe(13);
+    expect(names.length).toBe(14);
   });
 
   it("executes type_text through registered handler", async () => {

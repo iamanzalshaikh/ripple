@@ -136,14 +136,14 @@ describe("P8.5 E4/E7 matrix — draw + save + clipboard", () => {
 
   describe("E7 — clipboard v2 classifier", () => {
     const basicClipboard = [
-      ["select all and copy text", "desktop.select_all"],
+      ["select all and copy text", "desktop.press_keys"],
       ["copy this text", "desktop.copy"],
       ["copy selected content", "desktop.copy"],
       ["cut this text", "desktop.press_keys"],
       ["cut selected content", "desktop.press_keys"],
       ["paste this text", "desktop.paste"],
       ["paste clipboard content", "desktop.paste"],
-      ["select all and cut text", "desktop.select_all"],
+      ["select all and cut text", "desktop.press_keys"],
       ["read clipboard", "system.clipboard.read"],
       ["copy matrix ui test to clipboard", "system.clipboard.write"],
     ] as const;
@@ -170,7 +170,7 @@ describe("P8.5 E4/E7 matrix — draw + save + clipboard", () => {
       },
       {
         cmd: "select all and copy then save as notes.txt",
-        tools: ["desktop.select_all", "desktop.copy", "desktop.save_file"],
+        tools: ["desktop.press_keys", "desktop.save_file"],
       },
       {
         cmd: "copy this and create file data.txt",
@@ -179,6 +179,14 @@ describe("P8.5 E4/E7 matrix — draw + save + clipboard", () => {
       {
         cmd: "copy and save file test.txt",
         tools: ["desktop.copy", "desktop.save_file"],
+      },
+      {
+        cmd: "open notepad, write hello world and second, select all and copy",
+        tools: ["desktop.launch_app", "desktop.type_text", "desktop.press_keys"],
+      },
+      {
+        cmd: "open notepad, write hello world and then copy it",
+        tools: ["desktop.launch_app", "desktop.type_text", "desktop.press_keys"],
       },
     ] as const;
 

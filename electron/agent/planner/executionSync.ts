@@ -12,6 +12,13 @@ import {
 } from "../../focus/saveDialogMode.js";
 import { getFocusedA11yElement } from "../../native/win32Bridge.js";
 import { captureObservation } from "../observe.js";
+import { matchesMainDocumentA11y } from "../../focus/saveDialogMode.js";
+import { ensureEditorKeyboardFocus } from "../editorFocus.js";
+
+function isClassicEditorProcess(processName?: string | null): boolean {
+  const p = (processName ?? "").toLowerCase();
+  return p === "notepad" || p.includes("wordpad");
+}
 
 export const LAUNCH_FOCUS_SETTLE_MS = 500;
 export const TYPE_PREFLIGHT_WAIT_MS = 300;
@@ -37,21 +44,30 @@ const PAINT_STEP_TOOLS = new Set([
   "desktop.paint_op",
 ]);
 
-/** UIA control types that accept keyboard text input. */
+/** UIA control types that accept keyboard text input (generic apps). */
 export function isEditableControlType(controlType?: string | null): boolean {
   const c = (controlType ?? "").toLowerCase();
   return (
     c.includes("edit") ||
     c.includes("document") ||
-    c.includes("text") ||
-    c === "combobox"
+    c.includes("text")
   );
 }
 
-export async function isEditableFocused(): Promise<boolean> {
+/** True when the focused control is the real typing surface (Notepad document, not tab combo). */
+export async function isTypingTargetReady(): Promise<boolean> {
   const el = await getFocusedA11yElement();
   if (!el?.controlType) return false;
+  const obs = await captureObservation();
+  const proc = obs.foreground?.processName ?? "";
+  if (isClassicEditorProcess(proc)) {
+    return matchesMainDocumentA11y(el);
+  }
   return isEditableControlType(el.controlType);
+}
+
+export async function isEditableFocused(): Promise<boolean> {
+  return isTypingTargetReady();
 }
 
 function isPaintForeground(
@@ -123,7 +139,7 @@ export async function verifyInputFocusReady(options?: {
   const settleMs = options?.settleMs ?? 120;
   if (settleMs > 0) await delay(settleMs);
 
-  if (await isEditableFocused()) {
+  if (await isTypingTargetReady()) {
     return { ok: true };
   }
 
@@ -159,6 +175,12 @@ export async function focusLockAfterAppLaunch(nextTool?: string): Promise<void> 
   await restoreFocusContext();
   await delay(TYPE_PREFLIGHT_WAIT_MS);
   await adoptForegroundAsTypingTarget();
+
+  const obs = await captureObservation();
+  if (isClassicEditorProcess(obs.foreground?.processName)) {
+    await ensureEditorKeyboardFocus();
+  }
+
   check = await verifyInputFocusReady({ settleMs: 80 });
 
   if (process.env.RIPPLE_P85_TRACE !== "0" && !check.ok) {
@@ -169,15 +191,23 @@ export async function focusLockAfterAppLaunch(nextTool?: string): Promise<void> 
 /** Safe typing gate — refocus before INSERT_TEXT when field is not editable. */
 export async function safeTypingPreflight(): Promise<void> {
   if (isSaveDialogModalLocked()) return;
-  if (await isEditableFocused()) return;
+  if (await isTypingTargetReady()) return;
 
   await restoreFocusContext();
   await delay(TYPE_PREFLIGHT_WAIT_MS);
   await adoptForegroundAsTypingTarget();
 
-  if (await isEditableFocused()) return;
+  const obs = await captureObservation();
+  if (isClassicEditorProcess(obs.foreground?.processName)) {
+    await ensureEditorKeyboardFocus();
+  }
+
+  if (await isTypingTargetReady()) return;
 
   await delay(TYPE_PREFLIGHT_WAIT_MS);
+  if (isClassicEditorProcess(obs.foreground?.processName)) {
+    await ensureEditorKeyboardFocus();
+  }
 }
 
 /**

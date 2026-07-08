@@ -5,6 +5,11 @@ import {
 import type { ObservationSnapshot, TypingObservationResult } from "./types.js";
 import { isRippleApplicationWindow } from "../focus/focusContext.js";
 
+function isClassicEditorProcess(processName?: string): boolean {
+  const p = (processName ?? "").toLowerCase();
+  return p === "notepad" || p.includes("wordpad");
+}
+
 export async function captureObservation(): Promise<ObservationSnapshot> {
   const [foreground, focusedA11y] = await Promise.all([
     getForegroundWindow(),
@@ -81,6 +86,9 @@ export async function verifyTypingObservation(args: {
     control.includes("text");
 
   if (!args.keysOnly && after.focusedA11y && !inEditField) {
+    if (isClassicEditorProcess(after.foreground?.processName)) {
+      return { ok: true, before: args.before, after };
+    }
     return {
       ok: false,
       reason: `focus_not_editable:${after.focusedA11y.controlType}`,

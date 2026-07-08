@@ -45,6 +45,7 @@ function buildCases() {
       minDrags: opts.minDrags,
       file: opts.file,
       expect: opts.expect,
+      clearClipboard: opts.clearClipboard,
     };
   }
 
@@ -125,7 +126,148 @@ function buildCases() {
     ),
   ];
 
-  return [...phase1, ...extended];
+  const e7 = [
+    c("E7-01", "open notepad and type clip os test and copy this text", "clipboard", 3, {
+      tier: "e7",
+      expect: /clip os test/i,
+      clearClipboard: true,
+    }),
+    c("E7-02", "open notepad and type cut os test and cut selected content", "clipboard", 3, {
+      tier: "e7",
+      expect: /cut os test/i,
+      clearClipboard: true,
+    }),
+    c(
+      "E7-R01",
+      "open notepad and type ripple test then select all and copy",
+      "clipboard",
+      3,
+      { tier: "e7", expect: /ripple test/i, clearClipboard: true },
+    ),
+    c(
+      "E7-R02",
+      "open notepad and type ripple test then select all and cut",
+      "clipboard",
+      3,
+      { tier: "e7", expect: /ripple test/i, clearClipboard: true },
+    ),
+    c(
+      "E7-03",
+      "copy ripple e7 paste seed to clipboard and open notepad and paste clipboard content",
+      "bridge_ok",
+      3,
+      { tier: "e7", clearClipboard: true },
+    ),
+    c(
+      "E7-04",
+      "open notepad and type select all os test and select all and copy text",
+      "clipboard",
+      3,
+      { tier: "e7", expect: /select all os test/i, clearClipboard: true },
+    ),
+    c("E7-05", "copy ripple e7 read test to clipboard and read clipboard", "bridge_ok", 2, {
+      tier: "e7",
+      clearClipboard: true,
+    }),
+    c("E7-06", "copy ripple e7 ui matrix to clipboard", "clipboard", 1, {
+      tier: "e7",
+      expect: /ripple e7 ui matrix/i,
+      clearClipboard: true,
+    }),
+    c(
+      "E7-07",
+      "open notepad and type save os e7 test and save file e7-save-test.txt",
+      "file",
+      3,
+      {
+        tier: "e7",
+        file: "e7-save-test.txt",
+        expect: /save os e7 test/i,
+      },
+    ),
+    c(
+      "E7-08",
+      "open notepad and type create os e7 test and create file e7-data.txt",
+      "file",
+      3,
+      {
+        tier: "e7",
+        file: "e7-data.txt",
+        expect: /create os e7 test/i,
+      },
+    ),
+    c(
+      "E7-09",
+      "open notepad and type notes e7 test and save current file as e7-notes.txt",
+      "file",
+      3,
+      {
+        tier: "e7",
+        file: "e7-notes.txt",
+        expect: /notes e7 test/i,
+      },
+    ),
+    c(
+      "E7-10",
+      "open notepad and type called e7 test and create a file called e7-called",
+      "file",
+      3,
+      {
+        tier: "e7",
+        file: "e7-called.txt",
+        expect: /called e7 test/i,
+      },
+    ),
+    c(
+      "E7-11",
+      "open notepad and type compound copy e7 and copy this text and save file e7-compound.txt",
+      "file",
+      4,
+      {
+        tier: "e7",
+        file: "e7-compound.txt",
+        expect: /compound copy e7/i,
+        clearClipboard: true,
+      },
+    ),
+    c(
+      "E7-12",
+      "open notepad and type compound cut e7 and cut and save file e7-cut.txt",
+      "file",
+      4,
+      {
+        tier: "e7",
+        file: "e7-cut.txt",
+        clearClipboard: true,
+      },
+    ),
+    c(
+      "E7-13",
+      "open notepad and type compound select e7 and select all and copy then save as e7-notes2.txt",
+      "file",
+      4,
+      {
+        tier: "e7",
+        file: "e7-notes2.txt",
+        expect: /compound select e7/i,
+        clearClipboard: true,
+      },
+    ),
+    c(
+      "E7-14",
+      "open notepad and type edge e7 test and copy and save file e7-edge.txt",
+      "file",
+      4,
+      {
+        tier: "e7",
+        file: "e7-edge.txt",
+        expect: /edge e7 test/i,
+        clearClipboard: true,
+      },
+    ),
+  ];
+
+  return [...phase1, ...extended, ...e7];
 }
 
 const ALL = buildCases();
@@ -179,6 +321,18 @@ function killProc(name) {
   ).catch(() => "");
 }
 
+async function killNotepadAggressive() {
+  await killProc("notepad");
+  await ps(
+    `$p = Join-Path $env:LOCALAPPDATA 'Packages'
+Get-ChildItem $p -Filter 'Microsoft.WindowsNotepad_*' -ErrorAction SilentlyContinue | ForEach-Object {
+  $ts = Join-Path $_.FullName 'LocalState\\TabState'
+  if (Test-Path $ts) { Get-ChildItem $ts | Remove-Item -Force -ErrorAction SilentlyContinue }
+}`,
+  ).catch(() => "");
+  await sleep(400);
+}
+
 async function rippleRunning() {
   try {
     const out = await ps(
@@ -215,6 +369,9 @@ function spawnDev() {
       ...process.env,
       RIPPLE_P85_PHASE_B: "1",
       RIPPLE_P85_PLANNER_V2: "all",
+      ...(process.env.OS_TEST_LOCK_WINDOW
+        ? { OS_TEST_LOCK_WINDOW: process.env.OS_TEST_LOCK_WINDOW }
+        : {}),
     },
     stdio: ["ignore", "pipe", "pipe"],
     shell: true,
@@ -337,6 +494,16 @@ async function verifyPaintClosed() {
   }
 }
 
+async function clearClipboard() {
+  await ps(
+    `Set-Clipboard -Value "ripple-e7-baseline-${Date.now()}"`,
+  ).catch(() => {});
+}
+
+async function readClipboardText() {
+  return ps(`Get-Clipboard -Raw`).catch(() => "");
+}
+
 async function verifyChromeForeground() {
   try {
     const title = await ps(
@@ -355,6 +522,38 @@ $t.ToString()`,
     return /chrome/i.test(title);
   } catch {
     return false;
+  }
+}
+
+async function verifyFocusLock() {
+  const lock = process.env.OS_TEST_LOCK_WINDOW?.trim().toLowerCase();
+  if (!lock) return null;
+  try {
+    const title = await ps(
+      `Add-Type @"
+using System; using System.Runtime.InteropServices; using System.Text; using System.Diagnostics;
+public class FgLock {
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
+}
+"@
+$h = [FgLock]::GetForegroundWindow()
+$pid = 0
+[void][FgLock]::GetWindowThreadProcessId($h, [ref]$pid)
+$p = Get-Process -Id $pid -ErrorAction SilentlyContinue
+"$($p.ProcessName)|$($p.MainWindowTitle)"`,
+    );
+    const [proc, winTitle] = title.split("|");
+    const p = (proc ?? "").toLowerCase();
+    if (lock === "notepad" && p.includes("cursor")) {
+      return `focus violation: Cursor foreground (${winTitle?.slice(0, 40) ?? ""})`;
+    }
+    if (lock === "notepad" && p === "electron" && /ripple/i.test(winTitle ?? "")) {
+      return `focus violation: Ripple foreground during notepad lock`;
+    }
+    return null;
+  } catch {
+    return null;
   }
 }
 
@@ -380,9 +579,12 @@ function bridgePass(bridge, min) {
 
 async function runCase(tc) {
   await killProc("mspaint");
-  await killProc("notepad");
+  await killNotepadAggressive();
   if (tc.file && existsSync(join(DOWNLOADS, tc.file))) {
     unlinkSync(join(DOWNLOADS, tc.file));
+  }
+  if (tc.clearClipboard) {
+    await clearClipboard();
   }
   await sleep(500);
 
@@ -402,6 +604,11 @@ async function runCase(tc) {
   const fail = bridgePass(bridge, min);
   if (fail) return { ...fail, bridge };
 
+  const focusViolation = await verifyFocusLock();
+  if (focusViolation) {
+    return { pass: false, reason: focusViolation, bridge };
+  }
+
   if (tc.minDrags != null) {
     const drags =
       typeof bridge.dragSteps === "number" && bridge.dragSteps > 0
@@ -416,7 +623,7 @@ async function runCase(tc) {
     }
   }
 
-  await sleep(3500);
+  await sleep(tc.tier === "e7" ? 5000 : 3500);
 
   if (tc.verify === "paint_shape") {
     const px = await verifyPaintPixels();
@@ -453,19 +660,18 @@ async function runCase(tc) {
       : { pass: false, reason: "chrome not foreground", bridge };
   }
   if (tc.verify === "clipboard") {
-    const text = await ps(
-      `Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.Clipboard]::GetText()`,
-    ).catch(() => "");
+    const text = await readClipboardText();
     if (tc.expect?.test(text)) return { pass: true, reason: "clipboard ok", bridge };
-    return { pass: false, reason: `clipboard: ${text.slice(0, 40)}`, bridge };
+    return { pass: false, reason: `clipboard: ${text.slice(0, 60)}`, bridge };
   }
   if (tc.verify === "file") {
     const path = join(DOWNLOADS, tc.file);
     if (!existsSync(path)) return { pass: false, reason: `no file ${tc.file}`, bridge };
-    if (tc.expect?.test(readFileSync(path, "utf8"))) {
-      return { pass: true, reason: "file ok", bridge };
+    const content = readFileSync(path, "utf8");
+    if (tc.expect && !tc.expect.test(content)) {
+      return { pass: false, reason: `file content mismatch: ${content.slice(0, 60)}`, bridge };
     }
-    return { pass: false, reason: "file content mismatch", bridge };
+    return { pass: true, reason: "file ok", bridge };
   }
   return {
     pass: true,
@@ -478,8 +684,14 @@ async function main() {
   loadEnvFile();
   const osOnly = process.argv.includes("--os-only");
   const phase1Only = process.argv.includes("--phase1-only");
+  const e7Only = process.argv.includes("--e7-only");
+  const e7ClipboardOnly = process.argv.includes("--e7-clipboard-only");
   const filter = process.env.RIPPLE_OS_FILTER?.trim();
   const keepDev = process.argv.includes("--keep-dev");
+
+  if (e7Only || e7ClipboardOnly || filter?.startsWith("E7")) {
+    process.env.OS_TEST_LOCK_WINDOW = process.env.OS_TEST_LOCK_WINDOW || "notepad";
+  }
 
   console.log("[os-test] P8.5 OS automation (self-contained, file bridge, NO CDP)\n");
 
@@ -496,6 +708,14 @@ async function main() {
     : ALL;
   if (phase1Only) {
     cases = cases.filter((c) => c.tier === "phase1");
+  }
+  if (e7Only) {
+    cases = cases.filter((c) => c.tier === "e7");
+  }
+  if (e7ClipboardOnly) {
+    cases = cases.filter((c) =>
+      ["E7-01", "E7-02", "E7-R01", "E7-R02"].includes(c.id),
+    );
   }
 
   const results = [];
@@ -516,6 +736,8 @@ async function main() {
   const failed = results.filter((r) => !r.pass);
   const phase1Results = results.filter((r) => r.tier === "phase1");
   const phase1Failed = phase1Results.filter((r) => !r.pass);
+  const e7Results = results.filter((r) => r.tier === "e7");
+  const e7Failed = e7Results.filter((r) => !r.pass);
   console.log("\n========== OS TEST ==========");
   for (const r of results) {
     console.log(
@@ -525,6 +747,11 @@ async function main() {
   console.log(
     `\nPHASE1: ${phase1Failed.length === 0 ? "PASS" : "FAIL"} (${phase1Results.length - phase1Failed.length}/${phase1Results.length})`,
   );
+  if (e7Results.length) {
+    console.log(
+      `E7: ${e7Failed.length === 0 ? "PASS" : "FAIL"} (${e7Results.length - e7Failed.length}/${e7Results.length})`,
+    );
+  }
   console.log(
     `OVERALL: ${failed.length === 0 ? "PASS" : "FAIL"} (${results.length - failed.length}/${results.length})`,
   );
@@ -536,13 +763,21 @@ async function main() {
 
   if (!keepDev) cleanupDev();
   const exitCode =
-    phase1Only || filter
+    phase1Only
       ? phase1Failed.length > 0
         ? 1
         : 0
-      : failed.length > 0
-        ? 1
-        : 0;
+      : e7Only
+        ? e7Failed.length > 0
+          ? 1
+          : 0
+        : filter
+          ? failed.length > 0
+            ? 1
+            : 0
+          : failed.length > 0
+            ? 1
+            : 0;
   process.exit(exitCode);
 }
 

@@ -15,6 +15,19 @@ import {
 import { isPlannerShadowMode, logPlannerRouterMismatch } from "./planLogger.js";
 import { recordRouterMismatch } from "./routerParity.js";
 
+const ADAPTER_TOOL_PREFIXES = [
+  "browser.whatsapp.",
+  "browser.youtube.",
+  "browser.gmail.",
+  "browser.linkedin.",
+];
+
+function planUsesAdapterTools(plan: ExecutionPlan): boolean {
+  return plan.steps.some((s) =>
+    ADAPTER_TOOL_PREFIXES.some((p) => s.tool.startsWith(p)),
+  );
+}
+
 export type LegacyRouterKind = "desktop-input" | "desktop-fast" | "none";
 
 export type ShadowParityResult = {
@@ -387,6 +400,9 @@ export function runShadowParityOnExecute(
   p85Payload: CommandResultPayload,
 ): ShadowParityResult | null {
   if (!isShadowParityCompareEnabled()) return null;
+
+  // Adapter L0 tools intentionally diverge from legacy desktop-fast NLU payloads.
+  if (planUsesAdapterTools(plan)) return null;
 
   const legacy = resolveLegacyDesktopPayload(command);
   if (!legacy) return null;

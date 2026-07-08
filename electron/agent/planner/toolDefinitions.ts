@@ -175,7 +175,34 @@ export const PLANNER_TOOLS: ToolDefinition[] = [
     wave: 1,
     argsSchema: {
       contact: { type: "string" },
-      message: { type: "string", required: true },
+      // Required only when actually sending — see planValidator send-aware check.
+      // Empty message is valid for "open this contact's chat" (search/navigate).
+      message: { type: "string" },
+    },
+    requiresPermission: "messaging",
+  },
+  {
+    name: "browser.youtube.run",
+    description: "Open, search, or play on YouTube",
+    category: "browser",
+    wave: 1,
+    argsSchema: {
+      kind: { type: "string", required: true },
+      query: { type: "string" },
+      rawCommand: { type: "string" },
+    },
+  },
+  {
+    name: "browser.linkedin.run",
+    description: "Open, search people, or create post on LinkedIn",
+    category: "communication",
+    wave: 1,
+    argsSchema: {
+      kind: { type: "string", required: true },
+      query: { type: "string" },
+      text: { type: "string" },
+      publish: { type: "boolean" },
+      rawCommand: { type: "string" },
     },
     requiresPermission: "messaging",
   },
@@ -188,6 +215,7 @@ export const PLANNER_TOOLS: ToolDefinition[] = [
       to: { type: "string" },
       subject: { type: "string" },
       body: { type: "string" },
+      rawCommand: { type: "string" },
     },
     requiresPermission: "messaging",
   },

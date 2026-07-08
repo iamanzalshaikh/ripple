@@ -619,9 +619,15 @@ export async function captureFocusFromForeground(
       }
     }
     if (isRippleOwnWindow(raw.processName ?? "", raw.windowTitle ?? "")) {
-      if (saved) {
-        console.info("[ripple-desktop] focus skip Ripple window — keeping prior context");
-        return saved;
+      // Requirement: do not overwrite context memory when the Ripple overlay
+      // takes foreground — preserve the previous external foreground context.
+      const preserved = saved ?? bestStableFocus();
+      if (preserved) {
+        const surface = getStickyWebSurface();
+        console.info(
+          `[ripple-desktop] focus skip Ripple window — keeping ${preserved.processName}${surface ? ` (previousForeground surface=${surface})` : ""}`,
+        );
+        return preserved;
       }
     }
     if (isWeakFocusContext(ctx)) {

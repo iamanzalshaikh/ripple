@@ -2,13 +2,11 @@ import {
   isLikelyDesktopCommand,
   isRegionalLanguageCommand,
 } from "../../automation/voice/nlu/desktopIntentGuard.js";
-import { isGmailVoiceCommand } from "../../automation/commandIntent.js";
 import { parseAliasMetaCommand } from "../../automation/desktop/parseAliasCommand.js";
 import { parseSessionMemoryCommand } from "../../automation/desktop/parseSessionMemoryCommand.js";
 import { parseWorkflowMetaCommand } from "../../automation/desktop/parseWorkflowCommand.js";
 import { isRememberWorkflowPhrase } from "../../automation/desktop/spokenName.js";
 import { normalizeTranscript } from "../../automation/voice/normalizeTranscript.js";
-import { isComposeTopicOnlyCommand } from "../parseDesktopInput.js";
 
 const GPT_FALLBACK_REASONS = new Set([
   "compose_needs_llm",
@@ -31,31 +29,27 @@ function isSemanticMemoryTeach(norm: string): boolean {
 export function isMessagingAdapterCommand(command: string): boolean {
   const t = command.trim();
   if (!t) return false;
-  if (/\bwhatsapp\b/i.test(t)) return true;
-  if (/\b(?:linkedin|instagram)\b/i.test(t) && /\b(?:post|message|send|connect)\b/i.test(t)) {
+  if (/\b(?:instagram)\b/i.test(t) && /\b(?:post|message|send|connect)\b/i.test(t)) {
     return true;
   }
-  if (/\byoutube\b/i.test(t) && /\b(?:search|play|open)\b/i.test(t)) return true;
   return false;
 }
 
 /**
  * P8.5 must not plan/execute these — legacy adapters own the full utterance.
- * Unlike isMessagingAdapterCommand, YouTube stays on Planner v2 (workspace/search).
+ * WhatsApp, YouTube, Gmail, and LinkedIn route through dedicated L0 tool planners.
  */
 export function shouldBypassP85Planner(command: string): boolean {
   const t = command.trim();
   if (!t) return false;
-  if (/\bwhatsapp\b/i.test(t)) return true;
   if (
-    /\b(?:linkedin|instagram)\b/i.test(t) &&
+    /\b(?:instagram)\b/i.test(t) &&
     /\b(?:post|message|send|connect)\b/i.test(t)
   ) {
     return true;
   }
   const norm = normalizeTranscript(t);
   if (isSemanticMemoryTeach(norm)) return false;
-  if (isGmailVoiceCommand(norm) && !isComposeTopicOnlyCommand(norm)) return true;
   return false;
 }
 
