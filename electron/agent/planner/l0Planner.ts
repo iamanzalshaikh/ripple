@@ -36,6 +36,13 @@ import {
   parseListDirectoryCommand,
   planFromListDirectory,
 } from "./l0ListDirectory.js";
+import {
+  parseCreateFileInAppCommand,
+  type CreateFileInAppIntent,
+} from "../../automation/desktop/parseCreateFileInAppCommand.js";
+import {
+  planStepsForCreateFileInApp,
+} from "./planCreateFileInApp.js";
 import { firstCompoundClause } from "../../automation/voice/nlu/compoundParse.js";
 import { tracePlannerBranch } from "./plannerTrace.js";
 import {
@@ -94,6 +101,27 @@ const READ_CLIPBOARD =
 
 const AMBIGUOUS_SEND =
   /^(?:send|share)\s+(?:this|that|it)\s+(?:to|with)\s+(.+?)\s*$/i;
+
+const ACTIVE_WINDOW_QUERY =
+  /^\s*(?:what\s+window\s+is\s+active|which\s+app\s+(?:is\s+)?(?:open|active)|(?:what|which)\s+(?:application|app)(?:\s+currently)?\s+(?:am\s+i|i\s+am)\s+using|(?:what|which)\s+(?:application|app)\s+am\s+i\s+currently\s+using|tell\s+(?:me\s+)?(?:(?:the\s+)?active\s+window|what\s+application\s+is\s+currently\s+active)|(?:what\s+)?(?:application|app)\s+(?:am\s+i|i\s+am)\s+(?:currently\s+)?using|current\s+application|active\s+window)\s*[?.!]?\s*$/i;
+
+const CURRENT_WORKSPACE_QUERY =
+  /\b(?:explain (?:my )?current workspace|what project am i (?:on|in|working on)|which project am i (?:on|in|working on)|where am i working right now|tell me (?:my )?current project|current project|current workspace)\b/i;
+function planCreateFileInApp(
+  intent: CreateFileInAppIntent,
+  rawCommand: string,
+  normalized: string,
+  world: WorldModel,
+): ExecutionPlan {
+  return {
+    goal: `Create ${intent.filename}`,
+    confidence: 0.9,
+    steps: planStepsForCreateFileInApp(intent, world),
+    rawUtterance: rawCommand,
+    normalizedUtterance: normalized,
+    source: "L0",
+  };
+}
 
 function isWebComposeContext(): boolean {
   return (
@@ -263,6 +291,56 @@ export function runAtomicPlanner(
         0.95,
         "desktop_input_parser",
       ),
+    };
+  }
+
+  if (ACTIVE_WINDOW_QUERY.test(raw)) {
+    return {
+      kind: "plan",
+      plan: {
+        goal: "Get active window",
+        confidence: 0.95,
+        steps: [
+          {
+            tool: "desktop.get_active_window",
+            args: {},
+            reason: "active_window",
+          },
+        ],
+        rawUtterance: rawCommand,
+        normalizedUtterance: normalized,
+        source: "L0",
+      },
+    };
+  }
+
+  if (CURRENT_WORKSPACE_QUERY.test(raw) || CURRENT_WORKSPACE_QUERY.test(normalized)) {
+    return {
+      kind: "plan",
+      plan: {
+        goal: "Get current live workspace",
+        confidence: 0.94,
+        steps: [
+          {
+            tool: "desktop.get_current_workspace",
+            args: {},
+            reason: "current_workspace_live_context",
+          },
+        ],
+        rawUtterance: rawCommand,
+        normalizedUtterance: normalized,
+        source: "L0",
+      },
+    };
+  }
+
+  const createInApp =
+    parseCreateFileInAppCommand(rawCommand) ??
+    parseCreateFileInAppCommand(raw);
+  if (createInApp) {
+    return {
+      kind: "plan",
+      plan: planCreateFileInApp(createInApp, rawCommand, normalized, world),
     };
   }
 

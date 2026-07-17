@@ -1,9 +1,13 @@
 {
-  "version": "1.3.0",
+  "version": "2.2.0",
   "categories": {
     "desktop": [
       "desktop.type_text",
       "desktop.press_keys",
+      "desktop.press_key",
+      "desktop.hotkey",
+      "desktop.get_active_window",
+      "desktop.get_current_workspace",
       "desktop.copy",
       "desktop.paste",
       "desktop.select_all",
@@ -18,30 +22,90 @@
       "filesystem.rename",
       "filesystem.move",
       "filesystem.open",
-      "filesystem.list_directory"
+      "window.inspect"
     ],
     "apps": [
       "desktop.launch_app",
       "desktop.focus_window",
-      "desktop.close_window"
+      "desktop.close_window",
+      "desktop.close_app"
     ],
     "memory": [
-      "memory.search"
+      "memory.search",
+      "memory.get_user_preferences",
+      "memory.update_preference",
+      "memory.get_recent_context",
+      "memory.set_active_workspace",
+      "memory.get_active_workspace",
+      "memory.rank_choices",
+      "memory.learn_correction",
+      "memory.store_workflow",
+      "memory.get_user_goals",
+      "memory.forget_context",
+      "context.build_execution_context",
+      "context.resolve_user_intent"
     ],
     "browser": [
       "browser.search",
       "browser.open_workspace",
       "browser.search_workspace",
-      "browser.youtube.run"
+      "browser.youtube.run",
+      "browser.open_url",
+      "browser.extract_text",
+      "browser.find_element",
+      "browser.click",
+      "browser.type",
+      "browser.scroll"
     ],
     "communication": [
       "browser.whatsapp.send",
       "browser.linkedin.run",
+      "browser.instagram.run",
+      "browser.notion.run",
       "browser.gmail.compose"
     ],
     "system": [
       "system.clipboard.read",
-      "system.clipboard.write"
+      "system.clipboard.write",
+      "os.run_as_admin",
+      "os.get_app_properties",
+      "os.get_running_apps"
+    ],
+    "filesystem": [
+      "filesystem.list_directory",
+      "filesystem.search",
+      "filesystem.read_file",
+      "filesystem.get_metadata",
+      "filesystem.create_file",
+      "filesystem.write_file",
+      "filesystem.patch_file",
+      "filesystem.move_file",
+      "filesystem.copy_file",
+      "filesystem.copy_folder",
+      "filesystem.move_folder",
+      "filesystem.compare_directories",
+      "filesystem.compare_files"
+    ],
+    "automation": [
+      "automation.open_terminal",
+      "automation.run_command",
+      "automation.run_script",
+      "automation.git_operation",
+      "automation.open_project",
+      "automation.find_code",
+      "automation.scan_project",
+      "automation.analyze_codebase",
+      "automation.typecheck",
+      "automation.lint",
+      "automation.run_tests"
+    ],
+    "ai": [
+      "ai.explain_active_editor_file",
+      "ai.summarize_screen",
+      "ai.extract_context",
+      "ai.detect_element",
+      "ai.reason_about_task",
+      "ai.generate_action_plan"
     ]
   },
   "tools": [
@@ -65,7 +129,7 @@
     },
     {
       "name": "desktop.press_keys",
-      "description": "Send keyboard chords or key sequences (^a, ^c, {ENTER}, etc.)",
+      "description": "Send keyboard chords or key sequences (^a, ^c, {ENTER}, etc.) — compat shim",
       "category": "desktop",
       "wave": 1,
       "argsSchema": {
@@ -77,6 +141,45 @@
         }
       },
       "requiresPermission": "clipboard"
+    },
+    {
+      "name": "desktop.press_key",
+      "description": "Press a single key ({ENTER}, {TAB}, a)",
+      "category": "desktop",
+      "wave": 2,
+      "argsSchema": {
+        "key": {
+          "type": "string",
+          "required": true
+        }
+      }
+    },
+    {
+      "name": "desktop.hotkey",
+      "description": "Send a modifier chord (^a, ^c, ^+s)",
+      "category": "desktop",
+      "wave": 2,
+      "argsSchema": {
+        "chord": {
+          "type": "string",
+          "required": true
+        }
+      },
+      "requiresPermission": "clipboard"
+    },
+    {
+      "name": "desktop.get_active_window",
+      "description": "Read foreground window hwnd, title, and process name",
+      "category": "desktop",
+      "wave": 2,
+      "argsSchema": {}
+    },
+    {
+      "name": "desktop.get_current_workspace",
+      "description": "Read live Cursor/VS Code workspace from foreground IDE context",
+      "category": "desktop",
+      "wave": 2,
+      "argsSchema": {}
     },
     {
       "name": "desktop.copy",
@@ -206,12 +309,29 @@
     },
     {
       "name": "desktop.close_window",
-      "description": "Close a window",
+      "description": "Close a window (deprecated — use desktop.close_app)",
       "category": "apps",
       "wave": 1,
       "argsSchema": {
         "title": {
           "type": "string"
+        }
+      }
+    },
+    {
+      "name": "desktop.close_app",
+      "description": "Close the focused or named application window",
+      "category": "apps",
+      "wave": 2,
+      "argsSchema": {
+        "app": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "hwnd": {
+          "type": "number"
         }
       }
     },
@@ -335,6 +455,62 @@
         },
         "publish": {
           "type": "boolean"
+        },
+        "rawCommand": {
+          "type": "string"
+        }
+      },
+      "requiresPermission": "messaging"
+    },
+    {
+      "name": "browser.instagram.run",
+      "description": "Message or compose on Instagram via extension adapter",
+      "category": "communication",
+      "wave": 1,
+      "argsSchema": {
+        "kind": {
+          "type": "string",
+          "required": true
+        },
+        "username": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "send": {
+          "type": "boolean"
+        },
+        "pasteOnly": {
+          "type": "boolean"
+        },
+        "rawCommand": {
+          "type": "string"
+        }
+      },
+      "requiresPermission": "messaging"
+    },
+    {
+      "name": "browser.notion.run",
+      "description": "Create Notion page or paste clipboard via notion.new adapter",
+      "category": "communication",
+      "wave": 1,
+      "argsSchema": {
+        "kind": {
+          "type": "string",
+          "required": true
+        },
+        "pasteClipboard": {
+          "type": "boolean"
+        },
+        "title": {
+          "type": "string"
+        },
+        "body": {
+          "type": "string"
+        },
+        "workspace": {
+          "type": "string"
         },
         "rawCommand": {
           "type": "string"
@@ -497,7 +673,7 @@
     {
       "name": "filesystem.list_directory",
       "description": "List files in a folder",
-      "category": "desktop",
+      "category": "filesystem",
       "wave": 2,
       "argsSchema": {
         "parentFolder": {
@@ -509,6 +685,774 @@
         },
         "maxEntries": {
           "type": "number"
+        }
+      }
+    },
+    {
+      "name": "filesystem.search",
+      "description": "Search for files and folders by name",
+      "category": "filesystem",
+      "wave": 2,
+      "argsSchema": {
+        "query": {
+          "type": "string",
+          "required": true
+        },
+        "name": {
+          "type": "string"
+        },
+        "maxResults": {
+          "type": "number"
+        }
+      }
+    },
+    {
+      "name": "filesystem.read_file",
+      "description": "Read text file contents (size-capped)",
+      "category": "filesystem",
+      "wave": 2,
+      "argsSchema": {
+        "path": {
+          "type": "string"
+        },
+        "fileName": {
+          "type": "string"
+        },
+        "parentFolder": {
+          "type": "string"
+        },
+        "maxBytes": {
+          "type": "number"
+        }
+      }
+    },
+    {
+      "name": "filesystem.get_metadata",
+      "description": "Get file or folder metadata",
+      "category": "filesystem",
+      "wave": 2,
+      "argsSchema": {
+        "path": {
+          "type": "string"
+        },
+        "fileName": {
+          "type": "string"
+        },
+        "parentFolder": {
+          "type": "string"
+        }
+      }
+    },
+    {
+      "name": "filesystem.create_file",
+      "description": "Create a new file",
+      "category": "filesystem",
+      "wave": 2,
+      "argsSchema": {
+        "fileName": {
+          "type": "string",
+          "required": true
+        },
+        "parentFolder": {
+          "type": "string",
+          "required": true
+        }
+      }
+    },
+    {
+      "name": "filesystem.write_file",
+      "description": "Write or overwrite a text file",
+      "category": "filesystem",
+      "wave": 2,
+      "argsSchema": {
+        "path": {
+          "type": "string",
+          "required": true
+        },
+        "content": {
+          "type": "string",
+          "required": true
+        },
+        "createDirs": {
+          "type": "boolean"
+        }
+      }
+    },
+    {
+      "name": "filesystem.patch_file",
+      "description": "Patch a text file via find/replace",
+      "category": "filesystem",
+      "wave": 2,
+      "argsSchema": {
+        "path": {
+          "type": "string",
+          "required": true
+        },
+        "find": {
+          "type": "string"
+        },
+        "replace": {
+          "type": "string"
+        },
+        "content": {
+          "type": "string"
+        }
+      }
+    },
+    {
+      "name": "filesystem.move_file",
+      "description": "Move a file or folder",
+      "category": "filesystem",
+      "wave": 2,
+      "argsSchema": {
+        "sourceName": {
+          "type": "string",
+          "required": true
+        },
+        "destinationFolder": {
+          "type": "string",
+          "required": true
+        },
+        "parentFolder": {
+          "type": "string"
+        }
+      }
+    },
+    {
+      "name": "browser.open_url",
+      "description": "Open or navigate to a URL in the active browser tab",
+      "category": "browser",
+      "wave": 2,
+      "argsSchema": {
+        "url": {
+          "type": "string",
+          "required": true
+        },
+        "preferActiveTab": {
+          "type": "boolean"
+        },
+        "workspaceId": {
+          "type": "string"
+        }
+      }
+    },
+    {
+      "name": "browser.extract_text",
+      "description": "Extract visible text from the active browser tab",
+      "category": "browser",
+      "wave": 2,
+      "argsSchema": {
+        "maxChars": {
+          "type": "number"
+        }
+      }
+    },
+    {
+      "name": "browser.find_element",
+      "description": "Find a DOM element by selector, text, or aria-label",
+      "category": "browser",
+      "wave": 2,
+      "argsSchema": {
+        "selector": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "ariaLabel": {
+          "type": "string"
+        },
+        "partial": {
+          "type": "boolean"
+        }
+      }
+    },
+    {
+      "name": "browser.click",
+      "description": "Click an element or screen coordinates in the browser",
+      "category": "browser",
+      "wave": 2,
+      "argsSchema": {
+        "selector": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "ariaLabel": {
+          "type": "string"
+        },
+        "partial": {
+          "type": "boolean"
+        },
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        }
+      }
+    },
+    {
+      "name": "browser.type",
+      "description": "Type text into a focused or matched browser field",
+      "category": "browser",
+      "wave": 2,
+      "argsSchema": {
+        "text": {
+          "type": "string",
+          "required": true
+        },
+        "selector": {
+          "type": "string"
+        }
+      }
+    },
+    {
+      "name": "browser.scroll",
+      "description": "Scroll the active browser page or element",
+      "category": "browser",
+      "wave": 2,
+      "argsSchema": {
+        "deltaY": {
+          "type": "number"
+        },
+        "amount": {
+          "type": "number"
+        },
+        "selector": {
+          "type": "string"
+        }
+      }
+    },
+    {
+      "name": "automation.open_terminal",
+      "description": "Open Windows Terminal or shell",
+      "category": "automation",
+      "wave": 2,
+      "argsSchema": {
+        "cwd": {
+          "type": "string"
+        }
+      }
+    },
+    {
+      "name": "automation.run_command",
+      "description": "Run a shell command in a working directory",
+      "category": "automation",
+      "wave": 2,
+      "argsSchema": {
+        "command": {
+          "type": "string",
+          "required": true
+        },
+        "cwd": {
+          "type": "string"
+        }
+      }
+    },
+    {
+      "name": "automation.run_script",
+      "description": "Run an allowlisted script",
+      "category": "automation",
+      "wave": 2,
+      "argsSchema": {
+        "scriptPath": {
+          "type": "string",
+          "required": true
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "args": {
+          "type": "string"
+        }
+      }
+    },
+    {
+      "name": "automation.git_operation",
+      "description": "Run a git operation in a repository",
+      "category": "automation",
+      "wave": 2,
+      "argsSchema": {
+        "operation": {
+          "type": "string",
+          "required": true
+        },
+        "cwd": {
+          "type": "string",
+          "required": true
+        },
+        "message": {
+          "type": "string"
+        },
+        "paths": {
+          "type": "string"
+        },
+        "extraArgs": {
+          "type": "string"
+        }
+      }
+    },
+    {
+      "name": "automation.open_project",
+      "description": "Resolve and open a project in the detected IDE",
+      "category": "automation",
+      "wave": 2,
+      "argsSchema": {
+        "projectHint": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      }
+    },
+    {
+      "name": "automation.find_code",
+      "description": "Search source code in a project",
+      "category": "automation",
+      "wave": 2,
+      "argsSchema": {
+        "query": {
+          "type": "string",
+          "required": true
+        },
+        "projectRoot": {
+          "type": "string",
+          "required": true
+        },
+        "extension": {
+          "type": "string"
+        },
+        "maxResults": {
+          "type": "number"
+        }
+      }
+    },
+    {
+      "name": "automation.scan_project",
+      "description": "Scan a project tree (priority config files + source areas)",
+      "category": "automation",
+      "wave": 2,
+      "argsSchema": {
+        "projectRoot": {
+          "type": "string",
+          "required": true
+        }
+      }
+    },
+    {
+      "name": "automation.analyze_codebase",
+      "description": "Read project files and report heuristic code issues",
+      "category": "automation",
+      "wave": 2,
+      "argsSchema": {
+        "projectRoot": {
+          "type": "string",
+          "required": true
+        }
+      }
+    },
+    {
+      "name": "automation.typecheck",
+      "description": "Run TypeScript compiler (tsc --noEmit) and report errors",
+      "category": "automation",
+      "wave": 2,
+      "argsSchema": {
+        "projectRoot": {
+          "type": "string",
+          "required": true
+        }
+      }
+    },
+    {
+      "name": "automation.lint",
+      "description": "Run ESLint and report file/line errors",
+      "category": "automation",
+      "wave": 2,
+      "argsSchema": {
+        "projectRoot": {
+          "type": "string",
+          "required": true
+        }
+      }
+    },
+    {
+      "name": "automation.run_tests",
+      "description": "Run project test suite",
+      "category": "automation",
+      "wave": 2,
+      "argsSchema": {
+        "projectRoot": {
+          "type": "string",
+          "required": true
+        }
+      }
+    },
+    {
+      "name": "ai.explain_active_editor_file",
+      "description": "Explain the focused Cursor/VS Code file in Ripple UI (read-only, no insert)",
+      "category": "ai",
+      "wave": 2,
+      "argsSchema": {
+        "style": {
+          "type": "string"
+        }
+      }
+    },
+    {
+      "name": "ai.summarize_screen",
+      "description": "OCR the active window and return a short screen summary",
+      "category": "ai",
+      "wave": 2,
+      "argsSchema": {
+        "hwnd": {
+          "type": "number"
+        }
+      }
+    },
+    {
+      "name": "ai.extract_context",
+      "description": "Bundle foreground, clipboard, and optional screen context",
+      "category": "ai",
+      "wave": 2,
+      "argsSchema": {
+        "includeScreen": {
+          "type": "boolean"
+        }
+      }
+    },
+    {
+      "name": "ai.detect_element",
+      "description": "Locate a visible UI label via OCR and estimate click point",
+      "category": "ai",
+      "wave": 2,
+      "argsSchema": {
+        "query": {
+          "type": "string",
+          "required": true
+        },
+        "hwnd": {
+          "type": "number"
+        }
+      }
+    },
+    {
+      "name": "ai.reason_about_task",
+      "description": "Analyze a goal and suggest next steps (no side effects)",
+      "category": "ai",
+      "wave": 2,
+      "argsSchema": {
+        "goal": {
+          "type": "string",
+          "required": true
+        }
+      }
+    },
+    {
+      "name": "ai.generate_action_plan",
+      "description": "Draft an ExecutionPlan for a goal (never executes; caller re-enters validator)",
+      "category": "ai",
+      "wave": 2,
+      "argsSchema": {
+        "goal": {
+          "type": "string",
+          "required": true
+        },
+        "utterance": {
+          "type": "string"
+        }
+      }
+    },
+    {
+      "name": "memory.get_user_preferences",
+      "description": "Read preferred IDE, terminal, browser, and related habits",
+      "category": "memory",
+      "wave": 2,
+      "argsSchema": {}
+    },
+    {
+      "name": "memory.update_preference",
+      "description": "Update a single user preference key",
+      "category": "memory",
+      "wave": 2,
+      "argsSchema": {
+        "key": {
+          "type": "string",
+          "required": true
+        },
+        "value": {
+          "type": "string",
+          "required": true
+        }
+      }
+    },
+    {
+      "name": "memory.get_recent_context",
+      "description": "List recent projects, files, and commands",
+      "category": "memory",
+      "wave": 2,
+      "argsSchema": {
+        "limit": {
+          "type": "number"
+        }
+      }
+    },
+    {
+      "name": "memory.set_active_workspace",
+      "description": "Set sticky active workspace for follow-up commands",
+      "category": "memory",
+      "wave": 2,
+      "argsSchema": {
+        "path": {
+          "type": "string"
+        },
+        "projectHint": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "goal": {
+          "type": "string"
+        }
+      }
+    },
+    {
+      "name": "memory.get_active_workspace",
+      "description": "Read the sticky active workspace",
+      "category": "memory",
+      "wave": 2,
+      "argsSchema": {}
+    },
+    {
+      "name": "memory.rank_choices",
+      "description": "Rank app/path candidates by historical usage",
+      "category": "memory",
+      "wave": 2,
+      "argsSchema": {
+        "kind": {
+          "type": "string",
+          "required": true
+        },
+        "candidates": {
+          "type": "array",
+          "required": true
+        }
+      }
+    },
+    {
+      "name": "memory.learn_correction",
+      "description": "Remember spoken → canonical mapping",
+      "category": "memory",
+      "wave": 2,
+      "argsSchema": {
+        "spokenForm": {
+          "type": "string",
+          "required": true
+        },
+        "canonicalForm": {
+          "type": "string",
+          "required": true
+        },
+        "asAliasPath": {
+          "type": "string"
+        }
+      }
+    },
+    {
+      "name": "memory.store_workflow",
+      "description": "Store a named step recipe (does not execute)",
+      "category": "memory",
+      "wave": 2,
+      "argsSchema": {
+        "name": {
+          "type": "string",
+          "required": true
+        },
+        "steps": {
+          "type": "array",
+          "required": true
+        }
+      }
+    },
+    {
+      "name": "memory.get_user_goals",
+      "description": "Read current user goals / milestone notes",
+      "category": "memory",
+      "wave": 2,
+      "argsSchema": {}
+    },
+    {
+      "name": "memory.forget_context",
+      "description": "Clear active workspace and/or temporary memory scopes",
+      "category": "memory",
+      "wave": 2,
+      "argsSchema": {
+        "scope": {
+          "type": "string"
+        }
+      }
+    },
+    {
+      "name": "context.build_execution_context",
+      "description": "Build planner context from prefs, workspace, focus, recent work, and pending repair",
+      "category": "memory",
+      "wave": 2,
+      "argsSchema": {}
+    },
+    {
+      "name": "context.resolve_user_intent",
+      "description": "Map a short utterance to structured intent using memory (read-only)",
+      "category": "memory",
+      "wave": 2,
+      "argsSchema": {
+        "utterance": {
+          "type": "string",
+          "required": true
+        }
+      }
+    },
+    {
+      "name": "filesystem.copy_file",
+      "description": "Copy a file into a destination folder",
+      "category": "filesystem",
+      "wave": 2,
+      "argsSchema": {
+        "sourceName": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "destinationFolder": {
+          "type": "string",
+          "required": true
+        },
+        "parentFolder": {
+          "type": "string"
+        }
+      }
+    },
+    {
+      "name": "filesystem.copy_folder",
+      "description": "Copy a folder recursively into a destination folder",
+      "category": "filesystem",
+      "wave": 2,
+      "argsSchema": {
+        "sourceName": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "destinationFolder": {
+          "type": "string",
+          "required": true
+        },
+        "parentFolder": {
+          "type": "string"
+        }
+      }
+    },
+    {
+      "name": "filesystem.move_folder",
+      "description": "Move a folder to another parent folder",
+      "category": "filesystem",
+      "wave": 2,
+      "argsSchema": {
+        "sourceName": {
+          "type": "string",
+          "required": true
+        },
+        "destinationFolder": {
+          "type": "string",
+          "required": true
+        },
+        "parentFolder": {
+          "type": "string"
+        }
+      }
+    },
+    {
+      "name": "filesystem.compare_directories",
+      "description": "Compare two folders (only-left / only-right / size diffs)",
+      "category": "filesystem",
+      "wave": 2,
+      "argsSchema": {
+        "left": {
+          "type": "string",
+          "required": true
+        },
+        "right": {
+          "type": "string",
+          "required": true
+        }
+      }
+    },
+    {
+      "name": "filesystem.compare_files",
+      "description": "Compare two files by size and SHA-256",
+      "category": "filesystem",
+      "wave": 2,
+      "argsSchema": {
+        "left": {
+          "type": "string",
+          "required": true
+        },
+        "right": {
+          "type": "string",
+          "required": true
+        }
+      }
+    },
+    {
+      "name": "os.run_as_admin",
+      "description": "Launch an installed app or EXE elevated (UAC)",
+      "category": "system",
+      "wave": 2,
+      "argsSchema": {
+        "app": {
+          "type": "string",
+          "required": true
+        },
+        "path": {
+          "type": "string"
+        }
+      }
+    },
+    {
+      "name": "os.get_app_properties",
+      "description": "Read install path / version metadata for an app",
+      "category": "system",
+      "wave": 2,
+      "argsSchema": {
+        "app": {
+          "type": "string",
+          "required": true
+        }
+      }
+    },
+    {
+      "name": "os.get_running_apps",
+      "description": "List visible running app windows",
+      "category": "system",
+      "wave": 2,
+      "argsSchema": {
+        "limit": {
+          "type": "number"
+        }
+      }
+    },
+    {
+      "name": "window.inspect",
+      "description": "Inspect a visible window by title/process hint",
+      "category": "desktop",
+      "wave": 2,
+      "argsSchema": {
+        "query": {
+          "type": "string"
         }
       }
     }

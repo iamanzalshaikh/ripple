@@ -22,6 +22,12 @@ import { isWhatsAppPlannerUtterance } from "./l0WhatsAppPlanner.js";
 import { isYouTubePlannerUtterance } from "./l0YouTubePlanner.js";
 import { isGmailPlannerUtterance } from "./l0GmailPlanner.js";
 import { isLinkedInPlannerUtterance } from "./l0LinkedInPlanner.js";
+import { isInstagramPlannerUtterance } from "./l0InstagramPlanner.js";
+import { isSendItemPlannerUtterance } from "./l0SendItemPlanner.js";
+import { isNotionPlannerUtterance } from "./l0NotionPlanner.js";
+import { isFilesystemPlannerUtterance } from "./l0FilesystemPlanner.js";
+import { isCreateFileInAppCommand } from "./planCreateFileInApp.js";
+import { isDeveloperWorkflowUtterance } from "./developerWorkflowPlanner.js";
 
 /** True when utterance has ≥2 compound clauses (and/_then/comma boundaries). */
 export function isCompoundUtterance(
@@ -56,6 +62,17 @@ export function tryCompoundGate(
   if (isYouTubePlannerUtterance(rawCommand, normalized)) return null;
   if (isGmailPlannerUtterance(rawCommand, normalized)) return null;
   if (isLinkedInPlannerUtterance(rawCommand, normalized)) return null;
+  if (isInstagramPlannerUtterance(rawCommand, normalized)) return null;
+  if (isSendItemPlannerUtterance(rawCommand)) return null;
+  if (isNotionPlannerUtterance(rawCommand, normalized)) return null;
+  if (isFilesystemPlannerUtterance(rawCommand, normalized)) return null;
+  if (isDeveloperWorkflowUtterance(rawCommand, normalized)) return null;
+  if (
+    isCreateFileInAppCommand(rawCommand) ||
+    isCreateFileInAppCommand(normalized)
+  ) {
+    return null;
+  }
   if (!compoundStickyEnabled()) return null;
   if (!isCompoundUtterance(rawCommand, normalized)) return null;
 

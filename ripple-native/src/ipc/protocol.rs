@@ -46,7 +46,7 @@ impl CapabilityFlags {
             sendInput: true,
             uia: true,
             ocr: crate::ocr::is_ocr_available(),
-            globalHotkey: true,
+            globalHotkey: crate::hotkeys::global_hotkeys_active(),
             elevationInjection: false,
             foregroundEvents: true,
             mouse: true,

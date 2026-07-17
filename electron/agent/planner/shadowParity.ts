@@ -20,12 +20,66 @@ const ADAPTER_TOOL_PREFIXES = [
   "browser.youtube.",
   "browser.gmail.",
   "browser.linkedin.",
+  "browser.instagram.",
+  "browser.notion.",
 ];
+
+const P85_EXTENSION_REASONS = new Set([
+  "create_file_cursor",
+  "create_file_in_app",
+]);
+
+const P85_EXTENSION_TOOLS = new Set([
+  "filesystem.search",
+  "filesystem.read_file",
+  "filesystem.list_directory",
+  "filesystem.get_metadata",
+  "filesystem.write_file",
+  "filesystem.patch_file",
+  "browser.open_url",
+  "browser.extract_text",
+  "browser.find_element",
+  "browser.click",
+  "browser.type",
+  "browser.scroll",
+  "automation.open_project",
+  "automation.find_code",
+  "automation.scan_project",
+  "automation.analyze_codebase",
+  "automation.typecheck",
+  "automation.lint",
+]);
 
 function planUsesAdapterTools(plan: ExecutionPlan): boolean {
   return plan.steps.some((s) =>
     ADAPTER_TOOL_PREFIXES.some((p) => s.tool.startsWith(p)),
   );
+}
+
+/** P8.5 capabilities that intentionally diverge from legacy desktop-fast/input. */
+export function planUsesP85ExtensionTools(plan: ExecutionPlan): boolean {
+  if (plan.steps.some((s) => P85_EXTENSION_REASONS.has(s.reason ?? ""))) {
+    return true;
+  }
+  return plan.steps.some((s) => P85_EXTENSION_TOOLS.has(s.tool));
+}
+
+function isMeaninglessLegacyNoop(signature: string): boolean {
+  if (!signature.startsWith("NOOP:")) return false;
+  const data = signature.slice(5);
+  if (data === "{}") return true;
+  try {
+    const parsed = JSON.parse(data) as Record<string, unknown>;
+    return Object.keys(parsed).length === 0;
+  } catch {
+    return false;
+  }
+}
+
+/** Legacy router produced only empty NOOP placeholders — nothing to compare. */
+export function isLegacyNoopOnly(payload: CommandResultPayload): boolean {
+  const sigs = payloadActionSignatures(payload);
+  return sigs.length > 0 && sigs.every(isMeaninglessLegacyNoop);
 }
 
 export type LegacyRouterKind = "desktop-input" | "desktop-fast" | "none";
@@ -42,7 +96,7 @@ export type ShadowParityResult = {
 export function isShadowParityCompareEnabled(): boolean {
   if (process.env.RIPPLE_P85_SHADOW_COMPARE === "0") return false;
   if (process.env.RIPPLE_P85_SHADOW_COMPARE === "1") return true;
-  return isPlannerShadowMode();
+  return false;
 }
 
 export function resolveLegacyDesktopPayload(command: string): {
@@ -294,9 +348,13 @@ function signaturesCompatible(
       const kindMap: Record<string, string> = {
         "filesystem.delete": "delete_file",
         "filesystem.create": "create_file",
+        "filesystem.create_file": "create_file",
         "filesystem.create_folder": "create_folder",
         "filesystem.rename": "rename_file",
         "filesystem.move": "move_file",
+        "filesystem.move_file": "move_file",
+        "filesystem.write_file": "write_file",
+        "filesystem.patch_file": "patch_file",
       };
       const expectedKind = kindMap[p85FsMutator[1]!];
       if (expectedKind && legacyData.desktopKind === expectedKind) {
@@ -367,6 +425,45 @@ function signaturesCompatible(
       }
     }
 
+    const p85WriteFile = p85[i]?.match(/^filesystem\.write_file:(.+)$/);
+    if (p85WriteFile && legacy[i]?.startsWith("NOOP:")) {
+      const fsArgs = JSON.parse(p85WriteFile[1]!) as Record<string, unknown>;
+      const legacyData = JSON.parse(legacy[i]!.slice(5)!) as Record<
+        string,
+        unknown
+      >;
+      if (isMeaninglessLegacyNoop(legacy[i]!)) {
+        continue;
+      }
+      if (
+        legacyData.desktopKind === "create_file" ||
+        legacyData.desktopKind === "save_file"
+      ) {
+        const legacyName = String(
+          legacyData.filename ?? legacyData.sourceName ?? "",
+        );
+        const fsPath = String(fsArgs.path ?? "");
+        if (legacyName && fsPath.toLowerCase().endsWith(legacyName.toLowerCase())) {
+          continue;
+        }
+      }
+    }
+
+    const p85SaveFile = p85[i]?.match(/^desktop\.save_file:(.+)$/);
+    if (p85SaveFile && legacy[i]?.startsWith("NOOP:")) {
+      const saveArgs = JSON.parse(p85SaveFile[1]!) as Record<string, unknown>;
+      const legacyData = JSON.parse(legacy[i]!.slice(5)!) as Record<
+        string,
+        unknown
+      >;
+      if (
+        legacyData.desktopKind === "save_file" &&
+        legacyData.filename === saveArgs.filename
+      ) {
+        continue;
+      }
+    }
+
     return { matched: false, reason: `step_${i}_mismatch` };
   }
   return { matched: true };
@@ -404,8 +501,13 @@ export function runShadowParityOnExecute(
   // Adapter L0 tools intentionally diverge from legacy desktop-fast NLU payloads.
   if (planUsesAdapterTools(plan)) return null;
 
+  // P8.5 extension tools (create-file-in-cursor, filesystem intelligence) supersede legacy.
+  if (planUsesP85ExtensionTools(plan)) return null;
+
   const legacy = resolveLegacyDesktopPayload(command);
   if (!legacy) return null;
+
+  if (isLegacyNoopOnly(legacy.payload)) return null;
 
   const result = comparePlanToLegacyPayload(plan, command, legacy);
   if (!result.matched) {

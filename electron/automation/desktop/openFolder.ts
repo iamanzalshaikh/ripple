@@ -1,18 +1,11 @@
 import { existsSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
 import { shell } from "electron";
 import { recordFileTouch } from "../../storage/recordFileTouch.js";
-
-const WELL_KNOWN: Record<string, () => string> = {
-  downloads: () => join(homedir(), "Downloads"),
-  documents: () => join(homedir(), "Documents"),
-  desktop: () => join(homedir(), "Desktop"),
-};
+import { wellKnownFolderPath, resolveWellKnownFolderKey } from "./wellKnownFolders.js";
 
 export function resolveFolderPath(nameOrPath: string): string {
-  const key = nameOrPath.trim().toLowerCase();
-  if (WELL_KNOWN[key]) return WELL_KNOWN[key]();
+  const key = resolveWellKnownFolderKey(nameOrPath);
+  if (key) return wellKnownFolderPath(key);
   return nameOrPath;
 }
 

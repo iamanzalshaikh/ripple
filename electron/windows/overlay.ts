@@ -143,8 +143,25 @@ export function expandOverlayForDisambiguation(itemCount: number): void {
   overlayWindow.setAlwaysOnTop(true, "screen-saver");
 }
 
+/** Larger overlay for the code-repair fix panel (error + actions). */
+export function expandOverlayForCodeRepair(): void {
+  if (!overlayWindow || overlayWindow.isDestroyed()) return;
+  const display = screen.getPrimaryDisplay();
+  const area = display.workArea;
+  const width = 420;
+  const height = 320;
+  const x = Math.round(area.x + (area.width - width) / 2);
+  const y = Math.round(area.y + area.height - height - BOTTOM_MARGIN);
+  overlayWindow.setBounds({ x, y, width, height });
+  // Briefly focusable so Apply/Open/Ignore buttons receive clicks reliably.
+  overlayWindow.setFocusable(true);
+  overlayWindow.showInactive();
+  overlayWindow.setAlwaysOnTop(true, "screen-saver");
+}
+
 export function resetOverlaySize(): void {
   if (!overlayWindow || overlayWindow.isDestroyed()) return;
+  overlayWindow.setFocusable(false);
   positionIndicator(overlayWindow);
 }
 
@@ -174,17 +191,31 @@ export function cancelVoiceSession(): void {
   setOverlayState("idle");
   setVoiceSessionActive(false);
   dismissOverlay(300);
+  void import("../agent/dictation/dictationSession.js").then((m) => {
+    m.cancelDictationSession();
+  });
 }
 
-export async function handleShortcutPress(): Promise<void> {
+export async function handleShortcutPress(
+  mode: "command" | "dictation" = "command",
+): Promise<void> {
   if (!overlayWindow || overlayWindow.isDestroyed()) {
     overlayWindow = createOverlayWindow();
   }
 
   if (voiceSessionActive) {
-    sendToOverlay("overlay:voice-toggle", { action: "stop" });
+    sendToOverlay("overlay:voice-toggle", { action: "stop", mode });
     setOverlayState("processing");
     return;
+  }
+
+  const { startCommandSession, startDictationSession } = await import(
+    "../agent/dictation/dictationSession.js"
+  );
+  if (mode === "dictation") {
+    startDictationSession();
+  } else {
+    startCommandSession();
   }
 
   // Snapshot target app before overlay steals attention (do not re-capture FG here)
@@ -192,5 +223,5 @@ export async function handleShortcutPress(): Promise<void> {
   showOverlay();
   setVoiceSessionActive(true);
   setOverlayState("listening");
-  sendToOverlay("overlay:voice-toggle", { action: "start" });
+  sendToOverlay("overlay:voice-toggle", { action: "start", mode });
 }

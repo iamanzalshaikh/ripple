@@ -11,11 +11,11 @@ export type RecoveryOutcome = {
 };
 
 const TRANSIENT_PATTERNS =
-  /\b(?:focus|timed?\s*out|timeout|not\s+ready|busy|retry|lag|sidecar|econnreset|temporarily)\b/i;
+  /\b(?:focus|timed?\s*out|timeout|not\s+ready|busy|retry|lag|sidecar|econnreset|temporarily|typing\s+verification|a11y_name_mismatch|focus_not_editable)\b/i;
 const STALE_PATTERNS =
   /\b(?:window\s+(?:not\s+found|closed)|no\s+target|hwnd|not\s+visible|stale|foreground)\b/i;
 const HARD_PATTERNS =
-  /\b(?:permission|blocked|denied|invalid|not\s+allowed|policy)\b/i;
+  /\b(?:permission|blocked|denied|invalid|not\s+allowed|policy|enoent|enotdir|no such file)\b/i;
 const SAVE_STEP_PATTERNS =
   /\b(?:save\s+(?:as|ui|dialog|verification|file|path|folder)|save_file|ctrl\+s|ctrl\+shift\+s|could not (?:set save|confirm save)|refusing to confirm)\b/i;
 const SAVE_FOCUS_HARD_PATTERNS =
@@ -55,7 +55,9 @@ export function classifyExecutionFailure(
   if (isSaveStepFailure(error, record)) return "transient";
   if (STALE_PATTERNS.test(text)) return "stale_plan";
   if (TRANSIENT_PATTERNS.test(text)) return "transient";
-  if (record?.type === "INSERT_TEXT") return "transient";
+  if (record?.type === "INSERT_TEXT" && /typing|focus|paste|save/i.test(text)) {
+    return "transient";
+  }
   return "hard";
 }
 

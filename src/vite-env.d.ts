@@ -94,6 +94,17 @@ interface RippleApi {
     sessionId?: string;
     contextMetadata?: Record<string, unknown>;
   }) => Promise<{ ok: boolean; message?: string; data?: unknown }>;
+  executeDictation: (args: {
+    text: string;
+    insert?: boolean;
+  }) => Promise<{
+    ok: boolean;
+    mode: "dictation";
+    finalText?: string;
+    inserted?: boolean;
+    error?: string;
+    correctionKind?: string;
+  }>;
   getTelemetrySummary: () => Promise<{
     ok: boolean;
     message?: string;
@@ -230,7 +241,10 @@ interface RippleApi {
   ) => () => void;
   onOverlayState: (cb: (state: string) => void) => () => void;
   onVoiceToggle: (
-    cb: (payload: { action: "start" | "stop" | "cancel" }) => void,
+    cb: (payload: {
+      action: "start" | "stop" | "cancel";
+      mode?: "command" | "dictation";
+    }) => void,
   ) => () => void;
   pickDisambiguation?: (path: string | null) => Promise<{ ok: boolean }>;
   onDisambiguationShow?: (
@@ -243,6 +257,25 @@ interface RippleApi {
   onClarifyQuestion?: (
     cb: (payload: { question: string }) => void,
   ) => () => void;
+  onCodeRepairShow?: (
+    cb: (payload: {
+      file: string;
+      fileName: string;
+      line: number;
+      code: string;
+      message: string;
+      why: string;
+      suggestedFix: string;
+      before?: string;
+      after?: string;
+      hasSafePatch: boolean;
+      projectRoot: string;
+    }) => void,
+  ) => () => void;
+  onCodeRepairHide?: (cb: () => void) => () => void;
+  codeRepairAction?: (
+    action: "open" | "apply" | "ignore",
+  ) => Promise<{ ok: boolean; error?: string }>;
   isOverlay: () => boolean;
 }
 

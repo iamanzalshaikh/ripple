@@ -166,6 +166,13 @@ export const COMMON_NATIVE_APPS: NativeAppEntry[] = [
     processNames: ["taskmgr"],
     titleKeywords: ["task manager"],
   },
+  {
+    id: "windows-terminal",
+    aliases: ["terminal", "windows terminal", "wt", "powershell", "cmd"],
+    launch: "wt.exe",
+    processNames: ["windowsterminal", "wt", "powershell", "cmd"],
+    titleKeywords: ["windows terminal", "powershell", "command prompt"],
+  },
 ];
 
 const ALL_NATIVE_APPS: NativeAppEntry[] = [

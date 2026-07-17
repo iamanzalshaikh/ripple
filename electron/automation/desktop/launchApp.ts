@@ -178,7 +178,10 @@ async function launchNotepadFresh(app: NativeAppEntry): Promise<string> {
 }
 
 /** Launch a native app by registry entry (exe or URI scheme). */
-export async function launchNativeApp(app: NativeAppEntry): Promise<string> {
+export async function launchNativeApp(
+  app: NativeAppEntry,
+  options?: { cwd?: string },
+): Promise<string> {
   hideOverlay();
 
   if (process.platform !== "win32") {
@@ -191,16 +194,37 @@ export async function launchNativeApp(app: NativeAppEntry): Promise<string> {
 
   const target = resolveLaunchTarget(app);
   const escaped = target.replace(/'/g, "''");
-  await execFileAsync(
-    "powershell",
-    [
-      "-NoProfile",
-      "-Command",
-      `Start-Process -FilePath '${escaped}'`,
-    ],
-    { windowsHide: true },
+  const cwd = options?.cwd?.trim();
+  const cwdClause = cwd
+    ? ` -WorkingDirectory '${cwd.replace(/'/g, "''")}'`
+    : "";
+
+  // Windows Terminal: prefer -d for starting directory.
+  if (cwd && (app.id === "windows-terminal" || /\\wt\.exe$/i.test(target))) {
+    const dir = cwd.replace(/'/g, "''");
+    await execFileAsync(
+      "powershell",
+      [
+        "-NoProfile",
+        "-Command",
+        `Start-Process -FilePath '${escaped}' -ArgumentList '-d','${dir}'`,
+      ],
+      { windowsHide: true },
+    );
+  } else {
+    await execFileAsync(
+      "powershell",
+      [
+        "-NoProfile",
+        "-Command",
+        `Start-Process -FilePath '${escaped}'${cwdClause}`,
+      ],
+      { windowsHide: true },
+    );
+  }
+  console.info(
+    `[ripple-desktop] Launched ${app.id} → ${target}${cwd ? ` cwd=${cwd}` : ""}`,
   );
-  console.info(`[ripple-desktop] Launched ${app.id} → ${target}`);
   await delay(app.id === "file-explorer" ? 900 : 1400);
   try {
     await focusAppWindow(app);

@@ -36,6 +36,8 @@ function summarizeResolvedStep(
         : `open ${intent.name}`;
     case "save_file":
       return `save as ${intent.filename}`;
+    case "create_file_in_app":
+      return `create ${intent.filename} in ${intent.application}`;
     case "open_workspace":
       return `open ${intent.spokenName ?? intent.workspace.id}`;
     case "browser_search":

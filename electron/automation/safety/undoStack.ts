@@ -2,7 +2,8 @@ export type UndoAction =
   | { kind: "rename"; from: string; to: string }
   | { kind: "move"; from: string; to: string }
   | { kind: "delete"; path: string; backupPath: string }
-  | { kind: "create"; path: string };
+  | { kind: "create"; path: string }
+  | { kind: "restore_file"; path: string; backupPath: string };
 
 import { getRippleDb } from "../../storage/rippleDb.js";
 

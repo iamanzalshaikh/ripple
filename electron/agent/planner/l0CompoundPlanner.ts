@@ -33,6 +33,7 @@ const COMPOUND_STEP_KINDS = new Set<NativeCommandIntent["kind"]>([
   "type_text",
   "open_resolved",
   "save_file",
+  "create_file_in_app",
 ]);
 
 function isWave1Compound(steps: NativeCommandIntent[]): boolean {

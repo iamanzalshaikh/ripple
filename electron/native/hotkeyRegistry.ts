@@ -3,28 +3,50 @@ import {
   cancelVoiceSession,
   handleShortcutPress,
 } from "../windows/overlay.js";
+import {
+  isDictationModeEnabled,
+  type VoiceUiMode,
+} from "../agent/dictation/dictationSession.js";
 import { getSidecarCapabilities, isNativeClientAuthenticated } from "./nativeClient.js";
 
 export type HotkeyBinding = {
   accelerator: string;
   label: string;
-  action: "voice" | "cancel_voice";
+  action: "command" | "dictation" | "voice" | "cancel_voice";
 };
 
 const DEFAULT_BINDINGS: HotkeyBinding[] = [
-  { accelerator: "CommandOrControl+Space", label: "Voice", action: "voice" },
-  { accelerator: "Alt+Shift+Space", label: "Voice (fallback)", action: "voice" },
+  {
+    accelerator: "CommandOrControl+Space",
+    label: "Command mode",
+    action: "command",
+  },
+  {
+    accelerator: "Alt+Space",
+    label: "Dictation mode",
+    action: "dictation",
+  },
+  {
+    accelerator: "Alt+Shift+Space",
+    label: "Dictation (legacy)",
+    action: "dictation",
+  },
   { accelerator: "Escape", label: "Cancel voice", action: "cancel_voice" },
 ];
 
 const registered: string[] = [];
 
+function modeForAction(action: HotkeyBinding["action"]): VoiceUiMode {
+  if (action === "dictation" && isDictationModeEnabled()) return "dictation";
+  return "command";
+}
+
 function runHotkeyAction(action: HotkeyBinding["action"]): void {
-  if (action === "voice") {
-    void handleShortcutPress();
-  } else {
+  if (action === "cancel_voice") {
     cancelVoiceSession();
+    return;
   }
+  void handleShortcutPress(modeForAction(action));
 }
 
 function sidecarOwnsHotkeys(): boolean {
@@ -40,7 +62,7 @@ export function registerNativeHotkeys(
 ): { registered: string[]; failed: string[]; source: "sidecar" | "electron" } {
   if (sidecarOwnsHotkeys()) {
     console.info(
-      "[ripple-native] using sidecar hotkeys (RegisterHotKey — Ctrl+Space, Alt+Shift+Space, Escape)",
+      "[ripple-native] using sidecar hotkeys (Ctrl+Space=command, Alt+Space=dictation, Esc=cancel)",
     );
     return { registered: [], failed: [], source: "sidecar" };
   }

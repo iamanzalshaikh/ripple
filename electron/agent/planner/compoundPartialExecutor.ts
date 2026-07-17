@@ -11,7 +11,7 @@ import { phaseBExecuteEnabled } from "./phaseBConfig.js";
 import type { CommandResultPayload } from "../../automation/types.js";
 import type { ActionRunSummary } from "../../automation/types.js";
 
-const TAIL_SETTLE_MS = 900;
+const TAIL_SETTLE_MS = 2000;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));

@@ -3,6 +3,7 @@ import type { CommandResultPayload } from "../../automation/types.js";
 import { commandPayloadFromIntent } from "../../automation/desktop/desktopCommand.js";
 import type { NativeCommandIntent } from "../../automation/desktop/parseNativeCommand.js";
 import type { DesktopInputParsed } from "../types.js";
+import { keysFromDesktopKeyArgs } from "../../automation/input/keyArgs.js";
 import {
   buildTypingPayload,
   insertTextDataFromInput,
@@ -23,6 +24,11 @@ export function insertDataFromPlanStep(step: PlanStep): Record<string, unknown> 
         return { sequence: step.args.sequence };
       }
       return { keys: step.args.keys };
+    case "desktop.press_key":
+    case "desktop.hotkey": {
+      const keys = keysFromDesktopKeyArgs(step.tool, step.args);
+      return keys ? { keys } : null;
+    }
     case "desktop.copy":
       return { keys: "^c" };
     case "desktop.paste":
@@ -107,18 +113,31 @@ function planStepToActionData(step: PlanStep): Record<string, unknown> | null {
     }
   }
 
-  if (
-    step.tool.startsWith("filesystem.") ||
-    step.tool.startsWith("system.") ||
-    step.tool.startsWith("browser.") ||
-    step.tool === "desktop.save_file" ||
-    step.tool === "desktop.focus_window" ||
-    step.tool === "desktop.close_window"
-  ) {
+  if (isToolExecutorBridgedTool(step.tool)) {
     return { _p85Tool: step.tool, ...step.args };
   }
 
   return null;
+}
+
+/** Tools that run via P85 tool executor (_p85Tool marker), not legacy INSERT_TEXT typing. */
+function isToolExecutorBridgedTool(tool: string): boolean {
+  return (
+    tool.startsWith("filesystem.") ||
+    tool.startsWith("system.") ||
+    tool.startsWith("browser.") ||
+    tool.startsWith("automation.") ||
+    tool.startsWith("memory.") ||
+    tool.startsWith("ai.") ||
+    tool.startsWith("os.") ||
+    tool.startsWith("context.") ||
+    tool === "desktop.save_file" ||
+    tool === "desktop.focus_window" ||
+    tool === "desktop.close_window" ||
+    tool === "desktop.close_app" ||
+    tool === "desktop.get_active_window" ||
+    tool === "desktop.get_current_workspace"
+  );
 }
 
 function shellWorkflowPayload(
@@ -139,16 +158,16 @@ function shellWorkflowPayload(
 /** True when a plan step can be bridged to P7 INSERT_TEXT actions. */
 export function isBridgedPlanStep(step: PlanStep): boolean {
   if (step.tool === "desktop.launch_app") return true;
-  if (step.tool === "desktop.focus_window" || step.tool === "desktop.close_window") {
+  if (
+    step.tool === "desktop.focus_window" ||
+    step.tool === "desktop.close_window" ||
+    step.tool === "desktop.close_app" ||
+    step.tool === "desktop.get_active_window" ||
+    step.tool === "desktop.get_current_workspace"
+  ) {
     return true;
   }
-  if (step.tool.startsWith("filesystem.") || step.tool.startsWith("system.")) {
-    return true;
-  }
-  if (step.tool === "desktop.save_file") {
-    return true;
-  }
-  if (step.tool.startsWith("browser.")) {
+  if (isToolExecutorBridgedTool(step.tool)) {
     return true;
   }
   return insertDataFromPlanStep(step) !== null;

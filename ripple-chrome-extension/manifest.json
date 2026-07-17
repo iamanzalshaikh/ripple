@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Ripple Bridge (WhatsApp + Gmail + Slack + Outlook + Teams)",
-  "version": "1.9.0",
+  "version": "1.10.0",
   "description": "Ripple automation + P8 cross-app memory ingest (Gmail, Slack, Outlook, Teams).",
   "permissions": ["nativeMessaging", "tabs", "scripting", "downloads"],
   "host_permissions": [
@@ -15,7 +15,8 @@
     "https://outlook.live.com/*",
     "https://outlook.office.com/*",
     "https://outlook.office365.com/*",
-    "https://teams.microsoft.com/*"
+    "https://teams.microsoft.com/*",
+    "https://*/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -63,6 +64,11 @@
     {
       "matches": ["https://teams.microsoft.com/*"],
       "js": ["teamsContent.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://*/*"],
+      "js": ["browserGenericContent.js"],
       "run_at": "document_idle"
     }
   ]

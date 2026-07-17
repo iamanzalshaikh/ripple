@@ -17,6 +17,8 @@ const NON_CACHEABLE_TOOLS = new Set([
   "browser.gmail.compose",
   "browser.youtube.run",
   "browser.linkedin.run",
+  "browser.instagram.run",
+  "browser.notion.run",
 ]);
 
 const COMMUNICATION_PREFIXES = ["browser.whatsapp.", "browser.gmail.", "communication."];

@@ -97,20 +97,48 @@ export async function verifyTypingObservation(args: {
     };
   }
 
-  if (args.expectedText?.trim() && after.focusedA11y?.name) {
+  if (args.expectedText?.trim() && after.focusedA11y) {
     const snippet = args.expectedText.trim().slice(0, 24).toLowerCase();
     const controlIsDocument = control.includes("document");
-    if (
-      snippet.length >= 4 &&
-      !controlIsDocument &&
-      !after.focusedA11y.name.toLowerCase().includes(snippet)
-    ) {
-      return {
-        ok: false,
-        reason: "a11y_name_mismatch",
-        before: args.before,
-        after,
-      };
+    const name = (after.focusedA11y.name ?? "").toLowerCase();
+    const value = (after.focusedA11y.value ?? "").toLowerCase();
+    const beforeValue = (args.before.focusedA11y?.value ?? "").toLowerCase();
+
+    if (snippet.length >= 4 && !controlIsDocument) {
+      // WhatsApp / web contenteditables keep placeholder in `name` and typed
+      // text in `value`. Prefer value (and value growth) over name.
+      const inValue = value.includes(snippet);
+      const inName = name.includes(snippet);
+      const valueGrewWithText =
+        value.length > beforeValue.length &&
+        (inValue ||
+          snippet
+            .split(/\s+/)
+            .filter((w) => w.length >= 4)
+            .some((w) => value.includes(w)));
+
+      if (!inValue && !inName && !valueGrewWithText) {
+        // Only fail when neither name nor value shows the typed text.
+        if (!value.trim()) {
+          return {
+            ok: false,
+            reason: "a11y_name_mismatch",
+            before: args.before,
+            after,
+          };
+        }
+        // Non-empty value that doesn't match can still be a contenteditable
+        // that reports stale/truncated value — accept if still in edit field
+        // and value changed after insert.
+        if (value === beforeValue || !inEditField) {
+          return {
+            ok: false,
+            reason: "a11y_name_mismatch",
+            before: args.before,
+            after,
+          };
+        }
+      }
     }
   }
 

@@ -8,6 +8,7 @@ export function parseListDirectoryCommand(
   if (!cmd) return null;
 
   const patterns = [
+    /^(?:list|show)\s+(?:me\s+)?(?:all\s+)?(?:the\s+)?(?:files?|everything)\s+(?:in|on|inside)\s+(?:my\s+)?(downloads?|documents?|desktop)(?:\s+folder)?\s*$/,
     /^(?:list|show)\s+(?:me\s+)?(?:all\s+)?(?:the\s+)?files?\s+(?:in|on)\s+(?:my\s+)?(downloads?|documents?|desktop)\s*$/,
     /^(?:list|show)\s+(?:what(?:'s| is)\s+)?(?:in|on)\s+(?:my\s+)?(downloads?|documents?|desktop)\s*$/,
     /^what(?:'s| is) in (?:my\s+)?(downloads?|documents?|desktop)\s*$/,

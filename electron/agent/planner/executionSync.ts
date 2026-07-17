@@ -21,6 +21,7 @@ function isClassicEditorProcess(processName?: string | null): boolean {
 }
 
 export const LAUNCH_FOCUS_SETTLE_MS = 500;
+export const ELECTRON_EDITOR_SETTLE_MS = 1800;
 export const TYPE_PREFLIGHT_WAIT_MS = 300;
 export const COMPOUND_STEP_GAP_MS = 200;
 export const PAINT_FOCUS_STABLE_MS = 350;
@@ -35,7 +36,15 @@ const INPUT_READY_TOOLS = new Set([
   "desktop.type_text",
   "desktop.save_file",
   "desktop.press_keys",
+  "desktop.press_key",
+  "desktop.hotkey",
   "desktop.paste",
+]);
+
+const POST_LAUNCH_FILE_TOOLS = new Set([
+  "filesystem.write_file",
+  "filesystem.create_file",
+  "desktop.save_file",
 ]);
 
 const PAINT_STEP_TOOLS = new Set([
@@ -155,6 +164,14 @@ export async function verifyInputFocusReady(options?: {
 export async function focusLockAfterAppLaunch(nextTool?: string): Promise<void> {
   if (isSaveDialogModalLocked()) return;
 
+  if (nextTool && POST_LAUNCH_FILE_TOOLS.has(nextTool)) {
+    await delay(ELECTRON_EDITOR_SETTLE_MS);
+    await restoreFocusContext();
+    await adoptForegroundAsTypingTarget();
+    extendCommandFocusGrace(12_000);
+    return;
+  }
+
   await delay(LAUNCH_FOCUS_SETTLE_MS);
   await adoptForegroundAsTypingTarget();
   extendCommandFocusGrace(12_000);
@@ -222,6 +239,15 @@ export async function syncCompoundStepBoundary(
 
   if (nextTool === "desktop.save_file") {
     await delay(COMPOUND_STEP_GAP_MS);
+    return;
+  }
+
+  if (
+    prevTool &&
+    POST_LAUNCH_TOOLS.has(prevTool) &&
+    POST_LAUNCH_FILE_TOOLS.has(nextTool)
+  ) {
+    await focusLockAfterAppLaunch(nextTool);
     return;
   }
 

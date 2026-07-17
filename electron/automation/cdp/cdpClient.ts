@@ -91,13 +91,6 @@ export async function getOrOpenPage(
   return { page, reused: false };
 }
 
-export async function disconnectCdp(): Promise<void> {
-  if (browser?.connected) {
-    await browser.disconnect();
-  }
-  browser = null;
-}
-
 /** Active tab URL from CDP when reachable (optional context for backend). */
 export async function getCdpActiveTabUrl(): Promise<string | undefined> {
   if (!(await isCdpReachable())) return undefined;
@@ -113,4 +106,62 @@ export async function getCdpActiveTabUrl(): Promise<string | undefined> {
     return undefined;
   }
   return undefined;
+}
+
+export async function disconnectCdp(): Promise<void> {
+  if (browser?.connected) {
+    await browser.disconnect();
+  }
+  browser = null;
+}
+
+/** Best-effort active page in the CDP browser (last non-blank tab). */
+export async function getActiveCdpPage(): Promise<Page | null> {
+  if (!(await isCdpReachable())) return null;
+  try {
+    const b = await getCdpBrowser(false);
+    const pages = await b.pages();
+    let candidate: Page | null = null;
+    for (const p of pages) {
+      if (!isPageAlive(p)) continue;
+      try {
+        const url = p.url();
+        if (url && url !== "about:blank") candidate = p;
+      } catch {
+        continue;
+      }
+    }
+    if (candidate) {
+      await candidate.bringToFront();
+      return candidate;
+    }
+    return pages.find((p) => isPageAlive(p)) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Navigate via CDP — reuses active tab or opens a new one. */
+export async function navigateCdpUrl(
+  url: string,
+  options?: { newTab?: boolean },
+): Promise<Page> {
+  const normalized = url.trim();
+  if (!normalized) throw new Error("missing_url");
+
+  if (!(await isCdpReachable())) {
+    throw new Error("cdp_unavailable");
+  }
+
+  const b = await getCdpBrowser(false);
+  let page =
+    options?.newTab === true ? null : await getActiveCdpPage();
+  if (!page) {
+    page = await b.newPage();
+  }
+  await page.goto(normalized, {
+    waitUntil: "domcontentloaded",
+    timeout: 60_000,
+  });
+  return page;
 }

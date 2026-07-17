@@ -7,6 +7,8 @@ import { runPlannerPipeline } from "../planner/plannerPipeline.js";
 import { buildExecutorPayload } from "../planner/plannerExecutor.js";
 import {
   comparePlanToLegacyPayload,
+  isLegacyNoopOnly,
+  planUsesP85ExtensionTools,
   resolveLegacyDesktopPayload,
   runShadowParityOnExecute,
 } from "../planner/shadowParity.js";
@@ -31,11 +33,13 @@ const SHADOW_PARITY_FIXTURE_IDS = new Set([
 ]);
 
 function fixtureWorld(
-  overrides?: UtteranceFixture["worldOverrides"],
+  overrides?: UtteranceFixture["worldOverrides"] & {
+    foreground?: WorldModel["foreground"];
+  },
 ): WorldModel {
   return {
     capturedAt: Date.now(),
-    foreground: null,
+    foreground: overrides?.foreground ?? null,
     focusedField: null,
     focusContext: null,
     mouse: { x: 0, y: 0, windowUnderCursor: null },
@@ -123,6 +127,49 @@ describe("P8.5 Phase 3 — shadow parity", () => {
     );
     expect(parity?.matched).toBe(true);
     expect(getRouterParitySnapshot().mismatchTotal).toBe(0);
+  });
+
+  it("skips shadow compare for create-file-in-cursor (P85 extension)", () => {
+    const utterance = "create a new file server.js in cursor";
+    const world = fixtureWorld({
+      foreground: {
+        hwnd: 1,
+        processName: "Cursor",
+        windowTitle: "app.tsx - projectRipple - Cursor",
+      },
+    });
+    const pipeline = runPlannerPipeline({ command: utterance, world });
+    expect(pipeline.kind).toBe("execute");
+    if (pipeline.kind !== "execute") return;
+    expect(planUsesP85ExtensionTools(pipeline.plan)).toBe(true);
+
+    const built = buildExecutorPayload(pipeline.plan, utterance, world);
+    if (built.kind !== "payload" && built.kind !== "executor") return;
+
+    const legacy = resolveLegacyDesktopPayload(utterance);
+    if (legacy) {
+      expect(isLegacyNoopOnly(legacy.payload)).toBe(true);
+    }
+
+    const parity = runShadowParityOnExecute(
+      utterance,
+      pipeline.plan,
+      built.payload,
+    );
+    expect(parity).toBeNull();
+    expect(getRouterParitySnapshot().mismatchTotal).toBe(0);
+  });
+
+  it("plans create-file-in-cursor without legacy parity requirement", () => {
+    const utterance = "create file api.ts in cursor";
+    const world = fixtureWorld();
+    const pipeline = runPlannerPipeline({ command: utterance, world });
+    expect(pipeline.kind).toBe("execute");
+    if (pipeline.kind !== "execute") return;
+    expect(
+      pipeline.plan.steps.some((s) => s.tool === "filesystem.write_file"),
+    ).toBe(true);
+    expect(planUsesP85ExtensionTools(pipeline.plan)).toBe(true);
   });
 
   it("readyForDeprecation after shadow fixture passes", () => {

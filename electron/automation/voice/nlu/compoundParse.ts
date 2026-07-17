@@ -27,7 +27,7 @@ const SENTENCE_SPLIT =
 
 /** Clause-start verbs after comma or conjunction boundaries. */
 export const COMPOUND_CLAUSE_VERBS =
-  "type|write|save|close|launch|open|switch|focus|search|paste|copy|cut|calculate|dictate|likho|enter|put|click|press|draw|sketch|erase|scroll|drag|select|move|fill|paint|create|store";
+  "type|write|save|close|launch|open|switch|focus|search|paste|copy|cut|calculate|dictate|likho|enter|put|click|press|draw|sketch|erase|scroll|drag|select|move|fill|paint|create|store|analyze|identify|inspect|find|explain|apply|fix|update|patch|run|verify|read";
 
 /** Comma between clauses — not commas inside dictated text ("hello, world"). */
 export const COMMA_CLAUSE_SPLIT = new RegExp(

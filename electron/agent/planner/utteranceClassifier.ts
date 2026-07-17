@@ -1,4 +1,5 @@
 import { normalizeTranscript } from "../../automation/voice/normalizeTranscript.js";
+import { isCreateFileInAppCommand } from "./planCreateFileInApp.js";
 import { parseFileOperationCommand } from "../../automation/desktop/parseFileOperationCommand.js";
 import { parseWorkflowMetaCommand } from "../../automation/desktop/parseWorkflowCommand.js";
 import { isRememberWorkflowPhrase } from "../../automation/desktop/spokenName.js";
@@ -59,6 +60,14 @@ export function classifyUtterance(
   if (isAtomicDesktopInputCompound(normalized)) return "atomic";
 
   if (isSingleFileOpUtterance(normalized) || isSingleFileOpUtterance(rawCommand)) {
+    return "atomic";
+  }
+
+  if (
+    isCreateFileInAppCommand(rawCommand) ||
+    isCreateFileInAppCommand(normalized) ||
+    isCreateFileInAppCommand(transcript)
+  ) {
     return "atomic";
   }
 

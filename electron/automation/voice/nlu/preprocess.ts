@@ -7,6 +7,10 @@ import { normalizeUrdu } from "../i18n/urduNormalize.js";
 import { detectPrimaryScript } from "../i18n/scriptDetect.js";
 import { normalizeTranscript } from "../normalizeTranscript.js";
 import { normalizeForNlu } from "./normalizeIntent.js";
+import {
+  canonicalizeCodeAnalysisPhrase,
+  isCodeAnalysisUtterance,
+} from "./codeAnalysisIntent.js";
 
 export type NluPreprocessResult = {
   raw: string;
@@ -45,6 +49,9 @@ export function preprocessForNlu(command?: string | null): NluPreprocessResult {
   const hinglish = normalizeHinglish(afterTamil);
   const slotted = normalizeHinglishSlots(hinglish);
   let nlu = normalizeForNlu(slotted);
+  if (isCodeAnalysisUtterance(nlu)) {
+    nlu = canonicalizeCodeAnalysisPhrase(nlu);
+  }
   nlu = nlu
     .replace(/^\s*open\s+open\s+/i, "open ")
     // "lastpdf I opened" → recall; keep "lastpdf.io" as a filename/domain token

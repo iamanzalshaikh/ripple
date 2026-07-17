@@ -6,6 +6,10 @@ import {
 import type { CommandResultPayload } from "../types.js";
 import { isEditorClearTextPhrase } from "../../agent/parseDesktopInput.js";
 
+/** Utterance requests destructive filesystem / drive operations. */
+const MUTATING_VERBS =
+  /\b(?:delete|remove|format|wipe|erase|unlink|rmdir|destroy|overwrite|patch|write|move|rename|chmod)\b/i;
+
 export type PermissionResult = {
   level: PermissionLevel;
   reason?: string;
@@ -28,6 +32,22 @@ const SYSTEM_PATH =
 const DESTRUCTIVE_SHELL =
   /\b(?:rm\s+-rf|rmdir\s+\/s|del\s+\/s|remove-item\s+-recurse)\b/i;
 const BROADCAST_RECIPIENT = /^(?:everyone|all(?:\s+contacts?)?|sab(?:ko)?|har\s+kisi)$/i;
+
+export function utteranceLooksDestructive(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  if (isEditorClearTextPhrase(trimmed)) return false;
+  if (
+    BULK_DELETE.test(trimmed) ||
+    BULK_DELETE_HINGLISH.test(trimmed) ||
+    WILDCARD_DELETE.test(trimmed)
+  ) {
+    return true;
+  }
+  if (FORMAT_DRIVE.test(trimmed) || DESTRUCTIVE_SHELL.test(trimmed)) return true;
+  if (KILL_ALL.test(trimmed)) return true;
+  return SYSTEM_PATH.test(trimmed) && MUTATING_VERBS.test(trimmed);
+}
 
 function desktopKindsInPayload(payload: CommandResultPayload): string[] {
   const steps = payload.actions?.[0]?.data?.steps;
@@ -99,7 +119,13 @@ export function permissionForCommand(
   ) {
     return { level: "blocked", reason: "Bulk delete is not allowed." };
   }
-  if (FORMAT_DRIVE.test(text) || SYSTEM_PATH.test(text)) {
+  if (FORMAT_DRIVE.test(text)) {
+    return {
+      level: "blocked",
+      reason: "System or drive paths cannot be modified.",
+    };
+  }
+  if (SYSTEM_PATH.test(text) && utteranceLooksDestructive(text)) {
     return {
       level: "blocked",
       reason: "System or drive paths cannot be modified.",

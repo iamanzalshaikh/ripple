@@ -1,7 +1,7 @@
 /** Shared parsing for delete/rename/move — item name vs folder location. */
 
 const LOC_SUFFIX =
-  /\s+(?:from|in)\s+(?:my\s+|the\s+)?(downloads?|documents?|desktop)\s*\.?\s*$/i;
+  /\s+(?:from|in|inside)\s+(?:my\s+|the\s+)?(downloads?|documents?|desktop)\s*\.?\s*$/i;
 
 export function parseParentKey(raw: string): string {
   const key = raw.trim().toLowerCase();

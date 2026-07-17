@@ -13,7 +13,13 @@ import { registerPhase1BrowserTools } from "./tools/browserTools.js";
 import {
   registerPhase2FilesystemTools,
 } from "./tools/filesystemTools.js";
+import { registerPhase5BrowserTools } from "./tools/browserGenericTools.js";
+import { registerPhase5AutomationTools } from "./tools/automationTools.js";
+import { registerPhase5AiTools } from "./tools/aiTools.js";
 import { registerPhase1MemoryTools } from "./tools/memoryTools.js";
+import { registerPhase6MemoryIntelligenceTools } from "./tools/memoryIntelligenceTools.js";
+import { registerPhase6ContextTools } from "./tools/contextTools.js";
+import { registerPhase56OsTools } from "./tools/osTools.js";
 import { registerPhase1SystemTools } from "./tools/systemTools.js";
 import { getCachedCapabilitySnapshot } from "./capabilitySnapshotCache.js";
 import { getCapabilitySnapshot } from "./capabilityService.js";
@@ -28,7 +34,13 @@ export function ensureP85ToolsRegistered(): void {
   registerPhase1DesktopTools();
   registerPhase1BrowserTools();
   registerPhase1MemoryTools();
+  registerPhase6MemoryIntelligenceTools();
+  registerPhase6ContextTools();
   registerPhase2FilesystemTools();
+  registerPhase5BrowserTools();
+  registerPhase5AutomationTools();
+  registerPhase5AiTools();
+  registerPhase56OsTools();
   registerPhase1SystemTools();
 }
 
@@ -123,15 +135,26 @@ export function toolExecutorSummaryToActionRunSummary(
     command_id: commandId,
     records: summary.records.map((r) => ({
       index: r.index,
-      type: "INSERT_TEXT",
+      type: r.tool.startsWith("filesystem.") ||
+        r.tool.startsWith("automation.") ||
+        r.tool.startsWith("memory.") ||
+        r.tool.startsWith("context.") ||
+        r.tool === "desktop.get_active_window" ||
+        r.tool === "desktop.get_current_workspace"
+        ? "WORKFLOW"
+        : r.tool.startsWith("browser.")
+          ? "OPEN_URL"
+          : "INSERT_TEXT",
       status: r.result.ok ? "executed" : "failed",
       error: r.result.error,
       detail:
         typeof r.result.output === "string"
           ? r.result.output
-          : r.result.ok
-            ? `${r.tool} OK`
-            : undefined,
+          : r.result.output != null
+            ? JSON.stringify(r.result.output, null, 2)
+            : r.result.ok
+              ? `${r.tool} OK`
+              : undefined,
     })),
     allSucceeded: summary.ok,
   };

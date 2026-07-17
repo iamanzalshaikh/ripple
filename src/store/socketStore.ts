@@ -9,6 +9,19 @@ export interface ActionRunRecord {
   detail?: string;
 }
 
+export interface CommandDebugEntry {
+  at: string;
+  command: string;
+  transcript?: string;
+  intent?: string;
+  tools?: string[];
+  tool?: string;
+  status: "SUCCESS" | "FAILED" | "CLARIFY" | "PARTIAL";
+  result?: string;
+  error?: string;
+  source?: string;
+}
+
 interface SocketState {
   status: string;
   connected: boolean;
@@ -17,6 +30,8 @@ interface SocketState {
   lastExecution: ActionRunRecord[] | null;
   lastGeneratedText: string | null;
   lastError: string | null;
+  lastDebug: CommandDebugEntry | null;
+  debugLog: CommandDebugEntry[];
   hydrate: () => Promise<void>;
   bindEvents: () => () => void;
 }
@@ -29,6 +44,8 @@ export const useSocketStore = create<SocketState>((set, get) => ({
   lastExecution: null,
   lastGeneratedText: null,
   lastError: null,
+  lastDebug: null,
+  debugLog: [],
 
   hydrate: async () => {
     try {
@@ -83,6 +100,31 @@ export const useSocketStore = create<SocketState>((set, get) => ({
             lastError: null,
           });
         }
+      }),
+      api.onIpcEvent("command:debug", (payload) => {
+        const p = payload as CommandDebugEntry;
+        if (!p?.command) return;
+        set((state) => {
+          const entry: CommandDebugEntry = {
+            at: p.at || new Date().toISOString(),
+            command: p.command,
+            transcript: p.transcript,
+            intent: p.intent,
+            tools: p.tools,
+            tool: p.tool,
+            status: p.status,
+            result: p.result,
+            error: p.error,
+            source: p.source,
+          };
+          return {
+            lastDebug: entry,
+            debugLog: [entry, ...state.debugLog].slice(0, 12),
+            lastCommandPreview: `${entry.status}: ${entry.tool ?? entry.intent ?? "—"}`,
+            lastGeneratedText: entry.result ?? null,
+            lastError: entry.error ?? null,
+          };
+        });
       }),
       api.onIpcEvent("actions:executed", (payload) => {
         const p = payload as {

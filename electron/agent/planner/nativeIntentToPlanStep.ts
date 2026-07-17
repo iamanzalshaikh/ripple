@@ -1,5 +1,6 @@
-import type { NativeCommandIntent } from "../../automation/desktop/parseNativeCommand.js";
 import type { PlanStep } from "./planTypes.js";
+import type { NativeCommandIntent } from "../../automation/desktop/parseNativeCommand.js";
+import { planStepsForCreateFileInApp } from "./planCreateFileInApp.js";
 import { openIntentToPlanSteps } from "./l0FileOpPlanner.js";
 import type { DesktopOpenIntent } from "../../automation/desktop/parseDesktopCommand.js";
 import { resolveTabTargetFromWorkspace } from "../../automation/browser/browserTabResolver.js";
@@ -110,9 +111,16 @@ export function nativeIntentToPlanStep(
         args: {
           filename: intent.filename,
           ...(intent.folder ? { folder: intent.folder } : {}),
+          ...(typeof intent.application === "string"
+            ? { app: intent.application }
+            : {}),
         },
         reason: "save_file",
       };
+    case "create_file_in_app": {
+      const steps = planStepsForCreateFileInApp(intent);
+      return steps[0] ?? null;
+    }
     default:
       return null;
   }
@@ -123,6 +131,10 @@ export function nativeIntentsToPlanSteps(
 ): PlanStep[] | null {
   const steps: PlanStep[] = [];
   for (const intent of intents) {
+    if (intent.kind === "create_file_in_app") {
+      steps.push(...planStepsForCreateFileInApp(intent));
+      continue;
+    }
     const step = nativeIntentToPlanStep(intent);
     if (!step) return null;
     steps.push(step);

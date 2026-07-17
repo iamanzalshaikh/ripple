@@ -143,6 +143,46 @@ describe("P8.5 Phase 2 — executor safety", () => {
     expect(summary.records[0]?.result.error).toBe("safety_cancelled");
   });
 
+  it("skips confirm popup for pre-authorized code_repair_patch steps", async () => {
+    const confirmSpy = vi.fn(async () => false);
+    setConfirmHandlerForTests(confirmSpy);
+    const execute = vi.fn(async () => ({ ok: true, output: "patched" }));
+    registerTool({
+      definition: stubDef({
+        name: "filesystem.patch_file",
+        risk: "high",
+        category: "filesystem",
+      }),
+      execute,
+    });
+
+    const summary = await executePlan(
+      {
+        goal: "Apply safe code repairs",
+        confidence: 1,
+        steps: [
+          {
+            tool: "filesystem.patch_file",
+            args: {
+              path: "C:\\tmp\\broken.ts",
+              find: "st",
+              replace: "string",
+            },
+            reason: "code_repair_patch_1",
+          },
+        ],
+        rawUtterance: "apply the safe fixes",
+        normalizedUtterance: "apply the safe fixes",
+        source: "L0",
+      },
+      { command: "apply the safe fixes", world: stubWorld() },
+    );
+
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(execute).toHaveBeenCalled();
+    expect(summary.ok).toBe(true);
+  });
+
   it("pushes undo before filesystem mutator execute", async () => {
     setConfirmHandlerForTests(async () => true);
     clearUndoStack();

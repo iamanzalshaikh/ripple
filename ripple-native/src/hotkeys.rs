@@ -1,5 +1,12 @@
 use crate::events::NativeEvent;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::broadcast;
+
+static GLOBAL_HOTKEYS_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+pub fn global_hotkeys_active() -> bool {
+    GLOBAL_HOTKEYS_ACTIVE.load(Ordering::Relaxed)
+}
 
 pub fn start(event_tx: broadcast::Sender<NativeEvent>) {
     std::thread::Builder::new()
@@ -29,7 +36,8 @@ fn run_message_loop(event_tx: broadcast::Sender<NativeEvent>) -> Result<(), Stri
     };
 
     const HOTKEY_VOICE: i32 = 1;
-    const HOTKEY_VOICE_ALT: i32 = 2;
+    const HOTKEY_DICTATION: i32 = 2;
+    const HOTKEY_DICTATION_ALT: i32 = 4;
     const HOTKEY_CANCEL: i32 = 3;
 
     fn wide(s: &str) -> Vec<u16> {
@@ -90,29 +98,56 @@ fn run_message_loop(event_tx: broadcast::Sender<NativeEvent>) -> Result<(), Stri
         const VK_SPACE: u32 = 0x20;
         const VK_ESCAPE: u32 = 0x1B;
 
-        RegisterHotKey(
-            hwnd,
-            HOTKEY_VOICE,
-            HOT_KEY_MODIFIERS(MOD_CONTROL | MOD_NOREPEAT),
-            VK_SPACE,
-        )
-        .map_err(|e| e.to_string())?;
-        RegisterHotKey(
-            hwnd,
-            HOTKEY_VOICE_ALT,
-            HOT_KEY_MODIFIERS(MOD_ALT | MOD_SHIFT | MOD_NOREPEAT),
-            VK_SPACE,
-        )
-        .map_err(|e| e.to_string())?;
-        RegisterHotKey(
-            hwnd,
-            HOTKEY_CANCEL,
-            HOT_KEY_MODIFIERS(MOD_NOREPEAT),
-            VK_ESCAPE,
-        )
-        .map_err(|e| e.to_string())?;
+        let hotkeys = [
+            (
+                HOTKEY_VOICE,
+                HOT_KEY_MODIFIERS(MOD_CONTROL | MOD_NOREPEAT),
+                VK_SPACE,
+                "Ctrl+Space=command",
+            ),
+            (
+                HOTKEY_DICTATION,
+                HOT_KEY_MODIFIERS(MOD_ALT | MOD_NOREPEAT),
+                VK_SPACE,
+                "Alt+Space=dictation",
+            ),
+            (
+                HOTKEY_DICTATION_ALT,
+                HOT_KEY_MODIFIERS(MOD_ALT | MOD_SHIFT | MOD_NOREPEAT),
+                VK_SPACE,
+                "Alt+Shift+Space=dictation",
+            ),
+            (
+                HOTKEY_CANCEL,
+                HOT_KEY_MODIFIERS(MOD_NOREPEAT),
+                VK_ESCAPE,
+                "Esc=cancel",
+            ),
+        ];
 
-        tracing::info!("win32 pump: RegisterHotKey ready (Ctrl+Space, Alt+Shift+Space, Escape)");
+        let mut registered_hotkeys: Vec<i32> = Vec::new();
+        for (id, modifiers, vk, label) in hotkeys.iter().copied() {
+            match RegisterHotKey(hwnd, id, modifiers, vk) {
+                Ok(()) => registered_hotkeys.push(id),
+                Err(e) => {
+                    tracing::warn!(
+                        "win32 pump: RegisterHotKey unavailable for {label}: {e}; Electron fallback may handle hotkeys"
+                    );
+                    for registered_id in registered_hotkeys.drain(..) {
+                        let _ = UnregisterHotKey(hwnd, registered_id);
+                    }
+                    GLOBAL_HOTKEYS_ACTIVE.store(false, Ordering::Relaxed);
+                    break;
+                }
+            }
+        }
+
+        if registered_hotkeys.len() == hotkeys.len() {
+            GLOBAL_HOTKEYS_ACTIVE.store(true, Ordering::Relaxed);
+            tracing::info!(
+                "win32 pump: RegisterHotKey ready (Ctrl+Space=command, Alt+Space=dictation, Esc=cancel)"
+            );
+        }
 
         let mut msg = MSG::default();
         loop {
@@ -123,7 +158,8 @@ fn run_message_loop(event_tx: broadcast::Sender<NativeEvent>) -> Result<(), Stri
 
             if msg.message == WM_HOTKEY {
                 let name = match msg.wParam.0 as i32 {
-                    HOTKEY_VOICE | HOTKEY_VOICE_ALT => "voice",
+                    HOTKEY_VOICE => "command",
+                    HOTKEY_DICTATION | HOTKEY_DICTATION_ALT => "dictation",
                     HOTKEY_CANCEL => "cancel_voice",
                     _ => continue,
                 };
@@ -139,9 +175,10 @@ fn run_message_loop(event_tx: broadcast::Sender<NativeEvent>) -> Result<(), Stri
         if let Some(fg_hook) = fg_hook {
             crate::foreground::uninstall_foreground_hook(fg_hook);
         }
-        let _ = UnregisterHotKey(hwnd, HOTKEY_VOICE);
-        let _ = UnregisterHotKey(hwnd, HOTKEY_VOICE_ALT);
-        let _ = UnregisterHotKey(hwnd, HOTKEY_CANCEL);
+        GLOBAL_HOTKEYS_ACTIVE.store(false, Ordering::Relaxed);
+        for registered_id in registered_hotkeys {
+            let _ = UnregisterHotKey(hwnd, registered_id);
+        }
     }
 
     tracing::info!("win32 pump thread exiting");

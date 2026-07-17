@@ -124,7 +124,7 @@ const PRONOUN_MAP: [RegExp, string][] = [
   [/\bwoh\b/gi, "that"],
   [/\bwo\b/gi, "that"],
   [/\busko\b/gi, "it"],
-  [/\buse\b/gi, "it"],
+  // Do not map English "use" (e.g. "I use Cursor") — Hindi "use" ≈ "it" is covered by usko.
   [/\bissey\b/gi, "it"],
   [/\bis\s*ko\b/gi, "it"],
   [/\bdubara\b/gi, "again"],

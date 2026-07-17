@@ -12,6 +12,14 @@ import {
 } from "../tools/toolRegistry.js";
 import { recordCommandEvent } from "../../telemetry/commandTelemetry.js";
 
+const AUTOMATION_CONFIRM_KINDS = new Set([
+  "run_command",
+  "run_script",
+  "git_operation",
+  "run_tests",
+  "run_as_admin",
+]);
+
 export type { SafetySlots, SimulateResult };
 
 type ConfirmHandler = (
@@ -40,6 +48,22 @@ export function titleForSafetyKind(kind: string): string {
       return "confirm rename";
     case "create_file":
       return "confirm overwrite";
+    case "write_file":
+      return "confirm write";
+    case "patch_file":
+      return "confirm patch";
+    case "run_command":
+      return "confirm run command";
+    case "run_script":
+      return "confirm run script";
+    case "git_operation":
+      return "confirm git operation";
+    case "run_tests":
+      return "confirm run tests";
+    case "copy_file":
+      return "confirm copy";
+    case "run_as_admin":
+      return "confirm run as admin";
     default:
       return "confirm action";
   }
@@ -78,7 +102,7 @@ export async function confirmIfNeeded(
   data?: Record<string, unknown>,
 ): Promise<void> {
   if (data?._safetyConfirmed === true) return;
-  if (!isDestructiveKind(kind) && kind !== "create_file") return;
+  if (!isDestructiveKind(kind) && !AUTOMATION_CONFIRM_KINDS.has(kind) && kind !== "create_file") return;
 
   const required = await needsSafetyConfirm(kind, slots);
   if (!required) return;

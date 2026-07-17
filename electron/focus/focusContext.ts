@@ -515,6 +515,19 @@ export function getFocusContext(): FocusContext | null {
   return saved;
 }
 
+/** Window titles from voice target + recent non-Ripple focus (stable across overlay steal). */
+export function getStableFocusTitles(): string[] {
+  const titles: string[] = [];
+  const seen = new Set<string>();
+  for (const ctx of [voiceCommandTarget, lastNonRippleFocus, saved]) {
+    const title = ctx?.windowTitle?.trim();
+    if (!title || seen.has(title)) continue;
+    seen.add(title);
+    titles.push(title);
+  }
+  return titles;
+}
+
 export function setFocusContext(ctx: FocusContext): void {
   saved = ctx;
 }
@@ -644,6 +657,15 @@ export async function captureFocusFromForeground(
       return null;
     }
     const enriched = await enrichContextFromExtension(ctx);
+    const signature = `${enriched.hwnd}:${enriched.processName}:${enriched.windowTitle}`;
+    const now = Date.now();
+    if (
+      saved &&
+      signature !== lastFocusSignature &&
+      now - lastFocusCaptureAt < FOCUS_CAPTURE_DEBOUNCE_MS
+    ) {
+      return saved;
+    }
     if (isCommandFocusGraceActive() && !isSaveDialogModalLocked()) {
       if (voiceCommandTarget && !isWeakFocusContext(voiceCommandTarget)) {
         return voiceCommandTarget;
@@ -654,6 +676,8 @@ export async function captureFocusFromForeground(
       }
     }
     saved = enriched;
+    lastFocusCaptureAt = now;
+    lastFocusSignature = signature;
     rememberNonRippleFocus(enriched);
     rememberWebSurface(enriched);
     rememberPdfFromFocus(enriched);
@@ -736,6 +760,9 @@ const P8_FOCUS_SIDECAR_FALLBACK_MS = 10_000;
 const P8_BURST_DURATION_MS = 12_000;
 let p8FocusTimer: ReturnType<typeof setTimeout> | null = null;
 let p8BurstUntil = 0;
+const FOCUS_CAPTURE_DEBOUNCE_MS = 700;
+let lastFocusCaptureAt = 0;
+let lastFocusSignature = "";
 
 function isExplorerOrShellProcess(processName: string): boolean {
   const p = processName.toLowerCase();

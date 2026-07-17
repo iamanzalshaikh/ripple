@@ -16,6 +16,8 @@ export async function observeToolStep(
   switch (tool) {
     case "desktop.type_text":
     case "desktop.press_keys":
+    case "desktop.press_key":
+    case "desktop.hotkey":
     case "desktop.copy":
     case "desktop.paste":
     case "desktop.select_all":
@@ -57,6 +59,10 @@ export async function observeToolStep(
       return { ok: true };
 
     case "desktop.close_window":
+    case "desktop.close_app":
+      return { ok: true };
+
+    case "desktop.get_active_window":
       return { ok: true };
 
     default: {

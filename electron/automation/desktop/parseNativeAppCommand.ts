@@ -46,7 +46,7 @@ export function parseNativeAppCommand(
   }
 
   const switchMatch = cmd.match(
-    /^\s*(?:switch\s+to|focus|go\s+to)\s+(?:the\s+)?(?:app\s+)?(.+?)\s*\.?\s*$/i,
+    /^\s*(?:switch\s+(?:focus\s+)?to|focus(?:\s+on)?|go\s+to)\s+(?:the\s+)?(?:app\s+)?(.+?)\s*\.?\s*$/i,
   );
   if (switchMatch?.[1]) {
     const app = resolveAppName(switchMatch[1]);

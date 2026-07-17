@@ -22,15 +22,85 @@ struct CapturedBgra {
     pixels: Vec<u8>,
 }
 
+/// GPU-composited windows (Chrome, Electron/Cursor) return blank images from
+/// plain BitBlt. Detect a near-uniform capture so callers can fall back.
+#[cfg(windows)]
+fn is_mostly_blank(px: &[u8]) -> bool {
+    if px.len() < 4 {
+        return true;
+    }
+    let pixel_count = px.len() / 4;
+    let step = (pixel_count / 4096).max(1) * 4;
+    let (mut min_b, mut min_g, mut min_r) = (255u8, 255u8, 255u8);
+    let (mut max_b, mut max_g, mut max_r) = (0u8, 0u8, 0u8);
+    let mut i = 0usize;
+    while i + 3 < px.len() {
+        let (b, g, r) = (px[i], px[i + 1], px[i + 2]);
+        min_b = min_b.min(b);
+        min_g = min_g.min(g);
+        min_r = min_r.min(r);
+        max_b = max_b.max(b);
+        max_g = max_g.max(g);
+        max_r = max_r.max(r);
+        i += step;
+    }
+    (max_b - min_b) < 8 && (max_g - min_g) < 8 && (max_r - min_r) < 8
+}
+
+#[cfg(windows)]
+unsafe fn read_bitmap_pixels(
+    mem_dc: windows::Win32::Graphics::Gdi::HDC,
+    bitmap: windows::Win32::Graphics::Gdi::HBITMAP,
+    width: u32,
+    height: u32,
+) -> Result<Vec<u8>, String> {
+    use windows::Win32::Graphics::Gdi::{
+        GetDIBits, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS,
+    };
+
+    let mut info = BITMAPINFO {
+        bmiHeader: BITMAPINFOHEADER {
+            biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+            biWidth: width as i32,
+            biHeight: -(height as i32),
+            biPlanes: 1,
+            biBitCount: 32,
+            biCompression: BI_RGB.0,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let stride = (width * 4) as usize;
+    let mut pixels = vec![0u8; stride * height as usize];
+    let lines = GetDIBits(
+        mem_dc,
+        bitmap,
+        0,
+        height,
+        Some(pixels.as_mut_ptr() as *mut _),
+        &mut info,
+        DIB_RGB_COLORS,
+    );
+    if lines == 0 {
+        return Err("get_dibits_failed".into());
+    }
+    Ok(pixels)
+}
+
 #[cfg(windows)]
 fn capture_hwnd(hwnd: windows::Win32::Foundation::HWND) -> Result<CapturedBgra, String> {
     use windows::Win32::Foundation::RECT;
     use windows::Win32::Graphics::Gdi::{
         BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject, GetDC,
-        GetDIBits, ReleaseDC, SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS,
-        SRCCOPY,
+        ReleaseDC, SelectObject, SRCCOPY,
     };
+    use windows::Win32::Storage::Xps::{PrintWindow, PRINT_WINDOW_FLAGS};
     use windows::Win32::UI::WindowsAndMessaging::GetClientRect;
+
+    // PW_CLIENTONLY (0x1) | PW_RENDERFULLCONTENT (0x2) — required for
+    // GPU-composited windows (Chrome, Electron/Cursor) that BitBlt captures as blank.
+    const PW_CLIENT_FULL: PRINT_WINDOW_FLAGS = PRINT_WINDOW_FLAGS(0x1 | 0x2);
 
     unsafe {
         if hwnd.0.is_null() {
@@ -70,45 +140,90 @@ fn capture_hwnd(hwnd: windows::Win32::Foundation::HWND) -> Result<CapturedBgra, 
         }
 
         let old = SelectObject(mem_dc, bitmap);
-        let _ = BitBlt(mem_dc, 0, 0, width as i32, height as i32, window_dc, 0, 0, SRCCOPY);
 
-        let mut info = BITMAPINFO {
-            bmiHeader: BITMAPINFOHEADER {
-                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
-                biWidth: width as i32,
-                biHeight: -(height as i32),
-                biPlanes: 1,
-                biBitCount: 32,
-                biCompression: BI_RGB.0,
-                ..Default::default()
-            },
-            ..Default::default()
+        let print_ok = PrintWindow(hwnd, mem_dc, PW_CLIENT_FULL).as_bool();
+        let mut pixels = if print_ok {
+            read_bitmap_pixels(mem_dc, bitmap, width, height).ok()
+        } else {
+            None
         };
 
-        let stride = (width * 4) as usize;
-        let mut pixels = vec![0u8; stride * height as usize];
-        let lines = GetDIBits(
-            mem_dc,
-            bitmap,
-            0,
-            height,
-            Some(pixels.as_mut_ptr() as *mut _),
-            &mut info,
-            DIB_RGB_COLORS,
-        );
+        let blank = pixels.as_deref().map(is_mostly_blank).unwrap_or(true);
+
+        if blank {
+            let _ = BitBlt(mem_dc, 0, 0, width as i32, height as i32, window_dc, 0, 0, SRCCOPY);
+            pixels = read_bitmap_pixels(mem_dc, bitmap, width, height).ok();
+        }
+
         let _ = SelectObject(mem_dc, old);
         let _ = DeleteObject(bitmap);
         let _ = DeleteDC(mem_dc);
         let _ = ReleaseDC(hwnd, window_dc);
 
-        if lines == 0 {
-            return Err("get_dibits_failed".into());
+        match pixels {
+            Some(pixels) => Ok(CapturedBgra {
+                width,
+                height,
+                pixels,
+            }),
+            None => Err("capture_read_failed".into()),
         }
+    }
+}
+
+/// Full primary-screen capture — fallback when window capture is blank
+/// (GPU windows) or unreadable. Screen DC always contains composited pixels.
+#[cfg(windows)]
+fn capture_screen() -> Result<CapturedBgra, String> {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::Graphics::Gdi::{
+        BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject, GetDC,
+        ReleaseDC, SelectObject, SRCCOPY,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN};
+
+    unsafe {
+        let width = GetSystemMetrics(SM_CXSCREEN).max(0) as u32;
+        let height = GetSystemMetrics(SM_CYSCREEN).max(0) as u32;
+        if width == 0 || height == 0 {
+            return Err("screen_metrics_failed".into());
+        }
+        if width > 8192 || height > 8192 {
+            return Err("screen_too_large".into());
+        }
+
+        let desktop = HWND(std::ptr::null_mut());
+        let screen_dc = GetDC(desktop);
+        if screen_dc.is_invalid() {
+            return Err("get_screen_dc_failed".into());
+        }
+
+        let mem_dc = CreateCompatibleDC(screen_dc);
+        if mem_dc.is_invalid() {
+            let _ = ReleaseDC(desktop, screen_dc);
+            return Err("create_compatible_dc_failed".into());
+        }
+
+        let bitmap = CreateCompatibleBitmap(screen_dc, width as i32, height as i32);
+        if bitmap.is_invalid() {
+            let _ = DeleteDC(mem_dc);
+            let _ = ReleaseDC(desktop, screen_dc);
+            return Err("create_compatible_bitmap_failed".into());
+        }
+
+        let old = SelectObject(mem_dc, bitmap);
+        let _ = BitBlt(mem_dc, 0, 0, width as i32, height as i32, screen_dc, 0, 0, SRCCOPY);
+        let pixels = read_bitmap_pixels(mem_dc, bitmap, width, height);
+
+        let _ = SelectObject(mem_dc, old);
+        let _ = DeleteObject(bitmap);
+        let _ = DeleteDC(mem_dc);
+        let _ = ReleaseDC(desktop, screen_dc);
 
         Ok(CapturedBgra {
             width,
             height,
-            pixels,
+            pixels: pixels?,
         })
     }
 }
@@ -173,12 +288,32 @@ pub fn screenshot_ocr(params: &ScreenshotOcrParams) -> Result<ScreenshotOcrResul
         unsafe { GetForegroundWindow() }
     };
 
-    if hwnd.0.is_null() {
-        return Err("no_target_window".into());
+    // Window capture first; fall back to full-screen capture when the window
+    // capture fails, comes back blank, or yields no OCR text (GPU windows,
+    // wrong hwnd, occluded overlay windows).
+    let window_capture = if hwnd.0.is_null() {
+        Err("no_target_window".to_string())
+    } else {
+        capture_hwnd(hwnd)
+    };
+
+    let (mut capture, used_screen) = match window_capture {
+        Ok(c) if !is_mostly_blank(&c.pixels) => (c, false),
+        _ => (capture_screen()?, true),
+    };
+
+    let mut text = recognize_bgra(&capture)?;
+    if text.trim().is_empty() && !used_screen {
+        if let Ok(screen) = capture_screen() {
+            if let Ok(screen_text) = recognize_bgra(&screen) {
+                if !screen_text.trim().is_empty() {
+                    capture = screen;
+                    text = screen_text;
+                }
+            }
+        }
     }
 
-    let capture = capture_hwnd(hwnd)?;
-    let text = recognize_bgra(&capture)?;
     let line_count = if text.is_empty() {
         0
     } else {

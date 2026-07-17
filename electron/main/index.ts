@@ -60,6 +60,10 @@ import { createMainWindow, showMainWindow } from "../windows/mainWindow.js";
 import { createOverlayWindow } from "../windows/overlay.js";
 import { registerDisambiguationPickIpc } from "../windows/disambiguationPick.js";
 import {
+  registerCodeRepairPanelIpc,
+  setCodeRepairApplyHandler,
+} from "../windows/codeRepairPanel.js";
+import {
   startWhatsAppExtensionBridge,
   stopWhatsAppExtensionBridge,
 } from "../bridge/whatsappExtensionBridge.js";
@@ -75,6 +79,9 @@ import { pruneActivityLogOlderThan } from "../storage/activityLog.js";
 import { ingestCrossAppReference } from "../storage/crossAppIngest.js";
 import { probeP8bSearch, seedP8bTestData, P8B_VOICE_COMMANDS } from "../storage/p8bTestSeed.js";
 import { startOsTestBridge } from "../osTestBridge.js";
+import { buildWorldModel } from "../agent/worldModel.js";
+import { runPlannerPipelineAsync } from "../agent/planner/plannerPipeline.js";
+import { setConfirmHandlerForTests } from "../automation/safety/executionGuard.js";
 import { buildObservabilitySummary, buildCiGateSummary, exportTelemetryCsv } from "../telemetry/observabilityDashboard.js";
 import { buildPlannerDashboardSummary } from "../agent/planner/planMetricsDashboard.js";
 import {
@@ -234,6 +241,14 @@ async function completeAuth(data: AuthPayload): Promise<{
 
 function registerIpc(): void {
   registerDisambiguationPickIpc();
+  registerCodeRepairPanelIpc();
+  setCodeRepairApplyHandler(async () => {
+    await runDesktopCommand({
+      command: "yes, apply fixes",
+      sessionId,
+      getAccessToken: ensureValidAccessToken,
+    });
+  });
 
   ipcMain.handle("api:health", async () => {
     const result = await apiHealthCheck();
@@ -459,6 +474,19 @@ function registerIpc(): void {
       };
     },
   );
+
+  ipcMain.handle("dictation:execute", async (_e, args) => {
+    const { executeDictationUtterance } = await import(
+      "../agent/dictation/executeDictation.js"
+    );
+    const text = typeof args?.text === "string" ? args.text : "";
+    console.info(
+      `[ripple-desktop] dictation:execute (${text.length} chars)`,
+    );
+    return executeDictationUtterance(text, {
+      insert: args?.insert !== false,
+    });
+  });
 
   ipcMain.handle("command:execute", async (_e, args) => {
     clearPreprocessCache();
@@ -768,36 +796,98 @@ app.whenReady().then(async () => {
   console.info(`[ripple-desktop] API base: ${API_BASE}`);
   console.info(`[ripple-desktop] Socket URL: ${getSocketUrl()}`);
   registerIpc();
+  if (process.env.RIPPLE_OS_TEST === "1") {
+    setConfirmHandlerForTests(async () => true);
+  }
   startOsTestBridge(async (command) => {
     if (command === "__ripple_os_bridge_ping__") {
       return { ok: true, message: "pong", actionsOk: 0, actionsTotal: 0 };
     }
-    const result = await runDesktopCommand({
+    const world = await buildWorldModel();
+    const pipeline = await runPlannerPipelineAsync({
       command,
+      world,
       getAccessToken: ensureValidAccessToken,
     });
-    const exec = result.data?.execution as
-      | { records?: Array<{ status: string }> }
-      | undefined;
-    const records = exec?.records ?? [];
-    const actionsOk = records.filter((r) => r.status === "executed").length;
-    const dragFromDetail = records.filter(
-      (r) =>
-        r.status === "executed" &&
-        typeof r.detail === "string" &&
-        /Drew\s+\w+\s+in\s+Paint/i.test(r.detail),
-    ).length;
-    const dragSteps =
-      dragFromDetail > 0
-        ? dragFromDetail
-        : Math.max(0, Math.floor((actionsOk - 1) / 2));
-    return {
-      ok: result.ok,
-      message: result.message,
-      actionsOk,
-      actionsTotal: records.length,
-      dragSteps,
+    const toolsList =
+      pipeline.kind === "execute" || pipeline.kind === "partial"
+        ? pipeline.plan.steps.map((s) => s.tool)
+        : [];
+    const baseMeta = {
+      tools: toolsList.join("→"),
+      toolsList,
+      plannerKind: pipeline.kind,
+      blocked:
+        pipeline.kind === "defer" &&
+        /validation_failed|permission/i.test(
+          pipeline.kind === "defer" ? pipeline.reason : "",
+        ),
     };
+
+    if (process.env.RIPPLE_OS_TEST_PLAN_ONLY === "1") {
+      const planSteps =
+        pipeline.kind === "execute" || pipeline.kind === "partial"
+          ? pipeline.plan.steps.length
+          : 0;
+      return {
+        ok: pipeline.kind === "execute" || pipeline.kind === "partial",
+        message:
+          pipeline.kind === "defer"
+            ? pipeline.reason
+            : pipeline.kind === "clarify"
+              ? pipeline.question
+              : "plan-only",
+        actionsOk: 0,
+        actionsTotal: planSteps,
+        ...baseMeta,
+      };
+    }
+
+    try {
+      const result = await runDesktopCommand({
+        command,
+        getAccessToken: ensureValidAccessToken,
+      });
+      const exec = result.data?.execution as
+        | { records?: Array<{ status: string; detail?: string }> }
+        | undefined;
+      const records = exec?.records ?? [];
+      const actionsOk = records.filter((r) => r.status === "executed").length;
+      const dragFromDetail = records.filter(
+        (r) =>
+          r.status === "executed" &&
+          typeof r.detail === "string" &&
+          /Drew\s+\w+\s+in\s+Paint/i.test(r.detail),
+      ).length;
+      const dragSteps =
+        dragFromDetail > 0
+          ? dragFromDetail
+          : Math.max(0, Math.floor((actionsOk - 1) / 2));
+      const msg = result.message ?? "";
+      const blocked =
+        baseMeta.blocked ||
+        /blocked|not allowed|permission_blocked|bulk delete/i.test(msg);
+      return {
+        ok: result.ok,
+        message: result.message,
+        actionsOk,
+        actionsTotal: records.length,
+        dragSteps,
+        intent: result.data?.intent,
+        blocked,
+        ...baseMeta,
+      };
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return {
+        ok: false,
+        message: msg,
+        actionsOk: 0,
+        actionsTotal: 0,
+        blocked: /blocked|not allowed|permission/i.test(msg),
+        ...baseMeta,
+      };
+    }
   });
   createOverlayWindow();
 

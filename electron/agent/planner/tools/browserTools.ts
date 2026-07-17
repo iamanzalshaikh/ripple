@@ -2,6 +2,8 @@ import { runWhatsAppBatch } from "../../../automation/adapters/whatsapp/runWhats
 import { runWhatsAppMessageFlow } from "../../../automation/adapters/whatsapp/whatsappAdapter.js";
 import { runYouTubeBatch } from "../../../automation/adapters/youtube/runYouTubeAction.js";
 import { runLinkedInBatch } from "../../../automation/adapters/linkedin/runLinkedInAction.js";
+import { runInstagramBatch } from "../../../automation/adapters/instagram/runInstagramAction.js";
+import { runNotionBatch } from "../../../automation/adapters/notion/runNotionAction.js";
 import { executeReferentialSend } from "../../../automation/adapters/whatsapp/executeReferentialSend.js";
 import { openGmailCompose } from "../../../automation/gmailComposeUrl.js";
 import { sanitizeEmailAddress } from "../../../automation/emailParse.js";
@@ -312,6 +314,110 @@ const BROWSER_TOOLS: RegisteredTool[] = [
         return {
           ok: false,
           error: e instanceof Error ? e.message : "linkedin_run_failed",
+        };
+      }
+    },
+  },
+  {
+    definition: def({
+      name: "browser.instagram.run",
+      description: "Open, message, or compose on Instagram via extension adapter",
+      category: "communication",
+      priority: 90,
+      cost: 6,
+      permissions: ["messaging"],
+      execution: { timeoutMs: 60_000 },
+      argsSchema: {
+        kind: {
+          type: "string",
+          enum: ["message", "compose"],
+          required: true,
+        },
+        username: { type: "string" },
+        text: { type: "string" },
+        send: { type: "boolean" },
+        pasteOnly: { type: "boolean" },
+        rawCommand: { type: "string" },
+      },
+      examples: [
+        "message anzal saying hi on instagram",
+        "send hello to anzal on instagram",
+      ],
+    }),
+    execute: async (_ctx, args): Promise<ToolResult> => {
+      const kind =
+        typeof args.kind === "string" ? args.kind : ("message" as const);
+      const username =
+        typeof args.username === "string" ? args.username.trim() : "";
+      const text = typeof args.text === "string" ? args.text : "";
+      const send = args.send === true;
+      const pasteOnly = args.pasteOnly === true;
+      const rawCommand =
+        typeof args.rawCommand === "string" ? args.rawCommand : "";
+      try {
+        const detail = await runInstagramBatch({
+          instagramKind: kind,
+          username,
+          text,
+          send,
+          pasteOnly,
+          command: rawCommand,
+        });
+        return { ok: true, output: detail };
+      } catch (e: unknown) {
+        return {
+          ok: false,
+          error: e instanceof Error ? e.message : "instagram_run_failed",
+        };
+      }
+    },
+  },
+  {
+    definition: def({
+      name: "browser.notion.run",
+      description: "Create Notion page or paste clipboard via notion.new adapter",
+      category: "communication",
+      priority: 89,
+      cost: 6,
+      permissions: ["messaging"],
+      execution: { timeoutMs: 90_000 },
+      argsSchema: {
+        kind: {
+          type: "string",
+          enum: ["create_page"],
+          required: true,
+        },
+        pasteClipboard: { type: "boolean" },
+        title: { type: "string" },
+        body: { type: "string" },
+        workspace: { type: "string" },
+        rawCommand: { type: "string" },
+      },
+      examples: [
+        "create a new notion page and paste my clipboard",
+        "open notion workspace study and create page titled notes",
+      ],
+    }),
+    execute: async (_ctx, args): Promise<ToolResult> => {
+      const kind =
+        typeof args.kind === "string" ? args.kind : ("create_page" as const);
+      const rawCommand =
+        typeof args.rawCommand === "string" ? args.rawCommand : "";
+      try {
+        const detail = await runNotionBatch({
+          notionKind: kind,
+          pasteClipboard: args.pasteClipboard === true,
+          title: typeof args.title === "string" ? args.title : undefined,
+          body: typeof args.body === "string" ? args.body : undefined,
+          workspace:
+            typeof args.workspace === "string" ? args.workspace : undefined,
+          command: rawCommand,
+        });
+        return { ok: true, output: detail };
+      } catch (e: unknown) {
+        return {
+          ok: false,
+          error: e instanceof Error ? e.message : "notion_run_failed",
         };
       }
     },

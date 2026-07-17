@@ -12,6 +12,10 @@ export type ClarificationPending = {
   round: number;
   plan?: ExecutionPlan;
   worldHint: Pick<WorldModel, "browser" | "clipboard">;
+  /** P6 project identity — preferred path when user says yes. */
+  confirmPath?: string;
+  /** P6 project identity — numbered candidates for ambiguous picks. */
+  candidatePaths?: string[];
 };
 
 let pending: ClarificationPending | null = null;
@@ -31,6 +35,8 @@ export function beginClarificationRound(input: {
   reason: string;
   plan?: ExecutionPlan;
   world: WorldModel;
+  confirmPath?: string;
+  candidatePaths?: string[];
 }): void {
   const prevRound = pending?.originalCommand === input.originalCommand
     ? pending.round
@@ -47,6 +53,8 @@ export function beginClarificationRound(input: {
       browser: input.world.browser,
       clipboard: input.world.clipboard,
     },
+    confirmPath: input.confirmPath,
+    candidatePaths: input.candidatePaths,
   };
 }
 
@@ -70,6 +78,31 @@ export function resolveClarificationFollowUp(
   if (isClarificationRetry(answer, pending)) {
     console.info(
       `[ripple-p85] clarify retry reason=${pending.reason} (same/similar command, no merge)`,
+    );
+    clearClarificationContext();
+    return null;
+  }
+
+  // P6 project identity: only "yes" / "1" / a path may merge. Any other utterance
+  // is a distinct command (e.g. "Open my main project") and must NOT be merged into
+  // the memory write — supersede instead (memory/action separation).
+  if (
+    pending.reason === "project_identity_confirm" ||
+    pending.reason === "project_identity_ambiguous" ||
+    pending.reason === "project_identity_not_found"
+  ) {
+    const merged = mergeProjectIdentityAnswer(pending, answer);
+    if (merged) {
+      const round = pending.round;
+      const reason = pending.reason;
+      pending = null;
+      console.info(
+        `[ripple-p85] clarify merge round=${round} reason=${reason} → "${merged.slice(0, 80)}"`,
+      );
+      return { mergedCommand: merged, round, reason };
+    }
+    console.info(
+      `[ripple-p85] clarify supersede reason=${pending.reason} (new command, not an identity answer)`,
     );
     clearClarificationContext();
     return null;
@@ -107,6 +140,43 @@ function mergeClarificationAnswer(p: ClarificationPending, answer: string): stri
     return `${p.originalCommand} — specifically: ${answer}`.trim();
   }
   return `${p.normalizedUtterance} ${answer}`.trim();
+}
+
+function mergeProjectIdentityAnswer(
+  p: ClarificationPending,
+  answer: string,
+): string | null {
+  const a = answer.trim();
+  const yes =
+    /^(?:yes|yep|yeah|y|ok|okay|sure|confirm|save(?:\s+it)?|that's(?:\s+it)?|correct)\b/i.test(
+      a,
+    );
+  if (yes && p.confirmPath) {
+    return `Remember ${p.confirmPath} as my main project`;
+  }
+
+  const num = a.match(/^(?:option\s+)?(\d+)$/i);
+  if (num && p.candidatePaths?.length) {
+    const idx = Number(num[1]) - 1;
+    const path = p.candidatePaths[idx];
+    if (path) return `Remember ${path} as my main project`;
+  }
+
+  if (/^[A-Za-z]:[\\/]/.test(a) || a.includes("\\")) {
+    return `Remember ${a} as my main project`;
+  }
+
+  // Folder name pick from ambiguous list
+  if (p.candidatePaths?.length) {
+    const lower = a.toLowerCase();
+    const hit = p.candidatePaths.find((c) =>
+      c.toLowerCase().includes(lower) ||
+      c.split(/[\\/]/).pop()?.toLowerCase() === lower,
+    );
+    if (hit) return `Remember ${hit} as my main project`;
+  }
+
+  return null;
 }
 
 /** Compare commands for clarify retry — ignore case, trailing period, extra whitespace. */
@@ -196,6 +266,13 @@ export function isSameOrSimilarCommand(a: string, b: string): boolean {
 
 const NEW_COMMAND_SIMILARITY_CEILING = 0.82;
 
+/** P5.4 — confirming deferred code repair must not merge into the audit utterance. */
+function isCodeRepairConfirmAnswer(command: string): boolean {
+  return /^(?:yes|yep|yeah|ok|okay|sure|confirm|proceed|go ahead|do it|apply(?: the)?(?: safe)? fixes?|apply(?: the)? patches?|fix (?:it|them|the (?:issues?|problems?|errors?|bugs?))|yes[,.]?\s*(?:please\s+)?(?:fix|apply|patch|run))\b/i.test(
+    command.trim(),
+  );
+}
+
 /**
  * True when the user issued a fresh voice command while clarification was pending
  * (not a retry, not a short answer to the clarify prompt).
@@ -206,6 +283,11 @@ export function shouldSupersedePendingClarification(
 ): boolean {
   const answer = incomingCommand.trim();
   if (!answer) return false;
+
+  // "yes, apply fixes" answers a CODE_REPAIR defer — never merge into the audit command.
+  if (isCodeRepairConfirmAnswer(answer)) {
+    return true;
+  }
 
   if (isSelfContainedDesktopCommand(answer)) {
     return true;

@@ -71,6 +71,12 @@ export function normalizeTranscript(text: string): string {
   // Whisper glues "Open" + filename: "OpenResume.pdf" -> "Open Resume.pdf"
   s = s.replace(/\bopen([A-Za-z0-9][^\s]*\.\w{2,8})\b/gi, "open $1");
 
+  // "server.jsin cursor" → "server.js in cursor" (filename glued to "in")
+  s = s.replace(
+    /(\.[a-z0-9]{1,12})(in|inside)\s+(cursor|notepad|word|vs\s*code)\b/gi,
+    "$1 in $3",
+  );
+
   // Whisper mishearings — desktop folders
   s = s.replace(/\bupon\s+(?:the\s+)?(?:my\s+)?downloads?\b/gi, "open downloads");
   s = s.replace(/\bupon\s+(?:the\s+)?(?:my\s+)?documents?\b/gi, "open documents");

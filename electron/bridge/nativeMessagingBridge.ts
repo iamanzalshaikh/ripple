@@ -176,6 +176,19 @@ function onSocketData(chunk: Buffer): void {
       continue;
     }
 
+    if (msg.type === "BROWSER_GENERIC_RESULT" && msg.id) {
+      const p = pending.get(msg.id);
+      if (!p) continue;
+      clearTimeout(p.timer);
+      pending.delete(msg.id);
+      p.resolve({
+        ok: !!msg.ok,
+        error: msg.error,
+        detail: msg.detail,
+      });
+      continue;
+    }
+
     if (
       (msg.type === "WHATSAPP_RESULT" ||
         msg.type === "YOUTUBE_RESULT" ||
@@ -314,6 +327,51 @@ export function queryActiveTabFromExtension(): Promise<ExtensionActiveTab | null
     });
 
     sendFrame(nativeSocket!, { type: "GET_ACTIVE_TAB_INFO", id });
+  });
+}
+
+export type BrowserGenericExtensionPayload = {
+  action: string;
+  selector?: string;
+  text?: string;
+  ariaLabel?: string;
+  partial?: boolean;
+  x?: number;
+  y?: number;
+  deltaY?: number;
+  amount?: number;
+  maxChars?: number;
+};
+
+/** P5.3 — generic DOM action in the user's active Chrome tab. */
+export function runBrowserGenericViaExtension(
+  payload: BrowserGenericExtensionPayload,
+): Promise<ExtensionResult> {
+  return new Promise((resolve, reject) => {
+    if (!isNativeMessagingConnected()) {
+      reject(new Error("Native Messaging not connected"));
+      return;
+    }
+
+    const id = randomUUID();
+    const timer = setTimeout(() => {
+      pending.delete(id);
+      reject(new Error("Browser generic action timed out (20s)"));
+    }, 20_000);
+
+    pending.set(id, {
+      resolve: (r) => {
+        if (!r.ok) {
+          reject(new Error(r.error ?? "browser_generic_failed"));
+          return;
+        }
+        resolve(r);
+      },
+      reject,
+      timer,
+    });
+
+    sendFrame(nativeSocket!, { type: "BROWSER_GENERIC", id, ...payload });
   });
 }
 

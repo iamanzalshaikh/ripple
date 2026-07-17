@@ -12,8 +12,11 @@ const LIMITS: Record<string, LimitRule> = {
   create_file: { max: 30, windowMs: 5 * 60_000 },
   delete_file: { max: 10, windowMs: 10 * 60_000 },
   move_file: { max: 15, windowMs: 10 * 60_000 },
+  copy_file: { max: 20, windowMs: 10 * 60_000 },
   rename_file: { max: 15, windowMs: 10 * 60_000 },
+  run_as_admin: { max: 5, windowMs: 10 * 60_000 },
   whatsapp_message: { max: 10, windowMs: 10 * 60_000 },
+  ai_tool: { max: 30, windowMs: 5 * 60_000 },
   default: { max: 80, windowMs: 5 * 60_000 },
 };
 

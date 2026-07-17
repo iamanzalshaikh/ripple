@@ -77,6 +77,14 @@ async function focusTab(tab) {
   }
 }
 
+async function pickActiveTabAny() {
+  const active = await chrome.tabs.query({ active: true, currentWindow: true });
+  const tab = active[0] ?? null;
+  if (tab?.id && !tab.discarded) return tab;
+  const all = await chrome.tabs.query({});
+  return all.find((t) => t.id && !t.discarded && t.url && !t.url.startsWith("chrome://")) ?? null;
+}
+
 function connectNative() {
   if (nativePort) return;
 
@@ -98,7 +106,8 @@ function connectNative() {
       msg?.type !== "INSTAGRAM_FOCUS_COMPOSER" &&
       msg?.type !== "WHATSAPP_READ_COMPOSER" &&
       msg?.type !== "WHATSAPP_REPLACE_COMPOSER" &&
-      msg?.type !== "GET_ACTIVE_TAB_INFO"
+      msg?.type !== "GET_ACTIVE_TAB_INFO" &&
+      msg?.type !== "BROWSER_GENERIC"
     ) {
       return;
     }
@@ -182,6 +191,53 @@ function connectNative() {
       } catch (e) {
         nativePort.postMessage({
           type: "WHATSAPP_COMPOSER_RESULT",
+          id,
+          ok: false,
+          error: String(e?.message ?? e),
+        });
+      }
+      return;
+    }
+
+    if (msg?.type === "BROWSER_GENERIC") {
+      const id = msg.id;
+      try {
+        const tab = await pickActiveTabAny();
+        if (!tab?.id) {
+          throw new Error("No active browser tab found");
+        }
+        await focusTab(tab);
+        await new Promise((r) => setTimeout(r, 300));
+        const result = await runOnTab(
+          tab.id,
+          {
+            type: "BROWSER_GENERIC",
+            action: msg.action,
+            selector: msg.selector,
+            text: msg.text,
+            ariaLabel: msg.ariaLabel,
+            partial: msg.partial,
+            x: msg.x,
+            y: msg.y,
+            deltaY: msg.deltaY,
+            amount: msg.amount,
+            maxChars: msg.maxChars,
+          },
+          "browserGenericContent.js",
+        );
+        nativePort.postMessage({
+          type: "BROWSER_GENERIC_RESULT",
+          id,
+          ok: !!result?.ok,
+          error: result?.error,
+          detail:
+            typeof result?.detail === "string"
+              ? result.detail
+              : JSON.stringify(result ?? {}),
+        });
+      } catch (e) {
+        nativePort.postMessage({
+          type: "BROWSER_GENERIC_RESULT",
           id,
           ok: false,
           error: String(e?.message ?? e),

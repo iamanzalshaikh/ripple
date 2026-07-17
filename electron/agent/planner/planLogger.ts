@@ -4,7 +4,7 @@ import { recordPlannerMetric } from "./planMetrics.js";
 import { persistPlannerShadow } from "./planPersistence.js";
 import { recordRouterMismatch } from "./routerParity.js";
 
-let shadowModeEnabled = true;
+let shadowModeEnabled = false;
 
 export function setPlannerShadowMode(enabled: boolean): void {
   shadowModeEnabled = enabled;

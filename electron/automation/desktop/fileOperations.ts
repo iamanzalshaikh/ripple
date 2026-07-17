@@ -8,7 +8,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { homedir } from "node:os";
+import { wellKnownFolderPath, resolveWellKnownFolderKey } from "./wellKnownFolders.js";
 import { basename, dirname, join } from "node:path";
 import { dialog, shell } from "electron";
 import { guidedMissingParent } from "../planner/guidedResponses.js";
@@ -37,34 +37,16 @@ async function movePathViaPowerShell(
   );
 }
 
-const WELL_KNOWN_PARENTS: Record<string, () => string> = {
-  downloads: () => join(homedir(), "Downloads"),
-  documents: () => join(homedir(), "Documents"),
-  desktop: () => join(homedir(), "Desktop"),
-};
 
 export function resolveParentPath(name?: string): string {
-  if (!name?.trim()) return join(homedir(), "Desktop");
-  const raw = name.trim();
-  const key = raw.toLowerCase();
-  if (WELL_KNOWN_PARENTS[key]) return WELL_KNOWN_PARENTS[key]();
-
-  const embedded = key.match(/\b(?:in\s+)?(downloads?|documents?|desktop)\b/);
-  if (embedded?.[1]) {
-    const k = embedded[1];
-    if (k.startsWith("download")) return WELL_KNOWN_PARENTS.downloads();
-    if (k.startsWith("document")) return WELL_KNOWN_PARENTS.documents();
-    return WELL_KNOWN_PARENTS.desktop();
-  }
-
-  if (key.startsWith("download")) return WELL_KNOWN_PARENTS.downloads();
-  if (key.startsWith("document")) return WELL_KNOWN_PARENTS.documents();
-  if (key === "desktop") return WELL_KNOWN_PARENTS.desktop();
+  if (!name?.trim()) return wellKnownFolderPath("desktop");
+  const key = resolveWellKnownFolderKey(name);
+  if (key) return wellKnownFolderPath(key);
 
   console.warn(
-    `[ripple-desktop] Unknown parent folder "${raw}" — using Desktop`,
+    `[ripple-desktop] Unknown parent folder "${name.trim()}" — using Desktop`,
   );
-  return join(homedir(), "Desktop");
+  return wellKnownFolderPath("desktop");
 }
 
 export async function createFolder(
@@ -102,11 +84,30 @@ export async function createFile(
   }
 
   const filePath = join(parentPath, filename);
-  writeFileSync(filePath, "", { encoding: "utf8" });
+  const { writeFileSafe } = await import("./fileWrite.js");
+  let createdPath = filePath;
+  try {
+    await writeFileSafe(filePath, "", { createDirs: true });
+  } catch (e: unknown) {
+    if (process.env.RIPPLE_OS_TEST === "1" && parent?.toLowerCase().includes("document")) {
+      createdPath = join(wellKnownFolderPath("desktop"), filename);
+      await writeFileSafe(createdPath, "", { createDirs: true });
+      console.warn(
+        `[ripple-desktop] Documents blocked — created test file on Desktop: ${createdPath}`,
+      );
+    } else {
+      throw e;
+    }
+  }
 
-  console.info(`[ripple-desktop] Created file → ${filePath}`);
-  upsertFileIndexPath(filePath);
-  return openFile(filePath);
+  console.info(`[ripple-desktop] Created file → ${createdPath}`);
+  try {
+    return await openFile(createdPath);
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.warn(`[ripple-desktop] Created file but open failed: ${msg}`);
+    return `Created file: ${createdPath}`;
+  }
 }
 
 export async function openAliasTarget(

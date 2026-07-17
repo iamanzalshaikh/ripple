@@ -18,6 +18,16 @@ import { tryL0WhatsAppPlan } from "./l0WhatsAppPlanner.js";
 import { tryL0YouTubePlan } from "./l0YouTubePlanner.js";
 import { tryL0GmailPlan } from "./l0GmailPlanner.js";
 import { tryL0LinkedInPlan } from "./l0LinkedInPlanner.js";
+import { tryL0InstagramPlan } from "./l0InstagramPlanner.js";
+import { tryL0NotionPlan } from "./l0NotionPlanner.js";
+import { tryL0SendItemToContactPlan } from "./l0SendItemPlanner.js";
+import { tryL0FilesystemPlan } from "./l0FilesystemPlanner.js";
+import { tryL0BrowserGenericPlan } from "./l0BrowserGenericPlanner.js";
+import { tryL0AutomationPlan } from "./l0AutomationPlanner.js";
+import { tryL0AiPlan } from "./l0AiPlanner.js";
+import { tryL0MemoryPlan } from "./l0MemoryPlanner.js";
+import { tryL0OsControlPlan } from "./l0OsControlPlanner.js";
+import { tryDeveloperWorkflowPlan } from "./developerWorkflowPlanner.js";
 import type { L0PlannerResult } from "./planTypes.js";
 
 function isCompoundDeferReason(reason: string): boolean {
@@ -37,6 +47,30 @@ function applyDedicatedL0Plan(
       kind: "defer",
       reason: l0.reason,
       normalizedUtterance: normalized,
+    };
+    shadowFromPipelineResult(raw, normalized, result, Date.now() - started);
+    return result;
+  }
+  if (l0.kind === "partial") {
+    const result: PlannerPipelineResult = {
+      kind: "partial",
+      plan: stampExecutionPlan(l0.plan, world),
+      unresolvedClauses: l0.unresolvedClauses,
+      splitPreview: l0.splitPreview,
+      question: l0.question,
+      confidence: l0.confidence,
+      reason: l0.reason,
+    };
+    shadowFromPipelineResult(raw, normalized, result, Date.now() - started);
+    return result;
+  }
+  if (l0.kind === "clarify") {
+    const result: PlannerPipelineResult = {
+      kind: "clarify",
+      question: l0.question,
+      options: l0.options,
+      confidence: l0.confidence,
+      reason: l0.reason,
     };
     shadowFromPipelineResult(raw, normalized, result, Date.now() - started);
     return result;
@@ -91,10 +125,68 @@ export function runPlannerPipeline(
   }
 
   const earlyL0 =
+    applyDedicatedL0Plan(
+      tryDeveloperWorkflowPlan(raw, normalized),
+      raw,
+      normalized,
+      input.world,
+      started,
+    ) ??
+    applyDedicatedL0Plan(
+      tryL0SendItemToContactPlan(raw, normalized),
+      raw,
+      normalized,
+      input.world,
+      started,
+    ) ??
+    applyDedicatedL0Plan(
+      tryL0BrowserGenericPlan(raw, normalized),
+      raw,
+      normalized,
+      input.world,
+      started,
+    ) ??
+    applyDedicatedL0Plan(
+      tryL0MemoryPlan(raw, normalized),
+      raw,
+      normalized,
+      input.world,
+      started,
+    ) ??
+    applyDedicatedL0Plan(
+      tryL0AiPlan(raw, normalized),
+      raw,
+      normalized,
+      input.world,
+      started,
+    ) ??
+    applyDedicatedL0Plan(
+      tryL0AutomationPlan(raw, normalized),
+      raw,
+      normalized,
+      input.world,
+      started,
+    ) ??
+    applyDedicatedL0Plan(
+      tryL0OsControlPlan(raw, normalized),
+      raw,
+      normalized,
+      input.world,
+      started,
+    ) ??
+    applyDedicatedL0Plan(
+      tryL0FilesystemPlan(raw, normalized),
+      raw,
+      normalized,
+      input.world,
+      started,
+    ) ??
     applyDedicatedL0Plan(tryL0WhatsAppPlan(raw, normalized), raw, normalized, input.world, started) ??
     applyDedicatedL0Plan(tryL0YouTubePlan(raw, normalized), raw, normalized, input.world, started) ??
     applyDedicatedL0Plan(tryL0GmailPlan(raw, normalized), raw, normalized, input.world, started) ??
-    applyDedicatedL0Plan(tryL0LinkedInPlan(raw, normalized), raw, normalized, input.world, started);
+    applyDedicatedL0Plan(tryL0LinkedInPlan(raw, normalized), raw, normalized, input.world, started) ??
+    applyDedicatedL0Plan(tryL0InstagramPlan(raw, normalized), raw, normalized, input.world, started) ??
+    applyDedicatedL0Plan(tryL0NotionPlan(raw, normalized), raw, normalized, input.world, started);
   if (earlyL0) return earlyL0;
 
   const compoundGate = tryCompoundGate(raw, normalized);

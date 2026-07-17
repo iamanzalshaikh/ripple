@@ -139,6 +139,16 @@ describe("P9 parseDesktopInput", () => {
       expect(parsed.deltaX).toBe(-100);
     }
   });
+
+  it("maps move mouse to center of the screen", () => {
+    const parsed = parseDesktopInputFallback(
+      "Move the mouse to the center of the screen",
+    );
+    expect(parsed?.mode).toBe("mouse");
+    if (parsed?.mode === "mouse") {
+      expect(parsed.action).toBe("move_to_center");
+    }
+  });
   it("maps paste copied text to ctrl+v", () => {
     expect(parseDesktopInputFallback("Paste the text which you copied")?.keys).toBe(
       "^v",

@@ -16,6 +16,10 @@ export type OsTestOut = {
   planSteps?: number;
   dragSteps?: number;
   tools?: string;
+  toolsList?: string[];
+  plannerKind?: string;
+  intent?: string;
+  blocked?: boolean;
 };
 
 function bridgeDir(): string {
@@ -33,8 +37,21 @@ export function osTestOutPath(): string {
 }
 
 /** Dev-only file bridge so OS tests can run commands without CDP. */
+export type OsTestBridgeResult = {
+  ok: boolean;
+  message?: string;
+  actionsOk?: number;
+  actionsTotal?: number;
+  dragSteps?: number;
+  tools?: string;
+  toolsList?: string[];
+  plannerKind?: string;
+  intent?: string;
+  blocked?: boolean;
+};
+
 export function startOsTestBridge(
-  run: (command: string) => Promise<{ ok: boolean; message?: string; actionsOk?: number; actionsTotal?: number }>,
+  run: (command: string) => Promise<OsTestBridgeResult>,
 ): void {
   if (app.isPackaged && process.env.RIPPLE_OS_TEST !== "1") return;
 
@@ -58,6 +75,12 @@ export function startOsTestBridge(
         message: result.message,
         actionsOk: result.actionsOk,
         actionsTotal: result.actionsTotal,
+        dragSteps: result.dragSteps,
+        tools: result.tools,
+        toolsList: result.toolsList,
+        plannerKind: result.plannerKind,
+        intent: result.intent,
+        blocked: result.blocked,
       };
       writeFileSync(outPath, JSON.stringify(out, null, 2), "utf8");
     } catch (e: unknown) {

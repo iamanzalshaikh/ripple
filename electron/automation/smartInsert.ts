@@ -47,8 +47,9 @@ import { openGmailCompose } from "./gmailComposeUrl.js";
 import {
   pasteFromClipboard,
   selectAll,
-  simulateTyping,
 } from "./keyboard.js";
+import { runInsertWithFallback } from "./input/inputStrategy.js";
+import { captureObservation } from "../agent/observe.js";
 
 const TYPING_MAX = 280;
 
@@ -261,26 +262,27 @@ export async function smartInsertText(
     ? formatMessageBody(parsed, text)
     : parsed.body || text;
 
-  if (insertBody.length <= TYPING_MAX) {
-    try {
-      await simulateTyping(insertBody);
-      return `Typed ${insertBody.length} characters`;
-    } catch (e: unknown) {
-      console.warn(
-        "[ripple-desktop] simulateTyping failed:",
-        e instanceof Error ? e.message : e,
-      );
-    }
-  }
-
-  clipboard.writeText(insertBody);
-  await delay(120);
   try {
-    await pasteFromClipboard();
-    return focus
-      ? `Pasted ${insertBody.length} chars into ${focus.processName}`
-      : `Pasted ${insertBody.length} characters`;
-  } catch {
-    return `Copied to clipboard (${insertBody.length} chars) — press Ctrl+V`;
+    const beforeObserve = await captureObservation();
+    const { detail } = await runInsertWithFallback(insertBody, {
+      verify: process.env.RIPPLE_P85_INSERT_VERIFY !== "0",
+      beforeObserve,
+    });
+    return detail;
+  } catch (e: unknown) {
+    console.warn(
+      "[ripple-desktop] insert ladder exhausted:",
+      e instanceof Error ? e.message : e,
+    );
+    clipboard.writeText(insertBody);
+    await delay(120);
+    try {
+      await pasteFromClipboard();
+      return focus
+        ? `Pasted ${insertBody.length} chars into ${focus.processName} (fallback)`
+        : `Pasted ${insertBody.length} characters (fallback)`;
+    } catch {
+      return `Copied to clipboard (${insertBody.length} chars) — press Ctrl+V`;
+    }
   }
 }

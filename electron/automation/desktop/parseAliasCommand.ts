@@ -17,6 +17,20 @@ export function parseAliasMetaCommand(
   const cmd = normalizeTranscript(command ?? "");
   if (!cmd) return null;
 
+  if (
+    /^\s*remember\s+(?:that\s+)?(?:i\s+)?use\s+.+\s+as\s+(?:my\s+)?ide\b/i.test(
+      cmd,
+    )
+  ) {
+    return null;
+  }
+  if (/^\s*remember\s+.+\s+as\s+(?:my\s+)?main\s+project\b/i.test(cmd)) {
+    return null;
+  }
+  if (/^\s*learn\s+(?:that\s+)?.+\s+means\s+/i.test(cmd)) {
+    return null;
+  }
+
   if (/(?:^|\s)(?:list|show)\s+(?:my\s+)?aliases?\s*\.?\s*$/i.test(cmd)) {
     return { kind: "list_aliases" };
   }

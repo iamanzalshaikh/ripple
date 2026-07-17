@@ -328,6 +328,9 @@ export function extractContactName(
   const cmd = effectiveWhatsAppCommand(command);
   if (!cmd) return null;
 
+  if (/\bsearch\s+(?:the\s+)?web\b/i.test(cmd)) return null;
+  if (/\bsearch\b/i.test(cmd) && /\b(?:web|google|browser)\b/i.test(cmd)) return null;
+
   const searchOnWaOnly = cmd.match(
     /\bsearch\s+(.+?)\s+on\s+whatsapp\b/i,
   )?.[1];
@@ -454,6 +457,8 @@ function looksLikeInstagramHandleTarget(cmd: string): boolean {
 export function isWhatsAppMessagingCommand(command?: string | null): boolean {
   const cmd = effectiveWhatsAppCommand(command);
   if (!cmd) return false;
+  if (/\bsearch\s+(?:the\s+)?web\b/i.test(cmd)) return false;
+  if (/\bsearch\b/i.test(cmd) && /\b(?:web|google|browser)\b/i.test(cmd)) return false;
   if (isSendItemToContactPhrase(cmd)) return false;
   if (isGmailVoiceCommand(cmd)) return false;
   if (/\bnotion\b/i.test(cmd)) return false;

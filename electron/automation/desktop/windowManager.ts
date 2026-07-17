@@ -95,6 +95,75 @@ export async function focusAppWindow(app: NativeAppEntry): Promise<string> {
   return `Switched to ${app.aliases[0] ?? app.id}`;
 }
 
+/**
+ * Prefer an IDE window whose title includes any of the path/file hints
+ * (so we focus the project under repair, not an unrelated Cursor window).
+ */
+export async function focusAppWindowPreferringTitle(
+  app: NativeAppEntry,
+  titleHints: string[],
+): Promise<string> {
+  hideOverlay();
+
+  if (process.platform !== "win32") {
+    throw new Error("Window focus is only supported on Windows");
+  }
+
+  const hints = titleHints
+    .map((h) => h.trim().toLowerCase())
+    .filter((h) => h.length >= 2);
+
+  if (hints.length === 0) {
+    return focusAppWindow(app);
+  }
+
+  const rows = await listVisibleWindows();
+  let best: VisibleWindow | null = null;
+  let bestScore = 0;
+
+  for (const win of rows) {
+    let score = scoreWindow(win, app);
+    if (score < 25) continue;
+    const title = win.windowTitle.toLowerCase();
+    for (const hint of hints) {
+      if (title.includes(hint)) score += 80;
+    }
+    if (score > bestScore) {
+      bestScore = score;
+      best = win;
+    }
+  }
+
+  if (!best) {
+    return focusAppWindow(app);
+  }
+
+  await focusWindowByHwnd(best.hwnd, best.windowTitle);
+  console.info(
+    `[ripple-desktop] Focused ${app.id} hwnd=${best.hwnd} title="${best.windowTitle}" (hint match)`,
+  );
+  return `Switched to ${app.aliases[0] ?? app.id}`;
+}
+
+/** True if an app window title already mentions any hint (folder/file name). */
+export async function isAppWindowShowingTitle(
+  app: NativeAppEntry,
+  titleHints: string[],
+): Promise<boolean> {
+  const hints = titleHints
+    .map((h) => h.trim().toLowerCase())
+    .filter((h) => h.length >= 2);
+  if (hints.length === 0) return false;
+
+  const rows = await listVisibleWindows();
+  for (const win of rows) {
+    if (scoreWindow(win, app) < 25) continue;
+    const title = win.windowTitle.toLowerCase();
+    if (hints.some((h) => title.includes(h))) return true;
+  }
+  return false;
+}
+
 export async function closeAppWindow(app: NativeAppEntry): Promise<string> {
   hideOverlay();
 

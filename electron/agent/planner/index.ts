@@ -207,7 +207,9 @@ export {
 } from "./legacyRouterGate.js";
 export {
   comparePlanToLegacyPayload,
+  isLegacyNoopOnly,
   isShadowParityCompareEnabled,
+  planUsesP85ExtensionTools,
   resolveLegacyDesktopPayload,
   runShadowParityOnExecute,
   type LegacyRouterKind,

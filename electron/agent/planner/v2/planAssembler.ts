@@ -35,11 +35,13 @@ function recordsToSteps(records: ClauseRecord[]): {
   const steps: PlanStep[] = [];
   const resolved: ClauseRecord[] = [];
   const unresolved: ClauseRecord[] = [];
+  let blockedByPriorUnresolved = false;
 
   for (let i = 0; i < records.length; i++) {
     const record = records[i];
-    if (record.status !== "resolved") {
+    if (record.status !== "resolved" || blockedByPriorUnresolved) {
       unresolved.push(record);
+      blockedByPriorUnresolved = true;
       continue;
     }
     if (record.clauseType === "FILE_SEARCH" && !hasRegisteredTool("memory.search")) {
@@ -49,6 +51,7 @@ function recordsToSteps(records: ClauseRecord[]): {
     let part = routeRecordToSteps(record);
     if (!part?.length) {
       unresolved.push({ ...record, status: "unsupported" });
+      blockedByPriorUnresolved = true;
       continue;
     }
     if (record.clauseType === "CLIPBOARD_OP") {

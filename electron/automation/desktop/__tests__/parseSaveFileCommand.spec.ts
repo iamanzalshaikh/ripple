@@ -21,4 +21,11 @@ describe("parseSaveFileCommand", () => {
     const intent = parseSaveFileCommand("save as notes in downloads");
     expect(intent?.filename).toBe("notes.txt");
   });
+
+  it("extracts app target from create file command", () => {
+    const intent = parseSaveFileCommand("Create new file server.js in cursor");
+    expect(intent?.kind).toBe("save_file");
+    expect(intent?.filename).toBe("server.js");
+    expect(intent?.application).toBe("cursor");
+  });
 });

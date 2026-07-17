@@ -170,9 +170,10 @@ export function logVerificationFailure(
       break;
     case "a11y_name_mismatch":
       console.warn(
-        `${LOG_PREFIX} why: focused control name does not contain expected text snippet` +
+        `${LOG_PREFIX} why: typed text not found in focused control name/value` +
           ` expected="${preview(expectedText ?? "", 24)}"` +
-          ` actual_name="${preview(afterA11y?.name ?? "", 60)}"`,
+          ` actual_name="${preview(afterA11y?.name ?? "", 60)}"` +
+          ` actual_value="${preview(afterA11y?.value ?? "", 60)}"`,
       );
       break;
     default:

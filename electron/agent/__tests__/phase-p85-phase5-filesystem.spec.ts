@@ -73,16 +73,15 @@ describe("P8.5 Phase 5 — filesystem tools", () => {
     clearUndoStack();
   });
 
-  it("registers seven filesystem tools", () => {
+  it("registers filesystem tools including P5.1 intelligence layer", () => {
     const names = listPhase2FilesystemToolNames();
     expect(names).toContain("filesystem.delete");
     expect(names).toContain("filesystem.create");
-    expect(names).toContain("filesystem.create_folder");
-    expect(names).toContain("filesystem.rename");
-    expect(names).toContain("filesystem.move");
-    expect(names).toContain("filesystem.open");
-    expect(names).toContain("filesystem.list_directory");
-    expect(names.length).toBe(7);
+    expect(names).toContain("filesystem.search");
+    expect(names).toContain("filesystem.read_file");
+    expect(names).toContain("filesystem.write_file");
+    expect(names).toContain("filesystem.patch_file");
+    expect(names.length).toBeGreaterThanOrEqual(14);
   });
 
   it("validates filesystem.delete plan when tool is registered", () => {

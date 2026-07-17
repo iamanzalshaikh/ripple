@@ -242,7 +242,9 @@ export function parseInstagramCommand(command?: string | null): InstagramIntent 
   const onInstagram = isInstagramFocused() || onInstagramTab();
   const saidInstagram = mentionsInstagram(cmd);
 
-  if (isWhatsAppMessagingCommand(cmd) || isWhatsAppTabActive()) return null;
+  if (isWhatsAppMessagingCommand(cmd)) return null;
+  // Explicit "on Instagram" must win over sticky WhatsApp tab focus.
+  if (isWhatsAppTabActive() && !saidInstagram) return null;
 
   const structuredEarly = parseStructuredMessage(cmd);
 

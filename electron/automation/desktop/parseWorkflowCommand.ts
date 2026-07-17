@@ -158,6 +158,14 @@ export function parseWorkflowRunCommand(
   const cmd = normalizeTranscript(command ?? "");
   if (!cmd) return null;
 
+  // Shell/automation commands — not named user workflows.
+  if (
+    /^\s*run\s+.+\b(?:command|terminal|script|tests?)\b/i.test(cmd) ||
+    /^\s*run\s+(?:node|npm|git)\b/i.test(cmd)
+  ) {
+    return null;
+  }
+
   const spoken = extractLastRunPhrase(cmd);
   if (!spoken) return null;
 

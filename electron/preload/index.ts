@@ -56,6 +56,15 @@ const api = {
     sessionId?: string;
     contextMetadata?: Record<string, unknown>;
   }) => ipcRenderer.invoke("command:execute", args),
+  executeDictation: (args: { text: string; insert?: boolean }) =>
+    ipcRenderer.invoke("dictation:execute", args) as Promise<{
+      ok: boolean;
+      mode: "dictation";
+      finalText?: string;
+      inserted?: boolean;
+      error?: string;
+      correctionKind?: string;
+    }>,
   getTelemetrySummary: () =>
     ipcRenderer.invoke("telemetry:summary") as Promise<{
       ok: boolean;
@@ -204,11 +213,17 @@ const api = {
     return () => ipcRenderer.removeListener("overlay:state", handler);
   },
   onVoiceToggle: (
-    cb: (payload: { action: "start" | "stop" | "cancel" }) => void,
+    cb: (payload: {
+      action: "start" | "stop" | "cancel";
+      mode?: "command" | "dictation";
+    }) => void,
   ): Unsubscribe => {
     const handler = (
       _: unknown,
-      payload: { action: "start" | "stop" | "cancel" },
+      payload: {
+        action: "start" | "stop" | "cancel";
+        mode?: "command" | "dictation";
+      },
     ) => cb(payload);
     ipcRenderer.on("overlay:voice-toggle", handler);
     return () => ipcRenderer.removeListener("overlay:voice-toggle", handler);
@@ -237,6 +252,35 @@ const api = {
     ipcRenderer.on("overlay:clarify", handler);
     return () => ipcRenderer.removeListener("overlay:clarify", handler);
   },
+  onCodeRepairShow: (
+    cb: (payload: {
+      file: string;
+      fileName: string;
+      line: number;
+      code: string;
+      message: string;
+      why: string;
+      suggestedFix: string;
+      before?: string;
+      after?: string;
+      hasSafePatch: boolean;
+      projectRoot: string;
+    }) => void,
+  ): Unsubscribe => {
+    const handler = (_: unknown, payload: unknown) => cb(payload as never);
+    ipcRenderer.on("code-repair:show", handler);
+    return () => ipcRenderer.removeListener("code-repair:show", handler);
+  },
+  onCodeRepairHide: (cb: () => void): Unsubscribe => {
+    const handler = () => cb();
+    ipcRenderer.on("code-repair:hide", handler);
+    return () => ipcRenderer.removeListener("code-repair:hide", handler);
+  },
+  codeRepairAction: (action: "open" | "apply" | "ignore") =>
+    ipcRenderer.invoke("code-repair:action", { action }) as Promise<{
+      ok: boolean;
+      error?: string;
+    }>,
   isOverlay: () =>
     new URLSearchParams(window.location.search).get("overlay") === "1",
   memory: {

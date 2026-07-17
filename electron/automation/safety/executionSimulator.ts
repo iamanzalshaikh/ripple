@@ -15,6 +15,10 @@ export type SafetySlots = {
   parentFolder?: string;
   fileName?: string;
   folderName?: string;
+  command?: string;
+  scriptPath?: string;
+  operation?: string;
+  app?: string;
 };
 
 async function resolveFilePath(
@@ -160,6 +164,38 @@ export async function createFileNeedsConfirm(
   return existsSync(filePath);
 }
 
+export async function simulateWriteFile(
+  pathOrName: string,
+  parent?: string,
+): Promise<SimulateResult> {
+  const path = parent
+    ? join(resolveFolderPath(parent), pathOrName)
+    : pathOrName;
+  const exists = existsSync(path);
+  return {
+    summary: exists
+      ? `Would overwrite file:\n- ${path}`
+      : `Would write new file:\n- ${path}`,
+    targets: [path],
+  };
+}
+
+export async function simulatePatchFile(
+  pathOrName: string,
+  parent?: string,
+): Promise<SimulateResult> {
+  const path = parent
+    ? join(resolveFolderPath(parent), pathOrName)
+    : pathOrName;
+  const exists = existsSync(path);
+  return {
+    summary: exists
+      ? `Would patch file:\n- ${path}`
+      : `Would patch (file not found):\n- ${path}`,
+    targets: exists ? [path] : [],
+  };
+}
+
 export async function simulateForKind(
   kind: string,
   slots: SafetySlots,
@@ -181,6 +217,42 @@ export async function simulateForKind(
       );
     case "create_file":
       return simulateCreateFile(slots.fileName ?? "", slots.parentFolder);
+    case "write_file":
+      return simulateWriteFile(slots.sourceName ?? slots.fileName ?? "", slots.parentFolder);
+    case "patch_file":
+      return simulatePatchFile(slots.sourceName ?? slots.fileName ?? "", slots.parentFolder);
+    case "run_command":
+      return {
+        summary: `Would run command:\n${slots.command ?? "(empty)"}`,
+        targets: [],
+      };
+    case "run_script":
+      return {
+        summary: `Would run script:\n${slots.scriptPath ?? "(missing)"}`,
+        targets: slots.scriptPath ? [slots.scriptPath] : [],
+      };
+    case "git_operation":
+      return {
+        summary: `Would run git ${slots.operation ?? "operation"}`,
+        targets: [],
+      };
+    case "run_tests":
+      return {
+        summary: "Would run project test suite",
+        targets: [],
+      };
+    case "copy_file":
+      return {
+        summary: `Would copy:\n${slots.sourceName ?? "(source)"} → ${slots.destinationFolder ?? "(dest)"}`,
+        targets: [slots.sourceName, slots.destinationFolder].filter(
+          (x): x is string => Boolean(x?.trim()),
+        ),
+      };
+    case "run_as_admin":
+      return {
+        summary: `Would launch elevated:\n${slots.app ?? slots.command ?? "(app)"}`,
+        targets: slots.app ? [slots.app] : [],
+      };
     default:
       return { summary: `No simulation for ${kind}`, targets: [] };
   }
@@ -207,6 +279,16 @@ export async function needsSafetyConfirm(
       );
     case "create_file":
       return createFileNeedsConfirm(slots.fileName ?? "", slots.parentFolder);
+    case "write_file":
+    case "patch_file":
+      return true;
+    case "copy_file":
+    case "run_command":
+    case "run_script":
+    case "git_operation":
+    case "run_tests":
+    case "run_as_admin":
+      return true;
     default:
       return false;
   }

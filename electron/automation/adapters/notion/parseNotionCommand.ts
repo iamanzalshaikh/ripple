@@ -45,7 +45,7 @@ export function wantsExplicitNewPage(cmd: string): boolean {
   return (
     /\bnew\s+page\b/i.test(cmd) ||
     /\bcreate\s+(?:a\s+)?(?:new\s+)?page\b/i.test(cmd) ||
-    /\bcreate\s+(?:a\s+)?notion\s+page\b/i.test(cmd) ||
+    /\bcreate\s+(?:a\s+)?(?:new\s+)?notion\s+page\b/i.test(cmd) ||
     /\bnotion\.new\b/i.test(cmd)
   );
 }

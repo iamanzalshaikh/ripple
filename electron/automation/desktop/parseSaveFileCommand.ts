@@ -5,6 +5,7 @@ export type SaveFileIntent = {
   kind: "save_file";
   filename: string;
   folder?: "downloads" | "documents" | "desktop";
+  application?: string;
 };
 
 function normalizeFilename(raw: string): string {
@@ -19,6 +20,20 @@ function normalizeFilename(raw: string): string {
 function folderFromMatch(raw?: string): SaveFileIntent["folder"] | undefined {
   if (!raw?.trim()) return undefined;
   return normalizeFolderKey(raw) ?? undefined;
+}
+
+function extractAppTarget(rawFile: string): {
+  filename: string;
+  application?: string;
+} {
+  const m = rawFile.match(
+    /^(.*?)\s+(?:in|on)\s+(?:the\s+)?(cursor|vs\s*code|visual\s+studio\s+code|notepad|word)\s*$/i,
+  );
+  if (!m?.[1]?.trim()) return { filename: rawFile.trim() };
+  const app = m[2]!.trim().toLowerCase();
+  const application =
+    /^(?:vs\s*code|visual\s+studio\s+code)$/i.test(app) ? "cursor" : app;
+  return { filename: m[1]!.trim(), application };
 }
 
 /** "save the file as meetingnotes.txt inside documents" */
@@ -104,10 +119,12 @@ export function parseSaveFileCommand(
   for (const { re, file, folder } of patterns) {
     const m = cmd.match(re);
     if (!m?.[file]?.trim()) continue;
+    const target = extractAppTarget(m[file]!);
     return {
       kind: "save_file",
-      filename: normalizeFilename(m[file]!),
+      filename: normalizeFilename(target.filename),
       folder: folder ? folderFromMatch(m[folder]) : undefined,
+      ...(target.application ? { application: target.application } : {}),
     };
   }
 

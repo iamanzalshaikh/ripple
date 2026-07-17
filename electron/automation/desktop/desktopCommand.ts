@@ -293,19 +293,6 @@ export function buildDesktopCommandResult(
   return payloadFromIntent(parsed.intent, command, parsed.viaNlu ? " (NLU)" : "");
 }
 
-/**
- * Phase 4.6 — local parse first, then planner cost ladder when desktop-shaped.
- */
-export async function buildDesktopCommandResultAsync(
-  command: string,
-  getAccessToken: () => Promise<string | null>,
-): Promise<CommandResultPayload | null> {
-  const { planDesktopCommand } = await import("../planner/planExecute.js");
-  const result = await planDesktopCommand(command, getAccessToken);
-  if (result?.kind === "payload") return result.payload;
-  return null;
-}
-
 /** Build workflow payload from a resolved native intent (used by planExecute). */
 export function commandPayloadFromIntent(
   intent: NativeCommandIntent,

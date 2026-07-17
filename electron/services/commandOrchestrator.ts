@@ -1,12 +1,16 @@
 import { randomUUID } from "node:crypto";
-import { applyWhatsAppVoiceOverride } from "../automation/adapters/whatsapp/whatsappVoiceOverride.js";
+import { BrowserWindow } from "electron";
+import {
+  applyWhatsAppVoiceOverride,
+  applyWhatsAppComposeDictationOverride,
+  resolveWhatsAppComposeDictationText,
+  looksLikeRippleOsCommand,
+} from "../automation/adapters/whatsapp/whatsappVoiceOverride.js";
 import { applyWhatsAppRephraseOverride } from "../automation/adapters/whatsapp/whatsappRephraseOverride.js";
-import { buildNotionCommandResult } from "../automation/adapters/notion/notionCommand.js";
 import { applyNotionVoiceOverride } from "../automation/adapters/notion/notionVoiceOverride.js";
 import { normalizeTranscript } from "../automation/voice/normalizeTranscript.js";
 import { applyYouTubeVoiceOverride } from "../automation/adapters/youtube/youtubeVoiceOverride.js";
 import { applyLinkedInVoiceOverride } from "../automation/adapters/linkedin/linkedinVoiceOverride.js";
-import { buildInstagramCommandResult } from "../automation/adapters/instagram/instagramCommand.js";
 import { applyInstagramVoiceOverride } from "../automation/adapters/instagram/instagramVoiceOverride.js";
 import { isInstagramTabActive, isGmailComposeFocused, isWhatsAppTabActive, isLinkedInTabActive, isYouTubeFocused, isNotionFocused, isDesktopAppForeground } from "../focus/focusContext.js";
 import { isContextualLinkedInVoiceCommand, isLinkedInCommand } from "../automation/adapters/linkedin/parseLinkedInCommand.js";
@@ -30,7 +34,6 @@ import {
 import { buildDesktopCommandResult } from "../automation/desktop/desktopCommand.js";
 import { commandPayloadFromIntent } from "../automation/desktop/desktopCommand.js";
 import { parseUndoCommand } from "../automation/desktop/parseUndoCommand.js";
-import { shouldSkipFastPathForGpt } from "../automation/voice/nlu/aiFirstRouting.js";
 import { parseWorkflowMetaCommand } from "../automation/desktop/parseWorkflowCommand.js";
 import { isRememberWorkflowPhrase } from "../automation/desktop/spokenName.js";
 import { commandPayloadFromResolvedPath } from "../automation/desktop/desktopCommand.js";
@@ -41,7 +44,6 @@ import { setCapabilityCacheEntry } from "../storage/capabilityCache.js";
 import { recordFileTouch } from "../storage/recordFileTouch.js";
 import { clearPreprocessCache } from "../automation/voice/nlu/preprocess.js";
 import { recordCommandEvent, type PlannerSource } from "../telemetry/commandTelemetry.js";
-import { parseGraphOpenCommand } from "../automation/desktop/parseGraphOpenCommand.js";
 import {
   recordConversationTurn,
   type TurnOutcome,
@@ -63,6 +65,7 @@ import {
   parseDesktopInputFallback,
 } from "../agent/parseDesktopInput.js";
 import {
+  buildTypingPayload,
   buildTypingPayloadFromInput,
 } from "../agent/typingPayload.js";
 import {
@@ -71,7 +74,6 @@ import {
 } from "../agent/agentOrchestrator.js";
 import {
   buildWorldModel,
-  summarizeWorldForLog,
 } from "../agent/worldModel.js";
 import {
   planUniversalIntent,
@@ -80,11 +82,14 @@ import {
 import { runPlannerPipelineAsync } from "../agent/planner/plannerPipeline.js";
 import { buildExecutorPayload } from "../agent/planner/plannerExecutor.js";
 import { runValidatedPlanExecution } from "../agent/planner/executionRequest.js";
-import { logPlannerRouterMismatch, logPayloadBridgeDiagnostic } from "../agent/planner/planLogger.js";
+import {
+  logPlannerRouterMismatch,
+  logPayloadBridgeDiagnostic,
+  isPlannerShadowMode,
+} from "../agent/planner/planLogger.js";
 import { runShadowParityOnExecute } from "../agent/planner/shadowParity.js";
 import {
   legacyAgentCompoundEnabled,
-  legacyDesktopEarlyInputEnabled,
   legacyDesktopRoutersEnabled,
   legacyPlanDesktopEnabled,
   p85DesktopEntryEnabled,
@@ -97,9 +102,9 @@ import {
   tryL0CompoundPlan,
 } from "../agent/planner/l0CompoundPlanner.js";
 import { tryCompoundGate, isCompoundUtterance } from "../agent/planner/compoundGate.js";
+import { isDeveloperWorkflowUtterance } from "../agent/planner/developerWorkflowPlanner.js";
 import { shouldBlockLegacyDesktopRouters } from "../agent/planner/p85LegacyGate.js";
 import { shouldBypassP85Planner } from "../agent/planner/gptFallbackPolicy.js";
-import { logPhaseBSplit } from "../agent/planner/planLogger.js";
 import { executeCompoundPartialPlan } from "../agent/planner/compoundPartialExecutor.js";
 import {
   phaseBStage1Enabled,
@@ -113,6 +118,10 @@ import {
 } from "../agent/planner/clarificationEngine.js";
 import { observeP85Execution } from "../agent/planner/executionObserver.js";
 import {
+  broadcastCommandDebug,
+  summarizeDebugResult,
+} from "./commandDebugBroadcast.js";
+import {
   completeGoal,
   getActiveGoal,
   parseGoalControlCommand,
@@ -120,6 +129,57 @@ import {
   startGoal,
   updateGoal,
 } from "../agent/goalManager.js";
+
+function parseProjectIdentityExecutionError(error: string | undefined): {
+  reason:
+    | "project_identity_confirm"
+    | "project_identity_ambiguous"
+    | "project_identity_not_found";
+  question: string;
+  confirmPath?: string;
+  candidatePaths?: string[];
+} | null {
+  if (!error) return null;
+  if (error.startsWith("project_confirm:")) {
+    const rest = error.slice("project_confirm:".length);
+    const sep = rest.indexOf("|");
+    const path = sep >= 0 ? rest.slice(0, sep) : rest;
+    const question =
+      sep >= 0 ? rest.slice(sep + 1) : `I found:\n${path}\n\nSave this as your main project?`;
+    return {
+      reason: "project_identity_confirm",
+      question,
+      confirmPath: path,
+      candidatePaths: path ? [path] : undefined,
+    };
+  }
+  if (error.startsWith("project_ambiguous:")) {
+    const rest = error.slice("project_ambiguous:".length);
+    const sep = rest.indexOf("|");
+    const pathsPart = sep >= 0 ? rest.slice(0, sep) : "";
+    const question =
+      sep >= 0
+        ? rest.slice(sep + 1)
+        : rest || "Which project folder did you mean?";
+    const candidatePaths = pathsPart
+      ? pathsPart.split("||").map((p) => p.trim()).filter(Boolean)
+      : undefined;
+    return {
+      reason: "project_identity_ambiguous",
+      question,
+      confirmPath: candidatePaths?.[0],
+      candidatePaths,
+    };
+  }
+  if (error.startsWith("project_not_found:")) {
+    return {
+      reason: "project_identity_not_found",
+      question: error.slice("project_not_found:".length) ||
+        "I couldn't find that project. What's the full path?",
+    };
+  }
+  return null;
+}
 
 export interface RunCommandInput {
   command: string;
@@ -213,11 +273,6 @@ function trackActionUse(payload: CommandResultPayload): void {
   } catch {
     /* optional */
   }
-}
-
-function plannerSourceForFastPath(command: string): PlannerSource {
-  if (parseGraphOpenCommand(command)) return "graph";
-  return "fast";
 }
 
 function recordExecutionTelemetry(
@@ -329,8 +384,6 @@ async function runCompoundPartialResult(
   detail: string,
   getAccessToken: () => Promise<string | null>,
 ): Promise<RunCommandResult> {
-  logPhaseBSplit(partial);
-
   const outcome = await executeCompoundPartialPlan({
     partial,
     command,
@@ -410,7 +463,19 @@ async function tryP85FastPath(
     );
   }
 
-  const compoundGate = tryCompoundGate(effectiveCommand, normalizedForGate);
+  const skipCompoundForDevWorkflow = isDeveloperWorkflowUtterance(
+    effectiveCommand,
+    normalizedForGate,
+  );
+  if (skipCompoundForDevWorkflow) {
+    console.info(
+      "[ripple-p85] developer workflow — skipping compound v2 gate for CODE_REPAIR utterance",
+    );
+  }
+
+  const compoundGate = skipCompoundForDevWorkflow
+    ? null
+    : tryCompoundGate(effectiveCommand, normalizedForGate);
   if (compoundGate?.kind === "clarify") {
     return emitCompoundClarifyResult(command, effectiveCommand, compoundGate, world);
   }
@@ -453,6 +518,15 @@ async function tryP85FastPath(
     });
     showClarifyQuestionOnOverlay(pipeline.question);
     logConversationTurn(command, "rephrase");
+    broadcastCommandDebug({
+      at: new Date().toISOString(),
+      command: effectiveCommand,
+      transcript: command,
+      intent: "clarify",
+      status: "CLARIFY",
+      result: pipeline.question,
+      source: "p85",
+    });
     return { ok: false, message: pipeline.question };
   }
 
@@ -529,24 +603,111 @@ async function tryP85FastPath(
           `[ripple-desktop] actions done: ${ok}/${execution.records.length} succeeded`,
         );
       }
+
+      const identityClarify = parseProjectIdentityExecutionError(
+        execResult.error ??
+          execution?.records.find((r) => r.status === "failed")?.error,
+      );
+      if (identityClarify && !execResult.ok) {
+        beginClarificationRound({
+          originalCommand: command,
+          normalizedUtterance: effectiveCommand,
+          question: identityClarify.question,
+          reason: identityClarify.reason,
+          plan: pipeline.plan,
+          world,
+          confirmPath: identityClarify.confirmPath,
+          candidatePaths: identityClarify.candidatePaths,
+        });
+        showClarifyQuestionOnOverlay(identityClarify.question);
+        logConversationTurn(command, "rephrase");
+        recordCommandEvent({
+          outcome: "clarify",
+          planner_source: "p85",
+          intent: payload.intent,
+          detail: identityClarify.reason,
+        });
+        broadcastCommandDebug({
+          at: new Date().toISOString(),
+          command: effectiveCommand,
+          transcript: command,
+          intent: payload.intent,
+          tools: pipeline.plan.steps.map((s) => s.tool),
+          tool: pipeline.plan.steps[0]?.tool,
+          status: "CLARIFY",
+          result: identityClarify.question,
+          source: "p85",
+        });
+        return { ok: false, message: identityClarify.question };
+      }
+
       recordExecutionTelemetry(command, payload, execution, "fast", { detail });
       logConversationTurn(command, "success", { intent: payload.intent });
       if (execResult.via !== "executor") {
         trackActionUse(payload);
       }
-      recordP85Execute();
-      runShadowParityOnExecute(effectiveCommand, pipeline.plan, payload);
+      const allSucceeded =
+        execution?.allSucceeded ?? (execResult.ok && (execution?.records.length ?? 0) > 0);
+      if (allSucceeded) {
+        recordP85Execute();
+        runShadowParityOnExecute(effectiveCommand, pipeline.plan, payload);
+      }
       const m = getPlannerMetrics();
       if (m.total > 0 && m.total % 25 === 0) {
         console.info(formatPlannerMetricsLine());
         console.info(formatPlannerDashboardLine());
       }
-      return { ok: true, data: { ...payload, execution } };
+
+      const resultText =
+        summarizeDebugResult(
+          execution?.records
+            ?.map((r) => (r.status === "failed" ? r.error : r.detail))
+            .filter(Boolean)
+            .join("\n\n"),
+        ) ||
+        (allSucceeded ? "OK" : execResult.error ?? "Command failed");
+
+      broadcastCommandDebug({
+        at: new Date().toISOString(),
+        command: effectiveCommand,
+        transcript: command,
+        intent: payload.intent,
+        tools: pipeline.plan.steps.map((s) => s.tool),
+        tool: pipeline.plan.steps[0]?.tool,
+        status: allSucceeded ? "SUCCESS" : "FAILED",
+        result: resultText,
+        error: allSucceeded ? undefined : execResult.error,
+        source: `p85:${source}`,
+      });
+
+      // Keep Home "Last actions" panel in sync for tool-executor route
+      if (execution?.records?.length) {
+        for (const win of BrowserWindow.getAllWindows()) {
+          if (!win.isDestroyed()) {
+            win.webContents.send("actions:executed", {
+              command_id: payload.command_id,
+              intent: payload.intent,
+              result: resultText,
+              records: execution.records,
+              allSucceeded,
+            });
+          }
+        }
+      }
+
+      return {
+        ok: allSucceeded,
+        message: allSucceeded
+          ? undefined
+          : execResult.error ?? "Command failed",
+        data: { ...payload, execution },
+      };
     }
   }
 
   const deferReason = pipeline.kind === "defer" ? pipeline.reason : "no_match";
   if (
+    isPlannerShadowMode() &&
     legacyDesktopRoutersEnabled() &&
     !shouldBlockLegacyDesktopRouters(effectiveCommand, normalizedForGate)
   ) {
@@ -554,92 +715,6 @@ async function tryP85FastPath(
   }
 
   return null;
-}
-
-async function tryDesktopInputFastPath(
-  command: string,
-  detail: string,
-  opts?: { early?: boolean },
-): Promise<RunCommandResult | null> {
-  const allowed = opts?.early
-    ? legacyDesktopEarlyInputEnabled()
-    : legacyDesktopRoutersEnabled();
-  if (!allowed) return null;
-
-  const payload = buildDesktopInputPayload(command);
-  if (!payload?.actions?.length || !payload.command_id) return null;
-
-  console.info(
-    `[ripple-desktop] command:result intent=typing actions=${payload.actions.length} id=${payload.command_id} (${detail})`,
-  );
-  setLastCommandIntent(payload.intent);
-  const execution = await runCommandActions(payload, sendActionAckSafe);
-  if (execution) {
-    const ok = execution.records.filter((r) => r.status === "executed").length;
-    console.info(
-      `[ripple-desktop] actions done: ${ok}/${execution.records.length} succeeded`,
-    );
-  }
-  recordExecutionTelemetry(
-    command,
-    payload,
-    execution,
-    "fast",
-    { detail },
-  );
-  logConversationTurn(command, "success", { intent: payload.intent });
-  trackActionUse(payload);
-  return { ok: true, data: { ...payload, execution } };
-}
-
-async function tryLegacyDesktopFastPath(
-  command: string,
-  desktopFast: CommandResultPayload,
-): Promise<RunCommandResult | null> {
-  if (!legacyDesktopRoutersEnabled()) return null;
-  if (shouldSkipFastPathForGpt(command)) return null;
-
-  const permissionBlocked = getPermissionBlockMessage(command, desktopFast);
-  if (permissionBlocked) {
-    recordCommandEvent({
-      command,
-      outcome: "blocked",
-      permission: "blocked",
-      planner_source: plannerSourceForFastPath(command),
-      detail: permissionBlocked.slice(0, 200),
-    });
-    logConversationTurn(command, "blocked");
-    return { ok: false, message: permissionBlocked };
-  }
-  const limited = rateLimited(desktopFast);
-  if (limited) {
-    recordCommandEvent({
-      command,
-      outcome: "blocked",
-      detail: "rate_limit",
-    });
-    return { ok: false, message: limited };
-  }
-  console.info(
-    `[ripple-desktop] command:result intent=workflow actions=${desktopFast.actions?.length ?? 0} id=${desktopFast.command_id} (desktop-fast)`,
-  );
-  setLastCommandIntent(desktopFast.intent);
-  const execution = await runCommandActions(desktopFast, sendActionAckSafe);
-  if (execution) {
-    const ok = execution.records.filter((r) => r.status === "executed").length;
-    console.info(
-      `[ripple-desktop] actions done: ${ok}/${execution.records.length} succeeded`,
-    );
-  }
-  recordExecutionTelemetry(
-    command,
-    desktopFast,
-    execution,
-    plannerSourceForFastPath(command),
-  );
-  logConversationTurn(command, "success", { intent: desktopFast.intent });
-  trackActionUse(desktopFast);
-  return { ok: true, data: { ...desktopFast, execution } };
 }
 
 function logShadowLegacyDesktopRouters(
@@ -730,6 +805,9 @@ function shouldRouteToBackendFirst(input: RunCommandInput): boolean {
   if (isWhatsAppTabActive()) {
     if (isEditOrRephraseCommand(input.command)) return true;
     if (isRegionalLanguageCommand(input.command)) return true;
+    // Chat dictation while WhatsApp is focused — skip desktop workflow/p85
+    // ("start our new project" was falsely matching named workflows).
+    if (!looksLikeRippleOsCommand(input.command)) return true;
   }
   if (isInstagramTabActive() && isEditOrRephraseCommand(input.command)) {
     return true;
@@ -755,6 +833,11 @@ async function runBackendCommandFlow(
   const waOverride = applyWhatsAppVoiceOverride(input.command, data);
   if (waOverride) {
     data = waOverride;
+  }
+
+  const waCompose = applyWhatsAppComposeDictationOverride(input.command, data);
+  if (waCompose) {
+    data = waCompose;
   }
 
   const waRephrase = applyWhatsAppRephraseOverride(input.command, data);
@@ -824,11 +907,267 @@ async function runBackendCommandFlow(
   }
 
   logConversationTurn(input.command, "success", { intent: data.intent });
+
+  const actionTypes = (data.actions ?? []).map((a) => a.type).join(", ");
+  const suggestionOnly =
+    data.actions?.length === 1 && data.actions[0]?.type === "SHOW_SUGGESTIONS";
+  const looksLikeScreenAsk =
+    /\b(?:screen|page|window|visible|ocr|on\s+(?:the\s+)?(?:screen|page)|what\s+(?:can\s+i\s+do|is\s+visible)|find\s+\w+\s+button)\b/i.test(
+      input.command,
+    );
+  broadcastCommandDebug({
+    at: new Date().toISOString(),
+    command: input.command,
+    transcript: input.command,
+    intent: data.intent,
+    tools: suggestionOnly ? ["SHOW_SUGGESTIONS"] : actionTypes ? [actionTypes] : undefined,
+    tool: suggestionOnly ? "SHOW_SUGGESTIONS" : data.actions?.[0]?.type,
+    status: suggestionOnly ? "PARTIAL" : "SUCCESS",
+    result: suggestionOnly
+      ? looksLikeScreenAsk
+        ? "No screen/OCR tool matched — showed suggestions instead. Try: “Analyze my current screen” or “Find Save button on this screen”."
+        : "No desktop tool matched — showed suggestions instead. Try: “What application am I using” or “Explain my current workspace”."
+      : summarizeDebugResult(
+          execution?.records
+            ?.map((r) => (r.status === "failed" ? r.error : r.detail))
+            .filter(Boolean)
+            .join("\n\n"),
+        ) || actionTypes || "OK",
+    error: suggestionOnly
+      ? looksLikeScreenAsk
+        ? "screen_understanding_not_routed"
+        : "desktop_context_not_routed"
+      : undefined,
+    source: usedRestFallback ? "backend-rest" : "backend",
+  });
+
   return {
     ok: true,
     data: { ...data, execution },
     usedRestFallback,
   };
+}
+
+/**
+ * Legacy escape hatches after P8.5 defers — env-gated only (no desktop-fast / desktop-input-fast).
+ */
+async function runLegacyPlannerEscape(
+  input: RunCommandInput,
+): Promise<RunCommandResult | null> {
+  if (shouldTryAgentCompound(input.command)) {
+    const useLegacyAgentCompound = legacyAgentCompoundEnabled();
+    const agentCompound = tryAgentCompoundCommand(input.command);
+    const p85WouldHandle = tryL0CompoundPlan(
+      input.command,
+      normalizeIntent(input.command),
+    );
+
+    if (
+      agentCompound?.actions?.length &&
+      agentCompound.command_id &&
+      !useLegacyAgentCompound &&
+      p85WouldHandle
+    ) {
+      logPlannerRouterMismatch(
+        input.command,
+        "p85_l0_compound",
+        "agent-compound",
+        agentCompound,
+      );
+    } else if (
+      agentCompound?.actions?.length &&
+      agentCompound.command_id &&
+      (useLegacyAgentCompound || !p85WouldHandle)
+    ) {
+      console.info(
+        `[ripple-desktop] command:result intent=workflow actions=${agentCompound.actions.length} id=${agentCompound.command_id} (agent-compound)`,
+      );
+      setLastCommandIntent(agentCompound.intent);
+      const execution = await runCommandActions(agentCompound, sendActionAckSafe);
+      if (execution) {
+        const ok = execution.records.filter((r) => r.status === "executed").length;
+        console.info(
+          `[ripple-desktop] actions done: ${ok}/${execution.records.length} succeeded`,
+        );
+      }
+      recordExecutionTelemetry(
+        input.command,
+        agentCompound,
+        execution,
+        "fast",
+        { detail: "agent-compound" },
+      );
+      logConversationTurn(input.command, "success", {
+        intent: agentCompound.intent,
+      });
+      if (!getActiveGoal()) {
+        startGoal(input.command.trim(), agentCompound.actions.length);
+      } else {
+        updateGoal({ stepIndex: (getActiveGoal()?.stepIndex ?? 0) + 1 });
+      }
+      trackActionUse(agentCompound);
+      return { ok: true, data: { ...agentCompound, execution } };
+    }
+  }
+
+  if (shouldRouteToBackendFirst(input)) {
+    console.info(
+      "[ripple-desktop] web-app compose — backend-first (skip desktop planner)",
+    );
+    return runBackendCommandFlow(input);
+  }
+
+  const planStarted = Date.now();
+  const useLegacyPlanDesktop = legacyPlanDesktopEnabled();
+  const planned = useLegacyPlanDesktop
+    ? await planDesktopCommand(input.command, input.getAccessToken)
+    : null;
+  const planLatencyMs = Date.now() - planStarted;
+
+  if (!planned) {
+    if (
+      isLikelyDesktopCommand(input.command) ||
+      isRegionalLanguageCommand(input.command)
+    ) {
+      const message = guidedNotFound(input.command);
+      recordCommandEvent({
+        command: input.command,
+        outcome: "not_found",
+        planner_source: useLegacyPlanDesktop ? "offline" : "p85",
+        detail: useLegacyPlanDesktop ? "plan_null" : "p85_exhausted",
+        latency_ms: planLatencyMs,
+      });
+      logConversationTurn(input.command, "not_found");
+      return { ok: false, message };
+    }
+    return null;
+  }
+
+  if (planned.kind === "payload") {
+    const limited = rateLimited(planned.payload);
+    if (limited) {
+      recordCommandEvent({
+        command: input.command,
+        outcome: "blocked",
+        detail: "rate_limit",
+        latency_ms: planLatencyMs,
+      });
+      return { ok: false, message: limited };
+    }
+    const desktopOnly = planned.payload;
+    console.info(
+      `[ripple-desktop] command:result intent=workflow actions=${desktopOnly.actions?.length ?? 0} id=${desktopOnly.command_id} (desktop-${planned.source})`,
+    );
+    setLastCommandIntent(desktopOnly.intent);
+    const execution = await runCommandActions(desktopOnly, sendActionAckSafe);
+    if (execution) {
+      const ok = execution.records.filter((r) => r.status === "executed").length;
+      console.info(
+        `[ripple-desktop] actions done: ${ok}/${execution.records.length} succeeded`,
+      );
+      recordCommandEvent({
+        command: input.command,
+        outcome: ok > 0 ? "success" : "error",
+        planner_source: planned.source,
+        confidence: planned.confidence,
+        intent: desktopOnly.intent,
+        latency_ms: planLatencyMs,
+      });
+    }
+    logConversationTurn(input.command, "success", {
+      intent: desktopOnly.intent,
+    });
+    trackActionUse(desktopOnly);
+    return { ok: true, data: { ...desktopOnly, execution } };
+  }
+
+  if (
+    planned.kind === "blocked" ||
+    planned.kind === "rephrase" ||
+    planned.kind === "not_found"
+  ) {
+    const message =
+      planned.kind === "blocked" ? planned.message : planned.hint;
+    const outcome =
+      planned.kind === "blocked"
+        ? "blocked"
+        : planned.kind === "not_found"
+          ? "not_found"
+          : "rephrase";
+    if (planned.kind === "not_found" && shouldRouteToBackendFirst(input)) {
+      return runBackendCommandFlow(input);
+    }
+    recordCommandEvent({
+      command: input.command,
+      outcome,
+      planner_source: planned.kind === "not_found" ? "gpt" : "offline",
+      detail: planned.kind,
+      latency_ms: planLatencyMs,
+    });
+    console.warn(`[ripple-desktop] desktop plan ${planned.kind}: ${message}`);
+    logConversationTurn(input.command, outcome);
+    return { ok: false, message };
+  }
+
+  if (planned.kind === "clarify") {
+    if (planned.candidates.length > 0) {
+      const paths = planned.candidates.map((c) => c.path);
+      const picked = await pickItemFromMatches(planned.question, paths);
+      if (picked) {
+        recordFileTouch({
+          path: picked,
+          command: input.command,
+          source: "clarify",
+        });
+        const key = input.command.match(/\bopen\s+(?:my\s+|the\s+)?(.+?)\s*$/i)?.[1]
+          ?.trim()
+          .toLowerCase();
+        if (key) {
+          setCapabilityCacheEntry(key, picked, 0.95);
+          recordTrustSignal(key, "clarify");
+          boostEntityFromOpen(key, picked);
+          confirmEntity(key);
+        }
+        const payload = commandPayloadFromResolvedPath(
+          input.command,
+          picked,
+          " (clarify)",
+        );
+        setLastCommandIntent(payload.intent);
+        const execution = await runCommandActions(payload, sendActionAckSafe);
+        recordCommandEvent({
+          command: input.command,
+          outcome: "success",
+          planner_source: "offline",
+          confidence: planned.confidence,
+          intent: payload.intent,
+          latency_ms: planLatencyMs,
+        });
+        trackActionUse(payload);
+        return { ok: true, data: { ...payload, execution } };
+      }
+      recordCommandEvent({
+        command: input.command,
+        outcome: "cancel",
+        detail: "clarify_dismissed",
+        latency_ms: planLatencyMs,
+      });
+      return { ok: false, message: "Cancelled — pick which file you meant" };
+    }
+    recordCommandEvent({
+      command: input.command,
+      outcome: "clarify",
+      planner_source: "offline",
+      latency_ms: planLatencyMs,
+      detail: "clarify_pending",
+    });
+    return {
+      ok: false,
+      message: planned.question,
+    };
+  }
+
+  return null;
 }
 
 export async function runDesktopCommand(
@@ -883,6 +1222,61 @@ export async function runDesktopCommand(
       };
     }
 
+    // WhatsApp compose focused: type speech into the message box before
+    // workflow/p85 can mis-route phrases like "start our new project".
+    const waComposeText = resolveWhatsAppComposeDictationText(input.command);
+    if (waComposeText) {
+      const composePayload = buildTypingPayload(input.command, {
+        text: waComposeText,
+      });
+      console.info(
+        `[ripple-desktop] WhatsApp compose dictation (early) — typing ${waComposeText.length} chars`,
+      );
+      setLastCommandIntent(composePayload.intent);
+      const execution = await runCommandActions(
+        composePayload,
+        sendActionAckSafe,
+      );
+      if (execution) {
+        const ok = execution.records.filter((r) => r.status === "executed")
+          .length;
+        console.info(
+          `[ripple-desktop] actions done: ${ok}/${execution.records.length} succeeded`,
+        );
+      }
+      recordExecutionTelemetry(
+        input.command,
+        composePayload,
+        execution,
+        "fast",
+        { detail: "whatsapp-compose-dictation" },
+      );
+      logConversationTurn(input.command, "success", {
+        intent: composePayload.intent,
+      });
+      trackActionUse(composePayload);
+      broadcastCommandDebug({
+        at: new Date().toISOString(),
+        command: input.command,
+        transcript: input.command,
+        intent: composePayload.intent,
+        tools: ["INSERT_TEXT"],
+        tool: "INSERT_TEXT",
+        status: "SUCCESS",
+        result: `Typed into WhatsApp: ${waComposeText.slice(0, 80)}`,
+        source: "whatsapp-compose",
+      });
+      return { ok: true, data: { ...composePayload, execution } };
+    }
+
+    // Web compose (WhatsApp/Gmail/etc.): skip p85 so "start …" isn't a workflow name.
+    if (shouldRouteToBackendFirst(input)) {
+      console.info(
+        "[ripple-desktop] web-app compose — backend-first (skip desktop planner)",
+      );
+      return runBackendCommandFlow(input);
+    }
+
     if (p85DesktopEntryEnabled()) {
       const p85Early = await tryP85FastPath(
         input.command,
@@ -893,343 +1287,11 @@ export async function runDesktopCommand(
         return p85Early;
       }
     } else {
-      console.info("[ripple-p85] kill-switch — using legacy desktop routers only");
+      console.info("[ripple-p85] kill-switch — legacy escape hatches only");
     }
 
-    if (legacyDesktopEarlyInputEnabled()) {
-      const desktopInputEarly = await tryDesktopInputFastPath(
-        input.command,
-        "desktop-input-early",
-        { early: true },
-      );
-      if (desktopInputEarly) {
-        return desktopInputEarly;
-      }
-    }
-
-    const cmdNorm = normalizeTranscript(input.command);
-
-    const normForCompound = normalizeIntent(input.command);
-    const compoundLegacyGate = tryCompoundGate(input.command, normForCompound);
-    if (compoundLegacyGate?.kind === "clarify") {
-      const worldForClarify = await buildWorldModel();
-      return emitCompoundClarifyResult(
-        input.command,
-        input.command,
-        compoundLegacyGate,
-        worldForClarify,
-      );
-    }
-    if (compoundLegacyGate?.kind === "partial") {
-      const worldForPartial = await buildWorldModel();
-      return emitCompoundPartialResult(
-        input.command,
-        input.command,
-        compoundLegacyGate,
-        worldForPartial,
-        "p85-compound-legacy",
-        input.getAccessToken,
-      );
-    }
-
-    const desktopFast = buildDesktopCommandResult(input.command);
-    const world = await buildWorldModel();
-    console.info(`[ripple-desktop] world model: ${summarizeWorldForLog(world)}`);
-
-    const desktopInputFast = buildDesktopInputPayload(input.command);
-
-    if (shouldTryAgentCompound(input.command)) {
-      const useLegacyAgentCompound = legacyAgentCompoundEnabled();
-      const agentCompound = tryAgentCompoundCommand(input.command);
-      const p85WouldHandle = tryL0CompoundPlan(
-        input.command,
-        normalizeIntent(input.command),
-      );
-
-      if (
-        agentCompound?.actions?.length &&
-        agentCompound.command_id &&
-        !useLegacyAgentCompound &&
-        p85WouldHandle
-      ) {
-        logPlannerRouterMismatch(
-          input.command,
-          "p85_l0_compound",
-          "agent-compound",
-          agentCompound,
-        );
-      } else if (
-        agentCompound?.actions?.length &&
-        agentCompound.command_id &&
-        (useLegacyAgentCompound || !p85WouldHandle)
-      ) {
-        console.info(
-          `[ripple-desktop] command:result intent=workflow actions=${agentCompound.actions.length} id=${agentCompound.command_id} (agent-compound)`,
-        );
-        setLastCommandIntent(agentCompound.intent);
-        const execution = await runCommandActions(agentCompound, sendActionAckSafe);
-        if (execution) {
-          const ok = execution.records.filter((r) => r.status === "executed").length;
-          console.info(
-            `[ripple-desktop] actions done: ${ok}/${execution.records.length} succeeded`,
-          );
-        }
-        recordExecutionTelemetry(
-          input.command,
-          agentCompound,
-          execution,
-          "fast",
-          { detail: "agent-compound" },
-        );
-        logConversationTurn(input.command, "success", {
-          intent: agentCompound.intent,
-        });
-        if (!getActiveGoal()) {
-          startGoal(input.command.trim(), agentCompound.actions.length);
-        } else {
-          updateGoal({ stepIndex: (getActiveGoal()?.stepIndex ?? 0) + 1 });
-        }
-        trackActionUse(agentCompound);
-        return { ok: true, data: { ...agentCompound, execution } };
-      }
-    }
-
-    if (desktopInputFast?.actions?.length && desktopInputFast.command_id) {
-      if (legacyDesktopRoutersEnabled()) {
-        const desktopInputResult = await tryDesktopInputFastPath(
-          input.command,
-          "desktop-input-fast",
-        );
-        if (desktopInputResult) {
-          return desktopInputResult;
-        }
-      }
-    }
-
-    if (desktopFast?.actions?.length && desktopFast.command_id) {
-      if (
-        legacyDesktopRoutersEnabled() &&
-        !shouldBlockLegacyDesktopRouters(input.command, cmdNorm)
-      ) {
-        const legacyFast = await tryLegacyDesktopFastPath(
-          input.command,
-          desktopFast,
-        );
-        if (legacyFast) return legacyFast;
-      }
-    }
-
-    if (shouldRouteToBackendFirst(input)) {
-      console.info(
-        "[ripple-desktop] web-app compose — backend-first (skip desktop planner)",
-      );
-      return runBackendCommandFlow(input);
-    }
-
-    const planStarted = Date.now();
-    const useLegacyPlanDesktop = legacyPlanDesktopEnabled();
-    const planned = useLegacyPlanDesktop
-      ? await planDesktopCommand(input.command, input.getAccessToken)
-      : null;
-    const planLatencyMs = Date.now() - planStarted;
-
-    if (!planned) {
-      if (shouldRouteToBackendFirst(input)) {
-        return runBackendCommandFlow(input);
-      }
-      if (
-        isLikelyDesktopCommand(input.command) ||
-        isRegionalLanguageCommand(input.command)
-      ) {
-        const message = guidedNotFound(input.command);
-        recordCommandEvent({
-          command: input.command,
-          outcome: "not_found",
-          planner_source: useLegacyPlanDesktop ? "offline" : "p85",
-          detail: useLegacyPlanDesktop ? "plan_null" : "p85_exhausted",
-          latency_ms: planLatencyMs,
-        });
-        logConversationTurn(input.command, "not_found");
-        return { ok: false, message };
-      }
-    }
-
-    if (planned?.kind === "payload") {
-      const limited = rateLimited(planned.payload);
-      if (limited) {
-        recordCommandEvent({
-          command: input.command,
-          outcome: "blocked",
-          detail: "rate_limit",
-          latency_ms: planLatencyMs,
-        });
-        return { ok: false, message: limited };
-      }
-      const desktopOnly = planned.payload;
-      console.info(
-        `[ripple-desktop] command:result intent=workflow actions=${desktopOnly.actions?.length ?? 0} id=${desktopOnly.command_id} (desktop-${planned.source})`,
-      );
-      setLastCommandIntent(desktopOnly.intent);
-      const execution = await runCommandActions(desktopOnly, sendActionAckSafe);
-      if (execution) {
-        const ok = execution.records.filter((r) => r.status === "executed").length;
-        console.info(
-          `[ripple-desktop] actions done: ${ok}/${execution.records.length} succeeded`,
-        );
-        recordCommandEvent({
-          command: input.command,
-          outcome: ok > 0 ? "success" : "error",
-          planner_source: planned.source,
-          confidence: planned.confidence,
-          intent: desktopOnly.intent,
-          latency_ms: planLatencyMs,
-        });
-      }
-      logConversationTurn(input.command, "success", {
-        intent: desktopOnly.intent,
-      });
-      trackActionUse(desktopOnly);
-      return { ok: true, data: { ...desktopOnly, execution } };
-    }
-
-    if (
-      planned?.kind === "blocked" ||
-      planned?.kind === "rephrase" ||
-      planned?.kind === "not_found"
-    ) {
-      const message =
-        planned.kind === "blocked" ? planned.message : planned.hint;
-      const outcome =
-        planned.kind === "blocked"
-          ? "blocked"
-          : planned.kind === "not_found"
-            ? "not_found"
-            : "rephrase";
-      if (planned.kind === "not_found" && shouldRouteToBackendFirst(input)) {
-        return runBackendCommandFlow(input);
-      }
-      recordCommandEvent({
-        command: input.command,
-        outcome,
-        planner_source: planned.kind === "not_found" ? "gpt" : "offline",
-        detail: planned.kind,
-        latency_ms: planLatencyMs,
-      });
-      console.warn(`[ripple-desktop] desktop plan ${planned.kind}: ${message}`);
-      logConversationTurn(input.command, outcome);
-      return { ok: false, message };
-    }
-
-    if (planned?.kind === "clarify") {
-      if (planned.candidates.length > 0) {
-        const paths = planned.candidates.map((c) => c.path);
-        const picked = await pickItemFromMatches(
-          planned.question,
-          paths,
-        );
-        if (picked) {
-          recordFileTouch({
-            path: picked,
-            command: input.command,
-            source: "clarify",
-          });
-          const key = input.command.match(/\bopen\s+(?:my\s+|the\s+)?(.+?)\s*$/i)?.[1]
-            ?.trim()
-            .toLowerCase();
-          if (key) {
-            setCapabilityCacheEntry(key, picked, 0.95);
-            recordTrustSignal(key, "clarify");
-            boostEntityFromOpen(key, picked);
-            confirmEntity(key);
-          }
-          const payload = commandPayloadFromResolvedPath(
-            input.command,
-            picked,
-            " (clarify)",
-          );
-          setLastCommandIntent(payload.intent);
-          const execution = await runCommandActions(payload, sendActionAckSafe);
-          recordCommandEvent({
-            command: input.command,
-            outcome: "success",
-            planner_source: "offline",
-            confidence: planned.confidence,
-            intent: payload.intent,
-            latency_ms: planLatencyMs,
-          });
-          trackActionUse(payload);
-          return { ok: true, data: { ...payload, execution } };
-        }
-        recordCommandEvent({
-          command: input.command,
-          outcome: "cancel",
-          detail: "clarify_dismissed",
-          latency_ms: planLatencyMs,
-        });
-        return { ok: false, message: "Cancelled — pick which file you meant" };
-      }
-      recordCommandEvent({
-        command: input.command,
-        outcome: "clarify",
-        planner_source: "offline",
-        latency_ms: planLatencyMs,
-        detail: "clarify_pending",
-      });
-      return {
-        ok: false,
-        message: planned.question,
-      };
-    }
-
-    const notionOnly = buildNotionCommandResult(input.command);
-    if (notionOnly?.actions?.length && notionOnly.command_id) {
-      console.info(
-        `[ripple-desktop] command:result intent=workflow actions=${notionOnly.actions.length} id=${notionOnly.command_id} (notion-local)`,
-      );
-      setLastCommandIntent(notionOnly.intent);
-      const execution = await runCommandActions(notionOnly, sendActionAckSafe);
-      if (execution) {
-        const ok = execution.records.filter((r) => r.status === "executed").length;
-        console.info(
-          `[ripple-desktop] actions done: ${ok}/${execution.records.length} succeeded`,
-        );
-      }
-      recordExecutionTelemetry(
-        input.command,
-        notionOnly,
-        execution,
-        "fast",
-        { detail: "notion-local" },
-      );
-      return { ok: true, data: { ...notionOnly, execution } };
-    }
-
-    const igRephrase =
-      isInstagramTabActive() && isEditOrRephraseCommand(input.command);
-    const instagramOnly = igRephrase
-      ? null
-      : buildInstagramCommandResult(input.command);
-    if (instagramOnly?.actions?.length && instagramOnly.command_id) {
-      console.info(
-        `[ripple-desktop] command:result intent=workflow actions=${instagramOnly.actions.length} id=${instagramOnly.command_id} (instagram-local)`,
-      );
-      setLastCommandIntent(instagramOnly.intent);
-      const execution = await runCommandActions(instagramOnly, sendActionAckSafe);
-      if (execution) {
-        const ok = execution.records.filter((r) => r.status === "executed").length;
-        console.info(
-          `[ripple-desktop] actions done: ${ok}/${execution.records.length} succeeded`,
-        );
-      }
-      recordExecutionTelemetry(
-        input.command,
-        instagramOnly,
-        execution,
-        "fast",
-        { detail: "instagram-local" },
-      );
-      return { ok: true, data: { ...instagramOnly, execution } };
-    }
+    const legacy = await runLegacyPlannerEscape(input);
+    if (legacy) return legacy;
 
     return runBackendCommandFlow(input);
   } catch (e: unknown) {

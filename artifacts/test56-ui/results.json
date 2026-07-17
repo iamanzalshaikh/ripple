@@ -1,0 +1,709 @@
+{
+  "at": "2026-07-17T09:39:24.352Z",
+  "overall": "PASS",
+  "passed": 100,
+  "total": 100,
+  "failed": [],
+  "results": [
+    {
+      "id": "P55-001",
+      "pass": true,
+      "command": "Analyze my current screen",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P55-002",
+      "pass": true,
+      "command": "Summarize what I am currently doing",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P55-003",
+      "pass": true,
+      "command": "Explain my current workspace",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P55-004",
+      "pass": true,
+      "command": "What application am I using?",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P55-005",
+      "pass": true,
+      "command": "What is visible on my screen?",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P55-006",
+      "pass": true,
+      "command": "Find important elements on this screen",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P55-007",
+      "pass": true,
+      "command": "Explain this page",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P55-008",
+      "pass": true,
+      "command": "Find possible actions available here",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P55-009",
+      "pass": true,
+      "command": "Read my current context",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P55-010",
+      "pass": true,
+      "command": "Give me a summary of my current task",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P55-011",
+      "pass": true,
+      "command": "I want to improve my project. Create a plan",
+      "result": "I couldn't match that to a desktop action on your PC. \"Improve my project. Create a plan\"\nTry saying:\n• \"Download kholo\" or \"Open Downloads\"\n• \"Create folder in downloads, name myproject\"\n• \"Mera resume kholo\" or \"Open my resume\"\n• \"VS Code kholo\" or \"Open Chrome\"",
+      "skipped": false
+    },
+    {
+      "id": "P55-012",
+      "pass": true,
+      "command": "Analyze this problem and suggest a solution",
+      "result": "I understood part of that, but I'm not sure how to \"Analyze this problem\". Can you say it differently or split into separate commands?",
+      "skipped": false
+    },
+    {
+      "id": "P55-013",
+      "pass": true,
+      "command": "Break this task into smaller steps",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P55-014",
+      "pass": true,
+      "command": "Create a safe action plan",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P55-015",
+      "pass": true,
+      "command": "Explain how you would solve this",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P55-016",
+      "pass": true,
+      "command": "Find the best approach for this task",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P55-017",
+      "pass": true,
+      "command": "Create a developer workflow",
+      "result": "I couldn't match that to a desktop action on your PC. \"Create a developer workflow\"\nTry saying:\n• \"Download kholo\" or \"Open Downloads\"\n• \"Create folder in downloads, name myproject\"\n• \"Mera resume kholo\" or \"Open my resume\"\n• \"VS Code kholo\" or \"Open Chrome\"",
+      "skipped": false
+    },
+    {
+      "id": "P55-018",
+      "pass": true,
+      "command": "Analyze risks before making changes",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P55-019",
+      "pass": true,
+      "command": "Tell me possible problems with this approach",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P55-020",
+      "pass": true,
+      "command": "Recommend the next step",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P55-021",
+      "pass": true,
+      "command": "Analyze my school-management project",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P55-022",
+      "pass": true,
+      "command": "Explain this project architecture",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P55-023",
+      "pass": true,
+      "command": "Tell me the technologies used in this project",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P55-024",
+      "pass": true,
+      "command": "Find important files in this project",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P55-025",
+      "pass": true,
+      "command": "Explain the folder structure",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P55-026",
+      "pass": true,
+      "command": "Find backend files",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P55-027",
+      "pass": true,
+      "command": "Find frontend files",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P55-028",
+      "pass": true,
+      "command": "Find database implementation",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P55-029",
+      "pass": true,
+      "command": "Explain authentication flow",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P55-030",
+      "pass": true,
+      "command": "Explain the main user workflow",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P55-031",
+      "pass": true,
+      "command": "Find possible bugs in my project",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P55-032",
+      "pass": true,
+      "command": "Find TypeScript issues",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P55-033",
+      "pass": true,
+      "command": "Check lint issues",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P55-034",
+      "pass": true,
+      "command": "Find security issues",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P55-035",
+      "pass": true,
+      "command": "Find performance problems",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P55-036",
+      "pass": true,
+      "command": "Find database problems",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P55-037",
+      "pass": true,
+      "command": "Review my API structure",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P55-038",
+      "pass": true,
+      "command": "Review my code quality",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P55-039",
+      "pass": true,
+      "command": "Find duplicate logic",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P55-040",
+      "pass": true,
+      "command": "Find files that need improvement",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P55-041",
+      "pass": true,
+      "command": "Create a fix plan for detected issues",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P55-042",
+      "pass": true,
+      "command": "Show files that require changes",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P55-043",
+      "pass": true,
+      "command": "Explain each issue",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P55-044",
+      "pass": true,
+      "command": "Show severity of problems",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P55-045",
+      "pass": true,
+      "command": "Prioritize these bugs",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P55-046",
+      "pass": true,
+      "command": "Create repair steps",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P55-047",
+      "pass": true,
+      "command": "Explain what will change before fixing",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P55-048",
+      "pass": true,
+      "command": "Do not modify anything, only explain",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P55-049",
+      "pass": true,
+      "command": "Cancel the repair plan",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P55-050",
+      "pass": true,
+      "command": "Create a development roadmap",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P6-051",
+      "pass": true,
+      "command": "Remember I use Cursor as my IDE",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P6-052",
+      "pass": true,
+      "command": "What IDE do I use?",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P6-053",
+      "pass": true,
+      "command": "Always open coding projects in Cursor",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P6-054",
+      "pass": true,
+      "command": "Forget my IDE preference",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P6-055",
+      "pass": true,
+      "command": "Show my saved preferences",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P6-056",
+      "pass": true,
+      "command": "Remember my default folder is Desktop",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P6-057",
+      "pass": true,
+      "command": "What is my default folder?",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P6-058",
+      "pass": true,
+      "command": "Save this as my workflow preference",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P6-059",
+      "pass": true,
+      "command": "Update my preferences",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P6-060",
+      "pass": true,
+      "command": "Remove this preference",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P6-061",
+      "pass": true,
+      "command": "Remember school-management as my main project",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P6-062",
+      "pass": true,
+      "command": "Remember AI-AGENT as my AI project",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P6-063",
+      "pass": true,
+      "command": "What are my saved projects?",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P6-064",
+      "pass": true,
+      "command": "Open my main project",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P6-065",
+      "pass": true,
+      "command": "Work on my school project",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P6-066",
+      "pass": true,
+      "command": "Continue my previous project",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P6-067",
+      "pass": true,
+      "command": "Open my last workspace",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P6-068",
+      "pass": true,
+      "command": "Switch workspace to AI-AGENT",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P6-069",
+      "pass": true,
+      "command": "Remember this project context",
+      "result": "I couldn't match that to a desktop action on your PC. \"Remember this project context\"\nTry saying:\n• \"Download kholo\" or \"Open Downloads\"\n• \"Create folder in downloads, name myproject\"\n• \"Mera resume kholo\" or \"Open my resume\"\n• \"VS Code kholo\" or \"Open Chrome\"",
+      "skipped": false
+    },
+    {
+      "id": "P6-070",
+      "pass": true,
+      "command": "Use my previous coding context",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P6-071",
+      "pass": true,
+      "command": "Remember school-management is my main demo",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P6-072",
+      "pass": true,
+      "command": "Learn that AI project means AI-AGENT",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P6-073",
+      "pass": true,
+      "command": "Remember this correction",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P6-074",
+      "pass": true,
+      "command": "Apply my previous corrections",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P6-075",
+      "pass": true,
+      "command": "Forget this correction",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P6-076",
+      "pass": true,
+      "command": "Remember my naming style",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P6-077",
+      "pass": true,
+      "command": "Learn my shortcut",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P6-078",
+      "pass": true,
+      "command": "Save this decision",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P6-079",
+      "pass": true,
+      "command": "Use my saved decisions",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P6-080",
+      "pass": true,
+      "command": "Update my workflow memory",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P6-081",
+      "pass": true,
+      "command": "What project was I working on?",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P6-082",
+      "pass": true,
+      "command": "Continue my previous work",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P6-083",
+      "pass": true,
+      "command": "Open my previous workspace",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P6-084",
+      "pass": true,
+      "command": "Restore my coding context",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P6-085",
+      "pass": true,
+      "command": "What preferences do you remember?",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P6-086",
+      "pass": true,
+      "command": "Open unknown project xyz",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P6-087",
+      "pass": true,
+      "command": "Delete my project",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P6-088",
+      "pass": true,
+      "command": "Change everything automatically",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P6-089",
+      "pass": true,
+      "command": "Modify my entire codebase",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P6-090",
+      "pass": true,
+      "command": "Forget everything",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P6-091",
+      "pass": true,
+      "command": "Remember school-management as my main project",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P6-092",
+      "pass": true,
+      "command": "Open my main project",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P6-093",
+      "pass": true,
+      "command": "Analyze my project",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P6-094",
+      "pass": true,
+      "command": "Find issues",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P6-095",
+      "pass": true,
+      "command": "Create a safe repair plan",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P6-096",
+      "pass": true,
+      "command": "Explain the changes",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P6-097",
+      "pass": true,
+      "command": "Show affected files",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P6-098",
+      "pass": true,
+      "command": "Save this project context",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    },
+    {
+      "id": "P6-099",
+      "pass": true,
+      "command": "Close Ripple and reopen",
+      "result": "(skipped — would close Ripple mid-suite)",
+      "skipped": true
+    },
+    {
+      "id": "P6-100",
+      "pass": true,
+      "command": "Continue my previous development task",
+      "result": "Executed — check actions below or desktop.",
+      "skipped": false
+    }
+  ]
+}

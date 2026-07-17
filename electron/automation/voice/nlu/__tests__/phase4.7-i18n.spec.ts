@@ -82,6 +82,12 @@ describe("Phase 4.7 — regional normalizers", () => {
     expect(out).toMatch(/open downloads/i);
   });
 
+  it("hinglish preserves English I use (not I it)", () => {
+    const out = normalizeHinglish("Remember I use Cursor as my IDE");
+    expect(out.toLowerCase()).toContain("i use");
+    expect(out.toLowerCase()).not.toMatch(/\bi it\b/);
+  });
+
   it("sinhala basic open downloads", () => {
     const out = normalizeSinhala("ඩවුන්ලෝඩ් ඕපන් කරන්න");
     expect(out).toMatch(/open downloads/i);

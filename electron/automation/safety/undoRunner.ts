@@ -1,4 +1,5 @@
 import {
+  copyFileSync,
   existsSync,
   mkdirSync,
   renameSync,
@@ -50,6 +51,13 @@ export async function reverseUndoAction(action: UndoAction): Promise<string> {
         return `Undid create — removed ${action.path}`;
       }
       throw new Error(`Cannot undo create — missing ${action.path}`);
+    }
+    case "restore_file": {
+      if (!action.backupPath || !existsSync(action.backupPath)) {
+        throw new Error("Cannot undo write — backup missing");
+      }
+      copyFileSync(action.backupPath, action.path);
+      return `Restored file from backup → ${action.path}`;
     }
     default:
       throw new Error("Unknown undo action");

@@ -17,7 +17,9 @@ export type ClauseType =
   | "PAINT_OP"
   | "MOUSE_ACTION"
   | "SAVE_FILE"
+  | "CREATE_FILE"
   | "FILE_MUTATE"
+  | "AUTOMATION"
   | "UNKNOWN";
 
 export type ClauseStatus = "resolved" | "ambiguous" | "unsupported";
@@ -34,6 +36,8 @@ export type ClauseEntities = {
   itemName?: string;
   parentFolder?: string;
   typeText?: string;
+  keyInput?: string;
+  keySequence?: Array<{ value: string; delayMs?: number }>;
   clipOp?:
     | "copy"
     | "cut"
@@ -51,6 +55,13 @@ export type ClauseEntities = {
   paintLabel?: string;
   saveFilename?: string;
   saveFolder?: string;
+  createFilename?: string;
+  createApp?: string;
+  automationKind?: string;
+  automationPath?: string;
+  automationProjectHint?: string;
+  automationQuery?: string;
+  automationProjectRoot?: string;
 };
 
 export type ClauseRecord = {

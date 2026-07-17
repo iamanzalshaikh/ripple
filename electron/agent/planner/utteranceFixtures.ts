@@ -256,6 +256,54 @@ export const P85_UTTERANCE_FIXTURES: UtteranceFixture[] = [
     expectedTool: "desktop.mouse_move",
   },
   {
+    id: "active_window",
+    utterances: [
+      "what window is active",
+      "which app is open",
+      "tell me the active window",
+      "current application",
+    ],
+    expectedTool: "desktop.get_active_window",
+  },
+  {
+    id: "filesystem_search",
+    utterances: [
+      "find horizon backend",
+      "search for horizon backend",
+      "find my tax pdf",
+      "look for package.json",
+    ],
+    expectedTool: "filesystem.search",
+  },
+  {
+    id: "filesystem_read",
+    utterances: [
+      "read package.json",
+      "read package.json in downloads",
+      "show me package.json",
+    ],
+    expectedTool: "filesystem.read_file",
+  },
+  {
+    id: "filesystem_list",
+    utterances: [
+      "list files in downloads",
+      "what's in my documents",
+      "show files in desktop",
+    ],
+    expectedTool: "filesystem.list_directory",
+  },
+  {
+    id: "create_file_in_cursor",
+    utterances: [
+      "create a new file server.js in cursor",
+      "create file api.ts in cursor",
+      "create new file notes.txt in cursor",
+    ],
+    expectedTool: "filesystem.write_file",
+    expectedStepCount: 2,
+  },
+  {
     id: "paste_reject_empty_clipboard",
     utterances: ["paste here"],
     expectedTool: "__defer__",

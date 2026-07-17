@@ -1,6 +1,7 @@
 /**
  * Phase 4.6 — strip conversational filler and map casual verbs to canonical commands.
  */
+import { isCodeAnalysisUtterance } from "./codeAnalysisIntent.js";
 const LEADING_FILLER =
   /^(?:hey\s+ripple|ripple|okay|ok|yeah|yep|yes|yup|um+|uh+|well|so|like|please|kindly|just|actually|basically|honestly)\s+/i;
 
@@ -55,11 +56,18 @@ export function normalizeForNlu(text: string): string {
   }
 
   if (!recallProtected) {
-    // Find/get → open (desktop file context)
-    s = s.replace(
-      /\b(find|grab|locate)\s+(?:and\s+open\s+)?(?:my\s+)?/gi,
-      "open my ",
-    );
+    // Find/get → open (desktop file context) — never for code-analysis or screen OCR/UI detect
+    const screenUiIntent =
+      /\b(?:screen|window|page|button|field|label|element|elements)\b/i.test(s) &&
+      /\b(?:find|detect|locate|analyze|summarize|describe|explain|visible)\b/i.test(
+        s,
+      );
+    if (!isCodeAnalysisUtterance(s) && !screenUiIntent) {
+      s = s.replace(
+        /\b(find|grab|locate)\s+(?:and\s+open\s+)?(?:my\s+)?/gi,
+        "open my ",
+      );
+    }
 
     // Close / launch casual
     s = s.replace(

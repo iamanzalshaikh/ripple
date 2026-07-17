@@ -1,8 +1,11 @@
 import { resolveTabTargetFromWorkspace } from "../../../automation/browser/browserTabResolver.js";
 import { buildBrowserSearchUrl } from "../../../automation/browser/parseBrowserWorkspaceSearch.js";
 import { buildYouTubeSearchUrl } from "../../../automation/browser/parseMediaWorkspaceSearch.js";
-import { findWorkspaceById } from "../../../automation/desktop/workspaceRegistry.js";
 import { parseFileOperationCommand } from "../../../automation/desktop/parseFileOperationCommand.js";
+import { findWorkspaceById } from "../../../automation/desktop/workspaceRegistry.js";
+import { planStepsForCreateFileInApp } from "../planCreateFileInApp.js";
+import { automationIntentToPlanSteps } from "../automationIntentToPlanSteps.js";
+import { parseAutomationClause } from "../parseAutomationClause.js";
 import { fileOpIntentToPlanSteps } from "../l0FileOpPlanner.js";
 import type { PlanStep } from "../planTypes.js";
 import type { ClauseRecord, ClauseType, RoutingDecision } from "./clauseTypes.js";
@@ -46,7 +49,9 @@ const MATRIX: Record<
   PAINT_OP: { tool: null, forbidden: [], reason: "paint_op" },
   MOUSE_ACTION: { tool: "desktop.mouse_click", forbidden: [], reason: "mouse_action" },
   SAVE_FILE: { tool: "desktop.save_file", forbidden: [], reason: "save_file" },
+  CREATE_FILE: { tool: null, forbidden: [], reason: "create_file" },
   FILE_MUTATE: { tool: null, forbidden: [], reason: "file_mutate" },
+  AUTOMATION: { tool: null, forbidden: [], reason: "automation" },
   UNKNOWN: { tool: null, forbidden: ["*"], reason: "unknown" },
 };
 
@@ -71,8 +76,10 @@ export function routeClause(record: ClauseRecord): RoutingDecision | null {
   if (
     !entry.tool &&
     record.clauseType !== "FILE_MUTATE" &&
+    record.clauseType !== "AUTOMATION" &&
     record.clauseType !== "CLIPBOARD_OP" &&
-    record.clauseType !== "PAINT_OP"
+    record.clauseType !== "PAINT_OP" &&
+    record.clauseType !== "CREATE_FILE"
   ) {
     return null;
   }
@@ -165,6 +172,22 @@ export function routeClause(record: ClauseRecord): RoutingDecision | null {
       }
       return null;
     case "TYPE_TEXT":
+      if (e.keyInput) {
+        return {
+          tool: "desktop.press_keys",
+          args: { keys: e.keyInput },
+          reason: "press_keys",
+          blockedTools,
+        };
+      }
+      if (e.keySequence?.length) {
+        return {
+          tool: "desktop.press_keys",
+          args: { sequence: e.keySequence },
+          reason: "key_sequence",
+          blockedTools,
+        };
+      }
       if (!e.typeText?.trim()) return null;
       return {
         tool: entry.tool,
@@ -330,6 +353,55 @@ export function routeClause(record: ClauseRecord): RoutingDecision | null {
         reason: entry.reason,
         blockedTools,
       };
+    case "CREATE_FILE": {
+      const filename = e.createFilename?.trim();
+      const app = e.createApp?.trim();
+      if (!filename || !app) return null;
+      const steps = planStepsForCreateFileInApp({
+        kind: "create_file_in_app",
+        filename,
+        application: app,
+      });
+      if (!steps.length) return null;
+      if (steps.length === 1) {
+        const step = steps[0]!;
+        return {
+          tool: step.tool,
+          args: { ...step.args },
+          reason: step.reason ?? entry.reason,
+          blockedTools,
+        };
+      }
+      return {
+        tool: "__multi__",
+        args: { steps },
+        reason: entry.reason,
+        blockedTools,
+      };
+    }
+    case "AUTOMATION": {
+      const intent =
+        parseAutomationClause(record.normalized) ??
+        parseAutomationClause(record.raw);
+      if (!intent) return null;
+      const steps = automationIntentToPlanSteps(intent);
+      if (!steps.length) return null;
+      if (steps.length === 1) {
+        const step = steps[0]!;
+        return {
+          tool: step.tool,
+          args: { ...step.args },
+          reason: step.reason ?? entry.reason,
+          blockedTools,
+        };
+      }
+      return {
+        tool: "__multi__",
+        args: { steps },
+        reason: entry.reason,
+        blockedTools,
+      };
+    }
     case "FILE_MUTATE": {
       const op =
         parseFileOperationCommand(record.normalized) ??

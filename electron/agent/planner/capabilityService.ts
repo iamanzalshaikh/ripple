@@ -10,12 +10,26 @@ import {
 import { registerPhase1DesktopTools } from "./tools/desktopTools.js";
 import { registerPhase1BrowserTools } from "./tools/browserTools.js";
 import { registerPhase2FilesystemTools } from "./tools/filesystemTools.js";
+import { registerPhase5BrowserTools } from "./tools/browserGenericTools.js";
+import { registerPhase5AutomationTools } from "./tools/automationTools.js";
+import { registerPhase5AiTools } from "./tools/aiTools.js";
+import { registerPhase1MemoryTools } from "./tools/memoryTools.js";
+import { registerPhase6MemoryIntelligenceTools } from "./tools/memoryIntelligenceTools.js";
+import { registerPhase6ContextTools } from "./tools/contextTools.js";
+import { registerPhase56OsTools } from "./tools/osTools.js";
 import { registerPhase1SystemTools } from "./tools/systemTools.js";
 
 function snapshotFromWorld(world?: WorldModel): CapabilitySnapshot {
   registerPhase1DesktopTools();
   registerPhase1BrowserTools();
+  registerPhase1MemoryTools();
+  registerPhase6MemoryIntelligenceTools();
+  registerPhase6ContextTools();
   registerPhase2FilesystemTools();
+  registerPhase5BrowserTools();
+  registerPhase5AutomationTools();
+  registerPhase5AiTools();
+  registerPhase56OsTools();
   registerPhase1SystemTools();
   const caps = world?.capabilities;
 

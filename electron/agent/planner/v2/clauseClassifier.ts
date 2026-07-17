@@ -1,4 +1,5 @@
 import { parseSaveFileCommand } from "../../../automation/desktop/parseSaveFileCommand.js";
+import { parseCreateFileInAppCommand } from "../../../automation/desktop/parseCreateFileInAppCommand.js";
 import { parseNativeAppCommand } from "../../../automation/desktop/parseNativeAppCommand.js";
 import { parseWorkspaceOpenCommand } from "../../../automation/desktop/parseWorkspaceCommand.js";
 import { parseFileOperationCommand } from "../../../automation/desktop/parseFileOperationCommand.js";
@@ -13,6 +14,7 @@ import {
   parseClipboardCommand,
   parseDesktopInputFallback,
 } from "../../parseDesktopInput.js";
+import { parseAutomationClause } from "../parseAutomationClause.js";
 import { normalizeCompoundPart } from "../compoundClauseResolve.js";
 import type { ClauseRecord, ClauseType, ClauseEntities } from "./clauseTypes.js";
 
@@ -401,6 +403,14 @@ export function classifyClause(
     }, "parseSaveFileCommand", 0.92);
   }
 
+  const createInApp = parseCreateFileInAppCommand(normalized);
+  if (createInApp) {
+    return record(index, raw, normalized, "CREATE_FILE", {
+      createFilename: createInApp.filename,
+      createApp: createInApp.application,
+    }, "parseCreateFileInAppCommand", 0.92);
+  }
+
   const calc = parseCalculatorInput(normalized);
   if (calc) {
     const text = calc.mode === "text" ? calc.text : undefined;
@@ -423,6 +433,28 @@ export function classifyClause(
 
   const input = parseDesktopInputFallback(normalized);
   if (input) {
+    if (input.mode === "keys") {
+      return record(
+        index,
+        raw,
+        normalized,
+        "TYPE_TEXT",
+        { keyInput: input.keys },
+        "parseDesktopInputFallback",
+        0.95,
+      );
+    }
+    if (input.mode === "sequence") {
+      return record(
+        index,
+        raw,
+        normalized,
+        "TYPE_TEXT",
+        { keySequence: input.sequence },
+        "parseDesktopInputFallback",
+        0.95,
+      );
+    }
     const intent = desktopInputToTypeIntent(input);
     const typeRec = record(index, raw, normalized, "TYPE_TEXT", {
       typeText: intent.text,
@@ -471,6 +503,33 @@ export function classifyClause(
     return record(index, raw, normalized, "FOLDER_OPEN", {
       folder: folder.folder,
     }, "parseWellKnownFolderOpen", 0.9);
+  }
+
+  const automation =
+    parseAutomationClause(normalized) ?? parseAutomationClause(raw);
+  if (automation) {
+    return record(
+      index,
+      raw,
+      normalized,
+      "AUTOMATION",
+      {
+        automationKind: automation.kind,
+        ...(automation.path ? { automationPath: automation.path } : {}),
+        ...(automation.projectHint
+          ? { automationProjectHint: automation.projectHint }
+          : {}),
+        ...(automation.query ? { automationQuery: automation.query } : {}),
+        ...(automation.projectRoot
+          ? { automationProjectRoot: automation.projectRoot }
+          : {}),
+        ...(automation.kind === "run_command"
+          ? { automationQuery: automation.command }
+          : {}),
+      },
+      "parseAutomationClause",
+      0.9,
+    );
   }
 
   const fileOp = parseFileOperationCommand(normalized);

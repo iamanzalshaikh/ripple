@@ -23,7 +23,7 @@ import type { ExecutionPlan, L0PlannerResult } from "./planTypes.js";
 const WHATSAPP_URL = "https://web.whatsapp.com";
 
 const AMBIGUOUS_SEND =
-  /^(?:send|share)\s+(?:this|that)\s+(?:to|with)\s+/i;
+  /^(?:send|share)\s+(?:this|that|it)\s+(?:to|with)\s+/i;
 
 /** Bare "search <name>" — no file/web keywords — while a WhatsApp chat is open. */
 const BARE_SEARCH = /^\s*search\s+(?:for\s+)?(.+?)\s*$/i;
@@ -242,10 +242,10 @@ export function tryL0WhatsAppPlan(
   rawCommand: string,
   normalized: string,
 ): L0PlannerResult | null {
-  if (AMBIGUOUS_SEND.test(rawCommand.trim())) return null;
-
   const referential = tryReferentialWhatsAppPlan(rawCommand, normalized);
   if (referential) return referential;
+
+  if (AMBIGUOUS_SEND.test(rawCommand.trim())) return null;
 
   if (!isWhatsAppPlannerCommand(rawCommand)) return null;
   if (isSendItemToContactCommand(rawCommand)) return null;

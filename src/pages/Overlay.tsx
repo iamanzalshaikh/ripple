@@ -8,7 +8,22 @@ type OverlayPhase =
   | "processing"
   | "result"
   | "error"
-  | "clarify";
+  | "clarify"
+  | "code-repair";
+
+type CodeRepairPanel = {
+  file: string;
+  fileName: string;
+  line: number;
+  code: string;
+  message: string;
+  why: string;
+  suggestedFix: string;
+  before?: string;
+  after?: string;
+  hasSafePatch: boolean;
+  projectRoot: string;
+};
 
 const LABELS: Record<OverlayPhase, string> = {
   idle: "Ready",
@@ -17,6 +32,7 @@ const LABELS: Record<OverlayPhase, string> = {
   result: "Done",
   error: "Error",
   clarify: "Pick one",
+  "code-repair": "Error found",
 };
 
 export function OverlayPage() {
@@ -27,11 +43,15 @@ export function OverlayPage() {
   >([]);
   const [clarifySpoken, setClarifySpoken] = useState("");
   const [clarifyQuestion, setClarifyQuestion] = useState<string | null>(null);
+  const [repairPanel, setRepairPanel] = useState<CodeRepairPanel | null>(null);
+  const [repairBusy, setRepairBusy] = useState(false);
 
   const sessionIdRef = useRef<string | undefined>(undefined);
   const streamIdRef = useRef<string>("");
   const recordingRef = useRef(false);
   const busyRef = useRef(false);
+  const voiceModeRef = useRef<"command" | "dictation">("command");
+  const [voiceMode, setVoiceMode] = useState<"command" | "dictation">("command");
 
   const voice = useVoiceCapture();
 
@@ -74,10 +94,22 @@ export function OverlayPage() {
       setPhase("clarify");
       setError(null);
     });
+    const unsubRepairShow = api.onCodeRepairShow?.((payload) => {
+      setRepairPanel(payload);
+      setPhase("code-repair");
+      setError(null);
+    });
+    const unsubRepairHide = api.onCodeRepairHide?.(() => {
+      setRepairPanel(null);
+      setRepairBusy(false);
+      setPhase("idle");
+    });
     return () => {
       unsubShow?.();
       unsubHide?.();
       unsubClarify?.();
+      unsubRepairShow?.();
+      unsubRepairHide?.();
     };
   }, []);
 
@@ -93,6 +125,18 @@ export function OverlayPage() {
       execution?: { allSucceeded: boolean };
     };
     setPhase(data.execution?.allSucceeded === false ? "error" : "result");
+  }, []);
+
+  const runDictation = useCallback(async (text: string) => {
+    const res = await getRippleApi().executeDictation({ text, insert: true });
+    if (!res.ok) {
+      throw new Error(res.error ?? "Dictation failed");
+    }
+    console.info(
+      `[ripple-overlay] dictation final (${res.correctionKind}):`,
+      res.finalText,
+    );
+    setPhase("result");
   }, []);
 
   const cancelRecording = useCallback(async () => {
@@ -150,7 +194,11 @@ export function OverlayPage() {
       }
 
       console.info("[ripple-overlay] transcript raw:", text);
-      await runCommand(text);
+      if (voiceModeRef.current === "dictation") {
+        await runDictation(text);
+      } else {
+        await runCommand(text);
+      }
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Command failed");
       setPhase("error");
@@ -158,7 +206,7 @@ export function OverlayPage() {
       busyRef.current = false;
       await getRippleApi().setOverlayVoiceActive(false);
     }
-  }, [runCommand, voice]);
+  }, [runCommand, runDictation, voice]);
 
   const startRecording = useCallback(async () => {
     if (recordingRef.current || busyRef.current) return;
@@ -184,7 +232,11 @@ export function OverlayPage() {
 
   useEffect(() => {
     const api = getRippleApi();
-    const unsubToggle = api.onVoiceToggle(({ action }) => {
+    const unsubToggle = api.onVoiceToggle(({ action, mode }) => {
+      if (mode === "command" || mode === "dictation") {
+        voiceModeRef.current = mode;
+        setVoiceMode(mode);
+      }
       if (action === "start") {
         void startRecording();
         return;
@@ -213,6 +265,11 @@ export function OverlayPage() {
   }, [voice]);
 
   const label = error && phase === "error" ? error.slice(0, 40) : LABELS[phase];
+  const modeBanner = voiceMode === "dictation" ? "Dictation" : "Command";
+  const hotkeyHint =
+    voiceMode === "dictation"
+      ? "Alt+Space — stop · Esc — cancel"
+      : "Ctrl+Space — stop · Esc — cancel";
 
   const pickClarify = useCallback(async (path: string) => {
     await getRippleApi().pickDisambiguation?.(path);
@@ -225,6 +282,97 @@ export function OverlayPage() {
     setClarifyItems([]);
     setPhase("idle");
   }, []);
+
+  const runRepairAction = useCallback(
+    async (action: "open" | "apply" | "ignore") => {
+      if (repairBusy) return;
+      setRepairBusy(true);
+      try {
+        const res = await getRippleApi().codeRepairAction?.(action);
+        if (!res?.ok && action !== "open") {
+          setError(res?.error ?? "Action failed");
+        }
+        if (action === "ignore" || action === "apply") {
+          setRepairPanel(null);
+          setPhase(action === "apply" ? "processing" : "idle");
+        }
+      } catch (e: unknown) {
+        setError(e instanceof Error ? e.message : "Action failed");
+      } finally {
+        setRepairBusy(false);
+      }
+    },
+    [repairBusy],
+  );
+
+  if (phase === "code-repair" && repairPanel) {
+    return (
+      <div className="flex h-full w-full flex-col gap-2 overflow-hidden p-3">
+        <p className="text-[11px] font-semibold tracking-wide text-rose-300">
+          Error found
+        </p>
+        <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto text-[11px] leading-snug text-zinc-200">
+          <p>
+            <span className="text-zinc-500">File </span>
+            <span className="break-all text-zinc-100">{repairPanel.fileName}</span>
+          </p>
+          <p>
+            <span className="text-zinc-500">Line </span>
+            <span className="text-zinc-100">{repairPanel.line}</span>
+            <span className="ml-2 text-zinc-500">{repairPanel.code}</span>
+          </p>
+          <p>
+            <span className="text-zinc-500">Problem </span>
+            {repairPanel.message}
+          </p>
+          <p>
+            <span className="text-zinc-500">Why </span>
+            {repairPanel.why}
+          </p>
+          <p>
+            <span className="text-zinc-500">Suggested </span>
+            {repairPanel.suggestedFix}
+          </p>
+          {repairPanel.before ? (
+            <p className="rounded bg-zinc-900/80 px-1.5 py-1 font-mono text-[10px] text-amber-200/90">
+              Before: {repairPanel.before}
+            </p>
+          ) : null}
+          {repairPanel.after ? (
+            <p className="rounded bg-zinc-900/80 px-1.5 py-1 font-mono text-[10px] text-emerald-300/90">
+              After: {repairPanel.after}
+            </p>
+          ) : null}
+        </div>
+        <div className="flex shrink-0 gap-1.5">
+          <button
+            type="button"
+            disabled={repairBusy}
+            className="no-drag flex-1 rounded-md border border-zinc-600/50 bg-zinc-900/95 px-2 py-1.5 text-[11px] text-zinc-100 hover:border-zinc-400/60 disabled:opacity-50"
+            onClick={() => void runRepairAction("open")}
+          >
+            Open in Cursor
+          </button>
+          <button
+            type="button"
+            disabled={repairBusy || !repairPanel.hasSafePatch}
+            className="no-drag flex-1 rounded-md border border-emerald-500/40 bg-emerald-950/80 px-2 py-1.5 text-[11px] text-emerald-100 hover:border-emerald-400/70 disabled:opacity-40"
+            onClick={() => void runRepairAction("apply")}
+          >
+            Apply Fix
+          </button>
+          <button
+            type="button"
+            disabled={repairBusy}
+            className="no-drag rounded-md px-2 py-1.5 text-[11px] text-zinc-500 hover:text-zinc-300 disabled:opacity-50"
+            onClick={() => void runRepairAction("ignore")}
+          >
+            Ignore
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (phase === "clarify" && clarifyQuestion && clarifyItems.length === 0) {
     return (
@@ -268,9 +416,18 @@ export function OverlayPage() {
   return (
     <div
       className="drag-region flex h-full w-full items-center justify-center"
-      title="Ctrl+Space — stop · Esc — cancel"
+      title={hotkeyHint}
     >
       <div className="voice-pill flex items-center gap-2.5 rounded-full border border-violet-500/40 bg-zinc-950/95 px-3.5 py-2 shadow-[0_8px_32px_rgba(0,0,0,0.55),0_0_24px_rgba(124,58,237,0.2)]">
+        <span
+          className={`rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide ${
+            voiceMode === "dictation"
+              ? "bg-emerald-500/20 text-emerald-300"
+              : "bg-violet-500/20 text-violet-300"
+          }`}
+        >
+          {modeBanner}
+        </span>
         <div className="relative flex h-7 w-7 shrink-0 items-center justify-center">
           {phase === "listening" ? (
             <>

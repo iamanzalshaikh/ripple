@@ -337,7 +337,7 @@ export function parseDesktopInputFallback(
     return { mode: "text", text: replaceWrite[1].trim(), replaceAll: true };
   }
 
-  if (/^(?:press|hit|tap)\s+enter$/i.test(normalized)) {
+  if (/^(?:press|hit|tap)\s+enter(?:\s+to\s+.+)?$/i.test(normalized)) {
     return { mode: "keys", keys: "{ENTER}" };
   }
   if (/^(?:press|hit|tap)\s+tab$/i.test(normalized)) {
@@ -389,7 +389,11 @@ export function parseDesktopInputFallback(
     return { mode: "mouse", action: "move", ...delta };
   }
 
-  if (/^move\s+mouse\s+to\s+(?:the\s+)?center$/i.test(normalized)) {
+  if (
+    /^move\s+(?:(?:the|my)\s+)?(?:mouse|cursor)\s+to\s+(?:the\s+)?(?:center|middle)(?:\s+of\s+(?:the\s+)?screen)?$/i.test(
+      normalized,
+    )
+  ) {
     return { mode: "mouse", action: "move_to_center" };
   }
 
@@ -459,6 +463,29 @@ export function parseDesktopInputFallback(
     )
   ) {
     return { mode: "keys", keys: "{END}" };
+  }
+
+  const arrowWord = normalized.match(
+    /^(?:move|press)\s+(?:the\s+)?(?:cursor|caret)\s+(one|two|three|four|five)\s+lines?\s+(up|down|upward|downward)(?:\s+using\s+arrow\s+keys?)?$/i,
+  );
+  if (arrowWord?.[1] && arrowWord[2]) {
+    const count = parseSpokenCount(arrowWord[1]);
+    const dir = arrowWord[2].toLowerCase().startsWith("u") ? "{UP}" : "{DOWN}";
+    return {
+      mode: "sequence",
+      sequence: Array.from({ length: count }, () => ({ value: dir, delayMs: 30 })),
+    };
+  }
+  const arrowLines = normalized.match(
+    /^(?:move|press)\s+(?:the\s+)?(?:cursor|caret)\s+(\d+)\s+lines?\s+(up|down|upward|downward)(?:\s+using\s+arrow\s+keys?)?$/i,
+  );
+  if (arrowLines?.[1] && arrowLines[2]) {
+    const count = Math.min(20, Number.parseInt(arrowLines[1], 10) || 1);
+    const dir = arrowLines[2].toLowerCase().startsWith("u") ? "{UP}" : "{DOWN}";
+    return {
+      mode: "sequence",
+      sequence: Array.from({ length: count }, () => ({ value: dir, delayMs: 30 })),
+    };
   }
 
   const dirMap: Record<string, string> = {

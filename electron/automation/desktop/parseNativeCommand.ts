@@ -39,7 +39,8 @@ import type { ReferentialSendIntent } from "../voice/nlu/parseReferentialWhatsAp
 import type { RememberLifeEventIntent } from "../retriever/parseSemanticOpen.js";
 import type { GmailOpenEmailIntent } from "../gmail/parseGmailOpenEmail.js";
 import type { OpenCrossAppAttachmentIntent } from "../gmail/parseOpenCrossAppAttachment.js";
-import type { SaveFileIntent } from "./parseSaveFileCommand.js";
+import { parseSaveFileCommand, type SaveFileIntent } from "./parseSaveFileCommand.js";
+import { parseCreateFileInAppCommand } from "./parseCreateFileInAppCommand.js";
 import { parseReferentialSend } from "../voice/nlu/parseReferentialWhatsApp.js";
 import { parseDesktopIntent } from "../voice/nlu/pipeline.js";
 import { normalizeTranscript } from "../voice/normalizeTranscript.js";
@@ -78,6 +79,7 @@ export type NativeCommandIntent =
   | GmailOpenEmailIntent
   | OpenCrossAppAttachmentIntent
   | SaveFileIntent
+  | CreateFileInAppIntent
   | TypeTextIntent
   | BrowserSearchIntent;
 
@@ -124,6 +126,9 @@ export function parseNativeCommandStrict(
 
   const referentialSend = parseReferentialSend(command);
   if (referentialSend) return referentialSend;
+
+  const createInApp = parseCreateFileInAppCommand(command);
+  if (createInApp) return createInApp;
 
   const fileOp = parseFileOperationCommand(command);
   if (fileOp) return fileOp;

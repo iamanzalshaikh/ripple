@@ -7,6 +7,10 @@ import {
 } from "../../automation/voice/nlu/compoundParse.js";
 import { lookupBinding } from "./plannerMemory.js";
 import type { ResolvedEntities } from "./toolTypes.js";
+import {
+  INHERIT_PROJECT_ROOT,
+  isInheritedProjectRoot,
+} from "./inheritContext.js";
 
 export type EntityResolveInput = {
   utterance: string;
@@ -67,6 +71,29 @@ export async function bindStepArgs(
   resolved: ResolvedEntities,
 ): Promise<Record<string, unknown>> {
   const merged = { ...args, ...resolved };
+  const projectRoot =
+    typeof resolved.projectRoot === "string" ? resolved.projectRoot.trim() : "";
+
+  if (projectRoot) {
+    if (isInheritedProjectRoot(merged.projectRoot)) {
+      if (
+        tool.startsWith("automation.") &&
+        tool !== "automation.open_project" &&
+        tool !== "automation.open_terminal"
+      ) {
+        merged.projectRoot = projectRoot;
+      }
+    }
+    if (merged.cwd === "." || merged.cwd === INHERIT_PROJECT_ROOT) {
+      merged.cwd = projectRoot;
+    }
+    if (merged.path === INHERIT_PROJECT_ROOT) {
+      merged.path = projectRoot;
+    }
+    if (merged.parentFolder === INHERIT_PROJECT_ROOT) {
+      merged.parentFolder = projectRoot;
+    }
+  }
 
   if (tool === "desktop.launch_app") {
     if (merged._nativeIntent || merged._desktopPayload) {

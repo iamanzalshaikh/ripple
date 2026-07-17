@@ -104,6 +104,12 @@ export function parseDesktopCommand(command?: string | null): DesktopOpenIntent 
   const openItem = cmd.match(/^\s*open\s+(?:my\s+)?(.+?)\s*\.?\s*$/i);
   if (openItem?.[1]?.trim()) {
     const name = openItem[1].trim();
+    if (/^(?:the\s+)?project\b/i.test(name) || /^project\s+/i.test(name)) {
+      return null;
+    }
+    if (/[A-Za-z]:\\/.test(name)) {
+      return null;
+    }
     if (hasCompoundTailAfterFirstClause(name) || COMPOUND_TAIL_IN_ITEM.test(name)) {
       return null;
     }

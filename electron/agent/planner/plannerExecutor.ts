@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { CommandResultPayload } from "../../automation/types.js";
 import type { WorldModel } from "../types.js";
 import { executionPlanToPayload } from "./executionPlanToPayload.js";
@@ -46,7 +47,25 @@ export function buildExecutorPayload(
     };
   }
 
-  const payload = executionPlanToPayload(sanitized, command);
+  let payload = executionPlanToPayload(sanitized, command);
+  // Tool-only plans (memory.*, context.*, …) must still reach the executor even if
+  // the legacy INSERT_TEXT bridge omits a prefix — synthesize a minimal payload.
+  if (
+    (!payload?.actions?.length || !payload.command_id) &&
+    isToolExecutorRouteEnabled() &&
+    planEligibleForToolExecutor(sanitized)
+  ) {
+    payload = {
+      command_id: randomUUID(),
+      intent: "workflow",
+      output_type: "action",
+      actions: sanitized.steps.map((step) => ({
+        type: "INSERT_TEXT" as const,
+        status: "pending" as const,
+        data: { _p85Tool: step.tool, ...step.args },
+      })),
+    };
+  }
   if (!payload?.actions?.length || !payload.command_id) {
     return { kind: "invalid", errors: ["payload_build_failed"] };
   }

@@ -8,6 +8,9 @@ import {
   takePrimaryFileOpCommand,
 } from "./fileOpParse.js";
 
+const LOC_IN =
+  /^(.+?)\s+(?:in|inside)\s+(?:my\s+|the\s+)?(downloads?|documents?|desktop)\s*$/i;
+
 export type FileOpIntent =
   | { kind: "create_folder"; name: string; parent?: string }
   | { kind: "create_file"; name: string; parent?: string }
@@ -152,9 +155,7 @@ export function parseFileOperationCommand(
   );
   if (folderMatch?.[1]) {
     const nameRaw = folderMatch[1].trim();
-    const inMid = nameRaw.match(
-      /^(.+?)\s+in\s+(?:my\s+|the\s+)?(downloads?|documents?|desktop)\s*$/i,
-    );
+    const inMid = nameRaw.match(LOC_IN);
     if (inMid?.[1] && inMid[2]) {
       return {
         kind: "create_folder",
@@ -185,9 +186,7 @@ export function parseFileOperationCommand(
   );
   if (fileMatch?.[1]) {
     const nameRaw = fileMatch[1].trim();
-    const inMid = nameRaw.match(
-      /^(.+?)\s+in\s+(?:my\s+|the\s+)?(downloads?|documents?|desktop)\s*$/i,
-    );
+    const inMid = nameRaw.match(LOC_IN);
     if (inMid?.[1] && inMid[2]) {
       return {
         kind: "create_file",

@@ -353,3 +353,31 @@ export function queryLatestByExtension(
 
   return rows.map(rowToPath);
 }
+
+/** Fuzzy directory search for spoken folder / project names. */
+export function searchIndexedDirectories(
+  spoken: string,
+  limit = 12,
+): { path: string; filename: string }[] {
+  const query = spoken.trim().toLowerCase();
+  if (!query || getFileIndexCount() === 0) return [];
+
+  const tokens = query
+    .replace(/[()]/g, " ")
+    .split(/\s+/)
+    .filter((t) => t.length >= 2);
+  if (!tokens.length) return [];
+
+  const likeClauses = tokens.map(() => "lower(filename) LIKE ?").join(" AND ");
+  const params = tokens.map((t) => `%${t}%`);
+
+  const rows = getRippleDb()
+    .prepare(
+      `SELECT path, filename FROM file_index
+       WHERE is_directory = 1 AND ${likeClauses}
+       ORDER BY modified_at DESC LIMIT ?`,
+    )
+    .all(...params, Math.max(limit, 20)) as { path: string; filename: string }[];
+
+  return rows.slice(0, limit);
+}

@@ -29,25 +29,16 @@ function isSemanticMemoryTeach(norm: string): boolean {
 export function isMessagingAdapterCommand(command: string): boolean {
   const t = command.trim();
   if (!t) return false;
-  if (/\b(?:instagram)\b/i.test(t) && /\b(?:post|message|send|connect)\b/i.test(t)) {
-    return true;
-  }
   return false;
 }
 
 /**
  * P8.5 must not plan/execute these — legacy adapters own the full utterance.
- * WhatsApp, YouTube, Gmail, and LinkedIn route through dedicated L0 tool planners.
+ * WhatsApp, YouTube, Gmail, LinkedIn, and Instagram route through dedicated L0 tool planners.
  */
 export function shouldBypassP85Planner(command: string): boolean {
   const t = command.trim();
   if (!t) return false;
-  if (
-    /\b(?:instagram)\b/i.test(t) &&
-    /\b(?:post|message|send|connect)\b/i.test(t)
-  ) {
-    return true;
-  }
   const norm = normalizeTranscript(t);
   if (isSemanticMemoryTeach(norm)) return false;
   return false;

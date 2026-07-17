@@ -27,6 +27,7 @@ import {
   getWindowUnderCursorNative,
 } from "../../native/win32Bridge.js";
 import { captureObservation, verifyTypingObservation } from "../../agent/observe.js";
+import { retryInsertAfterVerifyFail } from "../input/inputStrategy.js";
 import { retryDesktopKeys } from "../../agent/retryTyping.js";
 import {
   logInsertTextDiagnostics,
@@ -312,6 +313,23 @@ async function finishTypingResult(
     console.warn(
       `[ripple-desktop] typing observe: ${verified.reason ?? "failed"} fg=${verified.after.foreground?.processName ?? "?"}`,
     );
+    if (strict && expectedText?.trim()) {
+      const recovered = await retryInsertAfterVerifyFail(
+        expectedText,
+        "sendkeys",
+        beforeObserve,
+      );
+      if (recovered) {
+        const reverify = await verifyTypingObservation({
+          before: beforeObserve,
+          expectedText,
+          settleMs: 220,
+        });
+        if (reverify.ok) {
+          return recovered.detail;
+        }
+      }
+    }
     if (strict) {
       throw new Error(`Typing verification failed: ${verified.reason ?? "unknown"}`);
     }

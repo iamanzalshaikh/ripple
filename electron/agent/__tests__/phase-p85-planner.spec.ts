@@ -238,6 +238,35 @@ describe("P8.5 L0 planner", () => {
     expect(l0.plan.steps.some((s) => s.tool === "desktop.save_file")).toBe(true);
   });
 
+  it("parses create new file server.js in cursor with app target", () => {
+    const l0 = runL0Planner(
+      "Create a new file, server.js in cursor",
+      "create a new file, server.js in cursor",
+      emptyWorld({
+        foreground: {
+          processName: "Cursor.exe",
+          windowTitle: "QueryProvider.tsx - projectRipple - Cursor",
+          hwnd: 1,
+        },
+      }),
+    );
+    expect(l0.kind).toBe("plan");
+    if (l0.kind !== "plan") return;
+    const write = l0.plan.steps.find((s) => s.tool === "filesystem.write_file");
+    const save = l0.plan.steps.find((s) => s.tool === "desktop.save_file");
+    expect(Boolean(write || save)).toBe(true);
+    if (write) {
+      expect(String(write.args.path)).toContain("server.js");
+      expect(l0.plan.steps.some((s) => s.tool === "desktop.focus_window")).toBe(
+        true,
+      );
+    }
+    if (save) {
+      expect(save.args.filename).toBe("server.js");
+      expect(save.args.app).toBe("cursor");
+    }
+  });
+
   it("builds executor payload for create folder named inside documents", () => {
     const l0 = runL0Planner(
       "Open Notepad and type hello",
@@ -272,6 +301,39 @@ describe("P8.5 L0 planner", () => {
     expect(l0.kind).toBe("plan");
     if (l0.kind !== "plan") return;
     expect(l0.plan.steps[0]?.tool).toBe("system.clipboard.read");
+  });
+
+  it("maps what window is active to desktop.get_active_window", () => {
+    const l0 = runL0Planner(
+      "What window is active",
+      "what window is active",
+      emptyWorld(),
+    );
+    expect(l0.kind).toBe("plan");
+    if (l0.kind !== "plan") return;
+    expect(l0.plan.steps[0]?.tool).toBe("desktop.get_active_window");
+  });
+
+  it("maps which application currently I am using to desktop.get_active_window", () => {
+    const l0 = runL0Planner(
+      "Which application currently I am using",
+      "which application currently i am using",
+      emptyWorld(),
+    );
+    expect(l0.kind).toBe("plan");
+    if (l0.kind !== "plan") return;
+    expect(l0.plan.steps[0]?.tool).toBe("desktop.get_active_window");
+  });
+
+  it("maps current workspace to live desktop workspace context", () => {
+    const l0 = runL0Planner(
+      "Explain my current workspace",
+      "explain my current workspace",
+      emptyWorld(),
+    );
+    expect(l0.kind).toBe("plan");
+    if (l0.kind !== "plan") return;
+    expect(l0.plan.steps[0]?.tool).toBe("desktop.get_current_workspace");
   });
 
   it("maps copy hello to clipboard to system.clipboard.write", () => {
@@ -418,7 +480,7 @@ describe("P8.5 GPT bridge", () => {
 
   it("classifies planner GPT candidates", () => {
     expect(isPlannerGptCandidate("open HRMS")).toBe(true);
-    expect(isMessagingAdapterCommand("message ahmed on instagram")).toBe(true);
+    expect(isMessagingAdapterCommand("message ahmed on instagram")).toBe(false);
     expect(isMessagingAdapterCommand("message ahmed on linkedin")).toBe(false);
   });
 

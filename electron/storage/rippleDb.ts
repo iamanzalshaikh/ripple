@@ -223,6 +223,83 @@ function migrateRippleSchema(database: DatabaseSync): void {
   database.exec(`
     CREATE INDEX IF NOT EXISTS idx_semantic_refs_contact ON semantic_refs(contact)
   `);
+
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS user_preferences (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      preferred_ide TEXT,
+      preferred_terminal TEXT,
+      preferred_browser TEXT,
+      default_projects_root TEXT,
+      confirm_strictness TEXT,
+      language TEXT,
+      updated_at TEXT NOT NULL
+    )
+  `);
+
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS active_workspace (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      name TEXT NOT NULL,
+      path TEXT NOT NULL,
+      goal TEXT,
+      set_at TEXT NOT NULL
+    )
+  `);
+
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS recent_context (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_path TEXT,
+      file_path TEXT,
+      diagnostic_code TEXT,
+      command TEXT,
+      created_at TEXT NOT NULL
+    )
+  `);
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS idx_recent_context_created
+      ON recent_context(created_at DESC)
+  `);
+
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS voice_corrections (
+      spoken_form TEXT PRIMARY KEY NOT NULL,
+      canonical_form TEXT NOT NULL,
+      source TEXT NOT NULL DEFAULT 'voice',
+      updated_at TEXT NOT NULL
+    )
+  `);
+
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS usage_counts (
+      kind TEXT NOT NULL,
+      key TEXT NOT NULL,
+      count INTEGER NOT NULL DEFAULT 0,
+      last_used_at TEXT NOT NULL,
+      PRIMARY KEY (kind, key)
+    )
+  `);
+
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS user_goals (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      title TEXT,
+      phase TEXT,
+      milestone TEXT,
+      notes_json TEXT,
+      updated_at TEXT NOT NULL
+    )
+  `);
+
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS named_workflows (
+      name TEXT PRIMARY KEY NOT NULL,
+      steps_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `);
 }
 
 export function initRippleDb(): void {
@@ -250,4 +327,12 @@ export function closeRippleDb(): void {
     db.close();
     db = null;
   }
+}
+
+/** Isolates P6 storage tests from the user's real ripple.db. */
+export function openRippleDbInMemoryForTests(): void {
+  closeRippleDb();
+  db = new DatabaseSync(":memory:");
+  db.exec(SCHEMA);
+  migrateRippleSchema(db);
 }

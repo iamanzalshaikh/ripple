@@ -1,0 +1,2211 @@
+[
+  {
+    "id": "P55-001",
+    "section": "P5.5",
+    "index": 1,
+    "command": "Analyze my current screen",
+    "kind": "execute",
+    "tools": [
+      "ai.reason_about_task"
+    ],
+    "altToolSets": [
+      [
+        "ai.summarize_screen"
+      ],
+      [
+        "ai.extract_context"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P55-002",
+    "section": "P5.5",
+    "index": 2,
+    "command": "Summarize what I am currently doing",
+    "kind": "execute",
+    "tools": [
+      "ai.summarize_screen"
+    ],
+    "altToolSets": [
+      [
+        "ai.extract_context"
+      ],
+      [
+        "ai.detect_element"
+      ],
+      [
+        "ai.reason_about_task"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P55-003",
+    "section": "P5.5",
+    "index": 3,
+    "command": "Explain my current workspace",
+    "kind": "execute",
+    "tools": [
+      "ai.reason_about_task"
+    ],
+    "altToolSets": [
+      [
+        "ai.summarize_screen"
+      ],
+      [
+        "ai.extract_context"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P55-004",
+    "section": "P5.5",
+    "index": 4,
+    "command": "What application am I using?",
+    "kind": "execute",
+    "tools": [
+      "ai.summarize_screen"
+    ],
+    "altToolSets": [
+      [
+        "ai.extract_context"
+      ],
+      [
+        "ai.detect_element"
+      ],
+      [
+        "ai.reason_about_task"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P55-005",
+    "section": "P5.5",
+    "index": 5,
+    "command": "What is visible on my screen?",
+    "kind": "execute",
+    "tools": [
+      "ai.summarize_screen"
+    ],
+    "altToolSets": [
+      [
+        "ai.extract_context"
+      ],
+      [
+        "ai.detect_element"
+      ],
+      [
+        "ai.reason_about_task"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P55-006",
+    "section": "P5.5",
+    "index": 6,
+    "command": "Find important elements on this screen",
+    "kind": "execute",
+    "tools": [
+      "ai.summarize_screen"
+    ],
+    "altToolSets": [
+      [
+        "ai.extract_context"
+      ],
+      [
+        "ai.detect_element"
+      ],
+      [
+        "ai.reason_about_task"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P55-007",
+    "section": "P5.5",
+    "index": 7,
+    "command": "Explain this page",
+    "kind": "execute",
+    "tools": [
+      "ai.reason_about_task"
+    ],
+    "altToolSets": [
+      [
+        "ai.summarize_screen"
+      ],
+      [
+        "ai.extract_context"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P55-008",
+    "section": "P5.5",
+    "index": 8,
+    "command": "Find possible actions available here",
+    "kind": "execute",
+    "tools": [
+      "ai.summarize_screen"
+    ],
+    "altToolSets": [
+      [
+        "ai.extract_context"
+      ],
+      [
+        "ai.detect_element"
+      ],
+      [
+        "ai.reason_about_task"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P55-009",
+    "section": "P5.5",
+    "index": 9,
+    "command": "Read my current context",
+    "kind": "execute",
+    "tools": [
+      "ai.summarize_screen"
+    ],
+    "altToolSets": [
+      [
+        "ai.extract_context"
+      ],
+      [
+        "ai.detect_element"
+      ],
+      [
+        "ai.reason_about_task"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P55-010",
+    "section": "P5.5",
+    "index": 10,
+    "command": "Give me a summary of my current task",
+    "kind": "execute",
+    "tools": [
+      "ai.summarize_screen"
+    ],
+    "altToolSets": [
+      [
+        "ai.extract_context"
+      ],
+      [
+        "ai.detect_element"
+      ],
+      [
+        "ai.reason_about_task"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P55-011",
+    "section": "P5.5",
+    "index": 11,
+    "command": "I want to improve my project. Create a plan",
+    "kind": "execute",
+    "tools": [
+      "ai.generate_action_plan"
+    ],
+    "altToolSets": [
+      [
+        "ai.reason_about_task"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P55-012",
+    "section": "P5.5",
+    "index": 12,
+    "command": "Analyze this problem and suggest a solution",
+    "kind": "execute",
+    "tools": [
+      "ai.reason_about_task"
+    ],
+    "altToolSets": [
+      [
+        "ai.summarize_screen"
+      ],
+      [
+        "ai.extract_context"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P55-013",
+    "section": "P5.5",
+    "index": 13,
+    "command": "Break this task into smaller steps",
+    "kind": "execute",
+    "tools": [
+      "ai.summarize_screen"
+    ],
+    "altToolSets": [
+      [
+        "ai.extract_context"
+      ],
+      [
+        "ai.detect_element"
+      ],
+      [
+        "ai.reason_about_task"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P55-014",
+    "section": "P5.5",
+    "index": 14,
+    "command": "Create a safe action plan",
+    "kind": "execute",
+    "tools": [
+      "ai.generate_action_plan"
+    ],
+    "altToolSets": [
+      [
+        "ai.reason_about_task"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P55-015",
+    "section": "P5.5",
+    "index": 15,
+    "command": "Explain how you would solve this",
+    "kind": "execute",
+    "tools": [
+      "ai.reason_about_task"
+    ],
+    "altToolSets": [
+      [
+        "ai.summarize_screen"
+      ],
+      [
+        "ai.extract_context"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P55-016",
+    "section": "P5.5",
+    "index": 16,
+    "command": "Find the best approach for this task",
+    "kind": "execute",
+    "tools": [
+      "ai.summarize_screen"
+    ],
+    "altToolSets": [
+      [
+        "ai.extract_context"
+      ],
+      [
+        "ai.detect_element"
+      ],
+      [
+        "ai.reason_about_task"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P55-017",
+    "section": "P5.5",
+    "index": 17,
+    "command": "Create a developer workflow",
+    "kind": "execute",
+    "tools": [
+      "ai.generate_action_plan"
+    ],
+    "altToolSets": [
+      [
+        "ai.reason_about_task"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P55-018",
+    "section": "P5.5",
+    "index": 18,
+    "command": "Analyze risks before making changes",
+    "kind": "execute",
+    "tools": [
+      "ai.reason_about_task"
+    ],
+    "altToolSets": [
+      [
+        "ai.summarize_screen"
+      ],
+      [
+        "ai.extract_context"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P55-019",
+    "section": "P5.5",
+    "index": 19,
+    "command": "Tell me possible problems with this approach",
+    "kind": "execute",
+    "tools": [
+      "ai.summarize_screen"
+    ],
+    "altToolSets": [
+      [
+        "ai.extract_context"
+      ],
+      [
+        "ai.detect_element"
+      ],
+      [
+        "ai.reason_about_task"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P55-020",
+    "section": "P5.5",
+    "index": 20,
+    "command": "Recommend the next step",
+    "kind": "execute",
+    "tools": [
+      "ai.summarize_screen"
+    ],
+    "altToolSets": [
+      [
+        "ai.extract_context"
+      ],
+      [
+        "ai.detect_element"
+      ],
+      [
+        "ai.reason_about_task"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P55-021",
+    "section": "P5.5",
+    "index": 21,
+    "command": "Analyze my school-management project",
+    "kind": "execute",
+    "tools": [
+      "ai.reason_about_task"
+    ],
+    "altToolSets": [
+      [
+        "ai.summarize_screen"
+      ],
+      [
+        "ai.extract_context"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P55-022",
+    "section": "P5.5",
+    "index": 22,
+    "command": "Explain this project architecture",
+    "kind": "execute",
+    "tools": [
+      "ai.reason_about_task"
+    ],
+    "altToolSets": [
+      [
+        "ai.summarize_screen"
+      ],
+      [
+        "ai.extract_context"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P55-023",
+    "section": "P5.5",
+    "index": 23,
+    "command": "Tell me the technologies used in this project",
+    "kind": "execute",
+    "tools": [
+      "ai.summarize_screen"
+    ],
+    "altToolSets": [
+      [
+        "ai.extract_context"
+      ],
+      [
+        "ai.detect_element"
+      ],
+      [
+        "ai.reason_about_task"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P55-024",
+    "section": "P5.5",
+    "index": 24,
+    "command": "Find important files in this project",
+    "kind": "execute",
+    "tools": [
+      "ai.summarize_screen"
+    ],
+    "altToolSets": [
+      [
+        "ai.extract_context"
+      ],
+      [
+        "ai.detect_element"
+      ],
+      [
+        "ai.reason_about_task"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P55-025",
+    "section": "P5.5",
+    "index": 25,
+    "command": "Explain the folder structure",
+    "kind": "execute",
+    "tools": [
+      "ai.reason_about_task"
+    ],
+    "altToolSets": [
+      [
+        "ai.summarize_screen"
+      ],
+      [
+        "ai.extract_context"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P55-026",
+    "section": "P5.5",
+    "index": 26,
+    "command": "Find backend files",
+    "kind": "execute",
+    "tools": [
+      "ai.summarize_screen"
+    ],
+    "altToolSets": [
+      [
+        "ai.extract_context"
+      ],
+      [
+        "ai.detect_element"
+      ],
+      [
+        "ai.reason_about_task"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P55-027",
+    "section": "P5.5",
+    "index": 27,
+    "command": "Find frontend files",
+    "kind": "execute",
+    "tools": [
+      "ai.summarize_screen"
+    ],
+    "altToolSets": [
+      [
+        "ai.extract_context"
+      ],
+      [
+        "ai.detect_element"
+      ],
+      [
+        "ai.reason_about_task"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P55-028",
+    "section": "P5.5",
+    "index": 28,
+    "command": "Find database implementation",
+    "kind": "execute",
+    "tools": [
+      "ai.summarize_screen"
+    ],
+    "altToolSets": [
+      [
+        "ai.extract_context"
+      ],
+      [
+        "ai.detect_element"
+      ],
+      [
+        "ai.reason_about_task"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P55-029",
+    "section": "P5.5",
+    "index": 29,
+    "command": "Explain authentication flow",
+    "kind": "execute",
+    "tools": [
+      "ai.reason_about_task"
+    ],
+    "altToolSets": [
+      [
+        "ai.summarize_screen"
+      ],
+      [
+        "ai.extract_context"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P55-030",
+    "section": "P5.5",
+    "index": 30,
+    "command": "Explain the main user workflow",
+    "kind": "execute",
+    "tools": [
+      "ai.generate_action_plan"
+    ],
+    "altToolSets": [
+      [
+        "ai.reason_about_task"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P55-031",
+    "section": "P5.5",
+    "index": 31,
+    "command": "Find possible bugs in my project",
+    "kind": "execute",
+    "tools": [
+      "ai.summarize_screen"
+    ],
+    "altToolSets": [
+      [
+        "ai.extract_context"
+      ],
+      [
+        "ai.detect_element"
+      ],
+      [
+        "ai.reason_about_task"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P55-032",
+    "section": "P5.5",
+    "index": 32,
+    "command": "Find TypeScript issues",
+    "kind": "execute",
+    "tools": [
+      "ai.summarize_screen"
+    ],
+    "altToolSets": [
+      [
+        "ai.extract_context"
+      ],
+      [
+        "ai.detect_element"
+      ],
+      [
+        "ai.reason_about_task"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P55-033",
+    "section": "P5.5",
+    "index": 33,
+    "command": "Check lint issues",
+    "kind": "execute",
+    "tools": [
+      "ai.summarize_screen"
+    ],
+    "altToolSets": [
+      [
+        "ai.extract_context"
+      ],
+      [
+        "ai.detect_element"
+      ],
+      [
+        "ai.reason_about_task"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P55-034",
+    "section": "P5.5",
+    "index": 34,
+    "command": "Find security issues",
+    "kind": "execute",
+    "tools": [
+      "ai.summarize_screen"
+    ],
+    "altToolSets": [
+      [
+        "ai.extract_context"
+      ],
+      [
+        "ai.detect_element"
+      ],
+      [
+        "ai.reason_about_task"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P55-035",
+    "section": "P5.5",
+    "index": 35,
+    "command": "Find performance problems",
+    "kind": "execute",
+    "tools": [
+      "ai.summarize_screen"
+    ],
+    "altToolSets": [
+      [
+        "ai.extract_context"
+      ],
+      [
+        "ai.detect_element"
+      ],
+      [
+        "ai.reason_about_task"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P55-036",
+    "section": "P5.5",
+    "index": 36,
+    "command": "Find database problems",
+    "kind": "execute",
+    "tools": [
+      "ai.summarize_screen"
+    ],
+    "altToolSets": [
+      [
+        "ai.extract_context"
+      ],
+      [
+        "ai.detect_element"
+      ],
+      [
+        "ai.reason_about_task"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P55-037",
+    "section": "P5.5",
+    "index": 37,
+    "command": "Review my API structure",
+    "kind": "execute",
+    "tools": [
+      "ai.summarize_screen"
+    ],
+    "altToolSets": [
+      [
+        "ai.extract_context"
+      ],
+      [
+        "ai.detect_element"
+      ],
+      [
+        "ai.reason_about_task"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P55-038",
+    "section": "P5.5",
+    "index": 38,
+    "command": "Review my code quality",
+    "kind": "execute",
+    "tools": [
+      "ai.summarize_screen"
+    ],
+    "altToolSets": [
+      [
+        "ai.extract_context"
+      ],
+      [
+        "ai.detect_element"
+      ],
+      [
+        "ai.reason_about_task"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P55-039",
+    "section": "P5.5",
+    "index": 39,
+    "command": "Find duplicate logic",
+    "kind": "execute",
+    "tools": [
+      "ai.summarize_screen"
+    ],
+    "altToolSets": [
+      [
+        "ai.extract_context"
+      ],
+      [
+        "ai.detect_element"
+      ],
+      [
+        "ai.reason_about_task"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P55-040",
+    "section": "P5.5",
+    "index": 40,
+    "command": "Find files that need improvement",
+    "kind": "execute",
+    "tools": [
+      "ai.summarize_screen"
+    ],
+    "altToolSets": [
+      [
+        "ai.extract_context"
+      ],
+      [
+        "ai.detect_element"
+      ],
+      [
+        "ai.reason_about_task"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P55-041",
+    "section": "P5.5",
+    "index": 41,
+    "command": "Create a fix plan for detected issues",
+    "kind": "execute",
+    "tools": [
+      "ai.generate_action_plan"
+    ],
+    "altToolSets": [
+      [
+        "ai.reason_about_task"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P55-042",
+    "section": "P5.5",
+    "index": 42,
+    "command": "Show files that require changes",
+    "kind": "execute",
+    "tools": [
+      "ai.summarize_screen"
+    ],
+    "altToolSets": [
+      [
+        "ai.extract_context"
+      ],
+      [
+        "ai.detect_element"
+      ],
+      [
+        "ai.reason_about_task"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P55-043",
+    "section": "P5.5",
+    "index": 43,
+    "command": "Explain each issue",
+    "kind": "execute",
+    "tools": [
+      "ai.reason_about_task"
+    ],
+    "altToolSets": [
+      [
+        "ai.summarize_screen"
+      ],
+      [
+        "ai.extract_context"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P55-044",
+    "section": "P5.5",
+    "index": 44,
+    "command": "Show severity of problems",
+    "kind": "execute",
+    "tools": [
+      "ai.summarize_screen"
+    ],
+    "altToolSets": [
+      [
+        "ai.extract_context"
+      ],
+      [
+        "ai.detect_element"
+      ],
+      [
+        "ai.reason_about_task"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P55-045",
+    "section": "P5.5",
+    "index": 45,
+    "command": "Prioritize these bugs",
+    "kind": "execute",
+    "tools": [
+      "ai.summarize_screen"
+    ],
+    "altToolSets": [
+      [
+        "ai.extract_context"
+      ],
+      [
+        "ai.detect_element"
+      ],
+      [
+        "ai.reason_about_task"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P55-046",
+    "section": "P5.5",
+    "index": 46,
+    "command": "Create repair steps",
+    "kind": "execute",
+    "tools": [
+      "ai.summarize_screen"
+    ],
+    "altToolSets": [
+      [
+        "ai.extract_context"
+      ],
+      [
+        "ai.detect_element"
+      ],
+      [
+        "ai.reason_about_task"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P55-047",
+    "section": "P5.5",
+    "index": 47,
+    "command": "Explain what will change before fixing",
+    "kind": "execute",
+    "tools": [
+      "ai.reason_about_task"
+    ],
+    "altToolSets": [
+      [
+        "ai.summarize_screen"
+      ],
+      [
+        "ai.extract_context"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P55-048",
+    "section": "P5.5",
+    "index": 48,
+    "command": "Do not modify anything, only explain",
+    "kind": "execute",
+    "tools": [
+      "ai.reason_about_task"
+    ],
+    "altToolSets": [
+      [
+        "ai.summarize_screen"
+      ],
+      [
+        "ai.extract_context"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P55-049",
+    "section": "P5.5",
+    "index": 49,
+    "command": "Cancel the repair plan",
+    "kind": "execute",
+    "tools": [
+      "ai.generate_action_plan"
+    ],
+    "altToolSets": [
+      [
+        "ai.reason_about_task"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P55-050",
+    "section": "P5.5",
+    "index": 50,
+    "command": "Create a development roadmap",
+    "kind": "execute",
+    "tools": [
+      "ai.generate_action_plan"
+    ],
+    "altToolSets": [
+      [
+        "ai.reason_about_task"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P6-051",
+    "section": "P6",
+    "index": 51,
+    "command": "Remember I use Cursor as my IDE",
+    "kind": "execute",
+    "tools": [
+      "memory.update_preference"
+    ],
+    "altToolSets": [
+      [
+        "memory.set_active_workspace"
+      ],
+      [
+        "memory.learn_correction"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P6-052",
+    "section": "P6",
+    "index": 52,
+    "command": "What IDE do I use?",
+    "kind": "execute",
+    "toolPrefixes": [
+      "memory.",
+      "automation.",
+      "ai."
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P6-053",
+    "section": "P6",
+    "index": 53,
+    "command": "Always open coding projects in Cursor",
+    "kind": "execute",
+    "tools": [
+      "memory.update_preference"
+    ],
+    "altToolSets": [
+      [
+        "memory.set_active_workspace"
+      ],
+      [
+        "memory.learn_correction"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P6-054",
+    "section": "P6",
+    "index": 54,
+    "command": "Forget my IDE preference",
+    "kind": "execute",
+    "tools": [
+      "memory.update_preference"
+    ],
+    "altToolSets": [
+      [
+        "memory.forget_context"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P6-055",
+    "section": "P6",
+    "index": 55,
+    "command": "Show my saved preferences",
+    "kind": "execute",
+    "tools": [
+      "memory.update_preference"
+    ],
+    "altToolSets": [
+      [
+        "memory.set_active_workspace"
+      ],
+      [
+        "memory.learn_correction"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P6-056",
+    "section": "P6",
+    "index": 56,
+    "command": "Remember my default folder is Desktop",
+    "kind": "execute",
+    "tools": [
+      "memory.update_preference"
+    ],
+    "altToolSets": [
+      [
+        "memory.set_active_workspace"
+      ],
+      [
+        "memory.learn_correction"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P6-057",
+    "section": "P6",
+    "index": 57,
+    "command": "What is my default folder?",
+    "kind": "execute",
+    "toolPrefixes": [
+      "memory.",
+      "automation.",
+      "ai."
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P6-058",
+    "section": "P6",
+    "index": 58,
+    "command": "Save this as my workflow preference",
+    "kind": "execute",
+    "tools": [
+      "memory.update_preference"
+    ],
+    "altToolSets": [
+      [
+        "memory.set_active_workspace"
+      ],
+      [
+        "memory.learn_correction"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P6-059",
+    "section": "P6",
+    "index": 59,
+    "command": "Update my preferences",
+    "kind": "execute",
+    "tools": [
+      "memory.update_preference"
+    ],
+    "altToolSets": [
+      [
+        "memory.set_active_workspace"
+      ],
+      [
+        "memory.learn_correction"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P6-060",
+    "section": "P6",
+    "index": 60,
+    "command": "Remove this preference",
+    "kind": "execute",
+    "tools": [
+      "memory.update_preference"
+    ],
+    "altToolSets": [
+      [
+        "memory.set_active_workspace"
+      ],
+      [
+        "memory.learn_correction"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P6-061",
+    "section": "P6",
+    "index": 61,
+    "command": "Remember school-management as my main project",
+    "kind": "execute",
+    "tools": [
+      "memory.update_preference"
+    ],
+    "altToolSets": [
+      [
+        "memory.set_active_workspace"
+      ],
+      [
+        "memory.learn_correction"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P6-062",
+    "section": "P6",
+    "index": 62,
+    "command": "Remember AI-AGENT as my AI project",
+    "kind": "execute",
+    "tools": [
+      "memory.update_preference"
+    ],
+    "altToolSets": [
+      [
+        "memory.set_active_workspace"
+      ],
+      [
+        "memory.learn_correction"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P6-063",
+    "section": "P6",
+    "index": 63,
+    "command": "What are my saved projects?",
+    "kind": "execute",
+    "toolPrefixes": [
+      "memory.",
+      "automation.",
+      "ai."
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P6-064",
+    "section": "P6",
+    "index": 64,
+    "command": "Open my main project",
+    "kind": "execute",
+    "tools": [
+      "automation.open_project"
+    ],
+    "altToolSets": [
+      [
+        "memory.get_active_workspace"
+      ],
+      [
+        "memory.set_active_workspace"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P6-065",
+    "section": "P6",
+    "index": 65,
+    "command": "Work on my school project",
+    "kind": "execute",
+    "toolPrefixes": [
+      "memory.",
+      "automation.",
+      "ai."
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P6-066",
+    "section": "P6",
+    "index": 66,
+    "command": "Continue my previous project",
+    "kind": "execute",
+    "tools": [
+      "automation.open_project"
+    ],
+    "altToolSets": [
+      [
+        "memory.get_active_workspace"
+      ],
+      [
+        "memory.set_active_workspace"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P6-067",
+    "section": "P6",
+    "index": 67,
+    "command": "Open my last workspace",
+    "kind": "execute",
+    "tools": [
+      "automation.open_project"
+    ],
+    "altToolSets": [
+      [
+        "memory.get_active_workspace"
+      ],
+      [
+        "memory.set_active_workspace"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P6-068",
+    "section": "P6",
+    "index": 68,
+    "command": "Switch workspace to AI-AGENT",
+    "kind": "execute",
+    "toolPrefixes": [
+      "memory.",
+      "automation.",
+      "ai."
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P6-069",
+    "section": "P6",
+    "index": 69,
+    "command": "Remember this project context",
+    "kind": "execute",
+    "tools": [
+      "memory.update_preference"
+    ],
+    "altToolSets": [
+      [
+        "memory.set_active_workspace"
+      ],
+      [
+        "memory.learn_correction"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P6-070",
+    "section": "P6",
+    "index": 70,
+    "command": "Use my previous coding context",
+    "kind": "execute",
+    "toolPrefixes": [
+      "memory.",
+      "automation.",
+      "ai."
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P6-071",
+    "section": "P6",
+    "index": 71,
+    "command": "Remember school-management is my main demo",
+    "kind": "execute",
+    "tools": [
+      "memory.update_preference"
+    ],
+    "altToolSets": [
+      [
+        "memory.set_active_workspace"
+      ],
+      [
+        "memory.learn_correction"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P6-072",
+    "section": "P6",
+    "index": 72,
+    "command": "Learn that AI project means AI-AGENT",
+    "kind": "execute",
+    "toolPrefixes": [
+      "memory.",
+      "automation.",
+      "ai."
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P6-073",
+    "section": "P6",
+    "index": 73,
+    "command": "Remember this correction",
+    "kind": "execute",
+    "tools": [
+      "memory.update_preference"
+    ],
+    "altToolSets": [
+      [
+        "memory.set_active_workspace"
+      ],
+      [
+        "memory.learn_correction"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P6-074",
+    "section": "P6",
+    "index": 74,
+    "command": "Apply my previous corrections",
+    "kind": "execute",
+    "toolPrefixes": [
+      "memory.",
+      "automation.",
+      "ai."
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P6-075",
+    "section": "P6",
+    "index": 75,
+    "command": "Forget this correction",
+    "kind": "execute",
+    "tools": [
+      "memory.update_preference"
+    ],
+    "altToolSets": [
+      [
+        "memory.forget_context"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P6-076",
+    "section": "P6",
+    "index": 76,
+    "command": "Remember my naming style",
+    "kind": "execute",
+    "tools": [
+      "memory.update_preference"
+    ],
+    "altToolSets": [
+      [
+        "memory.set_active_workspace"
+      ],
+      [
+        "memory.learn_correction"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P6-077",
+    "section": "P6",
+    "index": 77,
+    "command": "Learn my shortcut",
+    "kind": "execute",
+    "toolPrefixes": [
+      "memory.",
+      "automation.",
+      "ai."
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P6-078",
+    "section": "P6",
+    "index": 78,
+    "command": "Save this decision",
+    "kind": "execute",
+    "tools": [
+      "memory.update_preference"
+    ],
+    "altToolSets": [
+      [
+        "memory.set_active_workspace"
+      ],
+      [
+        "memory.learn_correction"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P6-079",
+    "section": "P6",
+    "index": 79,
+    "command": "Use my saved decisions",
+    "kind": "execute",
+    "toolPrefixes": [
+      "memory.",
+      "automation.",
+      "ai."
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P6-080",
+    "section": "P6",
+    "index": 80,
+    "command": "Update my workflow memory",
+    "kind": "execute",
+    "toolPrefixes": [
+      "memory.",
+      "automation.",
+      "ai."
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P6-081",
+    "section": "P6",
+    "index": 81,
+    "command": "What project was I working on?",
+    "kind": "execute",
+    "toolPrefixes": [
+      "memory.",
+      "automation.",
+      "ai."
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P6-082",
+    "section": "P6",
+    "index": 82,
+    "command": "Continue my previous work",
+    "kind": "execute",
+    "tools": [
+      "automation.open_project"
+    ],
+    "altToolSets": [
+      [
+        "memory.get_active_workspace"
+      ],
+      [
+        "memory.set_active_workspace"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P6-083",
+    "section": "P6",
+    "index": 83,
+    "command": "Open my previous workspace",
+    "kind": "execute",
+    "tools": [
+      "automation.open_project"
+    ],
+    "altToolSets": [
+      [
+        "memory.get_active_workspace"
+      ],
+      [
+        "memory.set_active_workspace"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P6-084",
+    "section": "P6",
+    "index": 84,
+    "command": "Restore my coding context",
+    "kind": "execute",
+    "toolPrefixes": [
+      "memory.",
+      "automation.",
+      "ai."
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P6-085",
+    "section": "P6",
+    "index": 85,
+    "command": "What preferences do you remember?",
+    "kind": "execute",
+    "tools": [
+      "memory.update_preference"
+    ],
+    "altToolSets": [
+      [
+        "memory.set_active_workspace"
+      ],
+      [
+        "memory.learn_correction"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P6-086",
+    "section": "P6",
+    "index": 86,
+    "command": "Open unknown project xyz",
+    "kind": "execute",
+    "toolPrefixes": [
+      "memory.",
+      "automation.",
+      "ai."
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P6-087",
+    "section": "P6",
+    "index": 87,
+    "command": "Delete my project",
+    "kind": "execute",
+    "toolPrefixes": [
+      "memory.",
+      "automation.",
+      "ai."
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P6-088",
+    "section": "P6",
+    "index": 88,
+    "command": "Change everything automatically",
+    "kind": "execute",
+    "toolPrefixes": [
+      "memory.",
+      "automation.",
+      "ai."
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P6-089",
+    "section": "P6",
+    "index": 89,
+    "command": "Modify my entire codebase",
+    "kind": "execute",
+    "toolPrefixes": [
+      "memory.",
+      "automation.",
+      "ai."
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P6-090",
+    "section": "P6",
+    "index": 90,
+    "command": "Forget everything",
+    "kind": "blocked"
+  },
+  {
+    "id": "P6-091",
+    "section": "P6",
+    "index": 91,
+    "command": "Remember school-management as my main project",
+    "kind": "execute",
+    "tools": [
+      "memory.update_preference"
+    ],
+    "altToolSets": [
+      [
+        "memory.set_active_workspace"
+      ],
+      [
+        "memory.learn_correction"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P6-092",
+    "section": "P6",
+    "index": 92,
+    "command": "Open my main project",
+    "kind": "execute",
+    "tools": [
+      "automation.open_project"
+    ],
+    "altToolSets": [
+      [
+        "memory.get_active_workspace"
+      ],
+      [
+        "memory.set_active_workspace"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P6-093",
+    "section": "P6",
+    "index": 93,
+    "command": "Analyze my project",
+    "kind": "execute",
+    "toolPrefixes": [
+      "memory.",
+      "automation.",
+      "ai."
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P6-094",
+    "section": "P6",
+    "index": 94,
+    "command": "Find issues",
+    "kind": "execute",
+    "toolPrefixes": [
+      "memory.",
+      "automation.",
+      "ai."
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P6-095",
+    "section": "P6",
+    "index": 95,
+    "command": "Create a safe repair plan",
+    "kind": "execute",
+    "toolPrefixes": [
+      "memory.",
+      "automation.",
+      "ai."
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P6-096",
+    "section": "P6",
+    "index": 96,
+    "command": "Explain the changes",
+    "kind": "execute",
+    "toolPrefixes": [
+      "memory.",
+      "automation.",
+      "ai."
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P6-097",
+    "section": "P6",
+    "index": 97,
+    "command": "Show affected files",
+    "kind": "execute",
+    "toolPrefixes": [
+      "memory.",
+      "automation.",
+      "ai."
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P6-098",
+    "section": "P6",
+    "index": 98,
+    "command": "Save this project context",
+    "kind": "execute",
+    "tools": [
+      "memory.update_preference"
+    ],
+    "altToolSets": [
+      [
+        "memory.set_active_workspace"
+      ],
+      [
+        "memory.learn_correction"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P6-099",
+    "section": "P6",
+    "index": 99,
+    "command": "Close Ripple and reopen",
+    "kind": "execute",
+    "toolPrefixes": [
+      "memory.",
+      "automation.",
+      "ai."
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  },
+  {
+    "id": "P6-100",
+    "section": "P6",
+    "index": 100,
+    "command": "Continue my previous development task",
+    "kind": "execute",
+    "tools": [
+      "automation.open_project"
+    ],
+    "altToolSets": [
+      [
+        "memory.get_active_workspace"
+      ],
+      [
+        "memory.set_active_workspace"
+      ]
+    ],
+    "altKinds": [
+      "partial",
+      "defer",
+      "clarify"
+    ]
+  }
+]

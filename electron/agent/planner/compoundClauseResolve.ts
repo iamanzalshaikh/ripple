@@ -2,6 +2,7 @@ import type { NativeCommandIntent } from "../../automation/desktop/parseNativeCo
 import { parseNativeCommandStrict } from "../../automation/desktop/parseNativeCommand.js";
 import { parseBrowserWorkspaceSearch } from "../../automation/browser/parseBrowserWorkspaceSearch.js";
 import { parseSaveFileCommand } from "../../automation/desktop/parseSaveFileCommand.js";
+import { parseCreateFileInAppCommand } from "../../automation/desktop/parseCreateFileInAppCommand.js";
 import {
   desktopInputToTypeIntent,
   parseCalculatorInput,
@@ -29,6 +30,9 @@ export function parseSimpleCompoundPartForGate(
   part: string,
 ): NativeCommandIntent | null {
   const normalized = normalizeCompoundPart(part);
+
+  const createInApp = parseCreateFileInAppCommand(normalized);
+  if (createInApp) return createInApp;
 
   const save = parseSaveFileCommand(normalized);
   if (save) return save;

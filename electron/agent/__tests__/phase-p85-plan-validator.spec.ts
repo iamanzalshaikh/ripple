@@ -131,4 +131,48 @@ describe("P8.5 plan validator", () => {
     expect(result.valid).toBe(false);
     expect(result.errors).toContain("desktop.press_keys:need_keys_or_sequence");
   });
+
+  it("allows empty write_file content for new empty files", () => {
+    const result = validatePlan(
+      plan([
+        {
+          tool: "filesystem.write_file",
+          args: {
+            path: "C:\\Users\\me\\Desktop\\project\\server.js",
+            content: "",
+          },
+        },
+      ]),
+      emptyWorld(),
+      "create file server.js in cursor",
+    );
+    expect(result.valid).toBe(true);
+  });
+
+  it("allows automation.open_project with a user drive path", () => {
+    const result = validatePlan(
+      plan([
+        {
+          tool: "automation.open_project",
+          args: { path: "C:\\Users\\ANZAL\\Desktop\\jkf (furniture)" },
+          reason: "open_project",
+        },
+      ]),
+      emptyWorld(),
+      'Open the project "C:\\Users\\ANZAL\\Desktop\\jkf (furniture)"',
+    );
+    expect(result.valid).toBe(true);
+  });
+
+  it("still blocks destructive drive-path utterances", () => {
+    const result = validatePlan(
+      plan([{ tool: "desktop.type_text", args: { text: "x" } }]),
+      emptyWorld(),
+      "delete C:\\Windows\\System32\\kernel32.dll",
+    );
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.startsWith("permission_blocked:"))).toBe(
+      true,
+    );
+  });
 });
