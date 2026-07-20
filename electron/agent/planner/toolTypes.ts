@@ -71,6 +71,8 @@ export interface CapabilitySnapshot {
   permissions: Record<string, "granted" | "denied" | "unknown">;
 }
 
+import type { WorkflowContext } from "./workflowTypes.js";
+
 export interface ExecutionContext {
   world: WorldModel;
   resolved: ResolvedEntities;
@@ -83,6 +85,8 @@ export interface ExecutionContext {
   currentFolder: string | null;
   recentFile: string | null;
   lastStepOutput: unknown;
+  /** Evidence-driven Semantic workflow state (optional). */
+  workflow?: WorkflowContext;
 }
 
 export interface ToolContext {

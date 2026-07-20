@@ -27,8 +27,10 @@ const WA_BROADCAST =
   /\b(?:message|send|text|bhej(?:o|do)?)\s+(?:to\s+)?(?:everyone|all\s+contacts?|sab(?:ko)?|har\s+kisi)\b/i;
 const WA_NO_CONTACT =
   /\b(?:message|send|text|bhej(?:o|do)?)\s+(?:on\s+)?whatsapp\s*$/i;
+/** True system locations — not every absolute path under C:\ (Wave 0 sandboxes
+ * like C:\Ripple-Test must remain movable/copyable). */
 const SYSTEM_PATH =
-  /\b(?:c:|d:|e:)[\\/]|\\windows\\system32\b|\bformat\b.*\bdrive\b/i;
+  /(?:[a-z]:[\\/](?:windows(?:[\\/]system32)?|program files(?:\s*\(x86\))?|programdata)\b)|\\windows\\system32\b|\bformat\b.*\bdrive\b/i;
 const DESTRUCTIVE_SHELL =
   /\b(?:rm\s+-rf|rmdir\s+\/s|del\s+\/s|remove-item\s+-recurse)\b/i;
 const BROADCAST_RECIPIENT = /^(?:everyone|all(?:\s+contacts?)?|sab(?:ko)?|har\s+kisi)$/i;
@@ -70,7 +72,10 @@ function whatsAppStepsInPayload(
 function whatsAppMissingRecipient(payload: CommandResultPayload): boolean {
   for (const data of whatsAppStepsInPayload(payload)) {
     const kind = data.whatsappKind;
-    if (kind === "open") continue;
+    // "open" has no message; "replace_composer" edits text already in an open,
+    // focused chat — there's no new recipient to resolve, only compose_message
+    // (a real send to a named contact) needs one.
+    if (kind === "open" || kind === "replace_composer") continue;
 
     const recipient = data.recipient;
     const send = data.send === true;

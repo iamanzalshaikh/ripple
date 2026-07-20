@@ -1,10 +1,28 @@
 /** Shared parsing for delete/rename/move — item name vs folder location. */
 
-const LOC_SUFFIX =
-  /\s+(?:from|in|inside)\s+(?:my\s+|the\s+)?(downloads?|documents?|desktop)\s*\.?\s*$/i;
+/**
+ * Absolute Windows path as a location. Allows spaces in folder names
+ * ("C:\Users\…\Test 2") but stops before trailing punctuation.
+ * Drive root forms: "C:\" and "C:\\".
+ */
+const ABS_PATH_LOCATION = "[a-zA-Z]:\\\\(?:[^\\\\/:*?\"<>|\\r\\n]+\\\\)*[^\\\\/:*?\"<>|\\r\\n]*";
+const LOC_SUFFIX = new RegExp(
+  `\\s+(?:from|in|inside)\\s+(?:my\\s+|the\\s+)?(downloads?|documents?|desktop|${ABS_PATH_LOCATION})\\s*\\.?\\s*$`,
+  "i",
+);
 
+/**
+ * Location words used to collapse to a hardcoded "desktop" default for
+ * anything that wasn't literally "downloads/documents/desktop" — silently
+ * discarding a real absolute path the caller explicitly said (wave0 T2-T5:
+ * "create a folder called X inside C:\Ripple-Test\W0" landed on Desktop
+ * with a garbage name instead). A real absolute path now passes through
+ * unchanged; resolveParentPath/resolveDestinationDir already handle that.
+ */
 export function parseParentKey(raw: string): string {
-  const key = raw.trim().toLowerCase();
+  const trimmed = raw.trim();
+  if (/^[a-zA-Z]:\\/.test(trimmed)) return trimmed;
+  const key = trimmed.toLowerCase();
   if (key.startsWith("download")) return "downloads";
   if (key.startsWith("document")) return "documents";
   return "desktop";

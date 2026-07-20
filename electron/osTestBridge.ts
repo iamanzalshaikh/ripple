@@ -1,6 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { app } from "electron";
+import { clearUndoStack } from "./automation/safety/undoStack.js";
+import { setConfirmHandlerForTests } from "./automation/safety/executionGuard.js";
 
 export type OsTestIn = {
   id: string;
@@ -59,6 +61,12 @@ export function startOsTestBridge(
   const outPath = osTestOutPath();
   let busy = false;
 
+  // Wave 0 / Playwright bridge: never hang on Confirm/Cancel dialogs or UAC.
+  // Production voice still shows dialogs; only the file bridge auto-approves.
+  process.env.RIPPLE_OS_TEST = "1";
+  setConfirmHandlerForTests(async () => true);
+  clearUndoStack();
+
   console.info(`[ripple-os-test] bridge active → ${inPath}`);
 
   setInterval(async () => {
@@ -68,7 +76,28 @@ export function startOsTestBridge(
     try {
       payload = JSON.parse(readFileSync(inPath, "utf8")) as OsTestIn;
       unlinkSync(inPath);
-      const result = await run(payload.command);
+      if (payload.command === "__ripple_os_bridge_clear_undo__") {
+        clearUndoStack();
+        writeFileSync(
+          outPath,
+          JSON.stringify({
+            id: payload.id,
+            ok: true,
+            message: "undo_cleared",
+          }),
+          "utf8",
+        );
+        return;
+      }
+      const result = await Promise.race([
+        run(payload.command),
+        new Promise<OsTestBridgeResult>((_, reject) =>
+          setTimeout(
+            () => reject(new Error("os_test_bridge_command_timeout")),
+            90_000,
+          ),
+        ),
+      ]);
       const out: OsTestOut = {
         id: payload.id,
         ok: result.ok,

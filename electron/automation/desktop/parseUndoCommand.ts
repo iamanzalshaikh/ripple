@@ -4,7 +4,9 @@ export type UndoIntent = { kind: "undo_last" };
 export type UndoCommandIntent = UndoIntent;
 
 const UNDO_PATTERNS = [
-  /^\s*(?:undo\s+last\s+action|undo\s+last|undo\s+that|undo)\s*$/i,
+  /^\s*(?:undo\s+last(?:\s+(?:action|copy|move|delete|change|edit))?|undo\s+that|undo)\s*$/i,
+  // Tolerate a stuttered / STT-duplicated "undo, undo" or "undo undo".
+  /^\s*undo\s*[,.]?\s*undo\s*$/i,
   /^\s*revert\s+last\s+action\s*$/i,
   /^\s*revert\s+that\s*$/i,
   /^\s*revert\s*$/i,

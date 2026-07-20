@@ -34,9 +34,21 @@ export type InsertFallbackOptions = {
   beforeObserve?: ObservationSnapshot;
   /** Skip strategies through this name (recovery after partial success). */
   skipThrough?: InsertStrategyName;
+  /** Replace the whole focused field when clipboard is used. Default inserts at caret. */
+  replaceAll?: boolean;
+  /** Vision is optional and inappropriate for an already-focused web composer. */
+  includeVision?: boolean;
+  /**
+   * Web contenteditables sometimes expose only a placeholder name and no value.
+   * Accept a successful OS insert in an editable control instead of retrying and
+   * duplicating text when verification is impossible.
+   */
+  acceptUnverifiableEdit?: boolean;
 };
 
 async function tryNativeTextInsert(text: string): Promise<boolean> {
+  await restoreFocusContext();
+  await delay(120);
   const focus = resolveTypingFocusTarget();
   const result = await runInputSequenceNative({
     hwnd: focus?.hwnd,
@@ -48,11 +60,16 @@ async function tryNativeTextInsert(text: string): Promise<boolean> {
 }
 
 async function trySendKeysInsert(text: string): Promise<boolean> {
+  await restoreFocusContext();
+  await delay(120);
   await simulateTyping(text);
   return true;
 }
 
-async function tryClipboardPasteInsert(text: string): Promise<boolean> {
+async function tryClipboardPasteInsert(
+  text: string,
+  replaceAll = false,
+): Promise<boolean> {
   await restoreFocusContext();
   await delay(350);
   const focus = getFocusContext();
@@ -62,8 +79,10 @@ async function tryClipboardPasteInsert(text: string): Promise<boolean> {
   }
   clipboard.writeText(text);
   await delay(80);
-  await selectAll();
-  await delay(60);
+  if (replaceAll) {
+    await selectAll();
+    await delay(60);
+  }
   await pasteFromClipboard();
   return true;
 }
@@ -73,18 +92,24 @@ async function tryVisionInsert(text: string): Promise<boolean> {
 }
 
 function strategiesToRun(
-  skipThrough?: InsertStrategyName,
+  options?: InsertFallbackOptions,
 ): Array<{ name: InsertStrategyName; run: (text: string) => Promise<boolean> }> {
   const all = [
     { name: "native_text" as const, run: tryNativeTextInsert },
     { name: "sendkeys" as const, run: trySendKeysInsert },
-    { name: "clipboard_paste" as const, run: tryClipboardPasteInsert },
+    {
+      name: "clipboard_paste" as const,
+      run: (text: string) => tryClipboardPasteInsert(text, options?.replaceAll),
+    },
     { name: "vision" as const, run: tryVisionInsert },
-  ];
-  if (!skipThrough) return all;
-  const idx = STRATEGY_ORDER.indexOf(skipThrough);
+  ].filter(
+    (strategy) => strategy.name !== "vision" || options?.includeVision !== false,
+  );
+  if (!options?.skipThrough) return all;
+  const idx = STRATEGY_ORDER.indexOf(options.skipThrough);
   if (idx < 0) return all;
-  return all.slice(idx + 1);
+  const skipped = new Set(STRATEGY_ORDER.slice(0, idx + 1));
+  return all.filter((strategy) => !skipped.has(strategy.name));
 }
 
 function strategyDetail(name: InsertStrategyName, text: string): string {
@@ -105,7 +130,7 @@ export async function runInsertWithFallback(
   const before =
     options?.beforeObserve ??
     (options?.verify ? await captureObservation() : undefined);
-  const strategies = strategiesToRun(options?.skipThrough);
+  const strategies = strategiesToRun(options);
 
   let lastError: unknown = null;
   for (const strategy of strategies) {
@@ -121,15 +146,29 @@ export async function runInsertWithFallback(
           settleMs: 220,
         });
         if (!verified.ok) {
-          console.warn(
-            `[ripple-p85] insert verify failed strategy=${strategy.name} reason=${verified.reason ?? "unknown"}`,
-          );
-          continue;
+          const control =
+            verified.after?.focusedA11y?.controlType?.toLowerCase() ?? "";
+          const unverifiableEditable =
+            options?.acceptUnverifiableEdit === true &&
+            verified.reason === "a11y_name_mismatch" &&
+            (control.includes("edit") ||
+              control.includes("document") ||
+              control.includes("text"));
+          if (unverifiableEditable) {
+            console.warn(
+              `[ripple-insert] strategy=${strategy.name} verify=unavailable editable=true; accepting to avoid duplicate retry`,
+            );
+          } else {
+            console.warn(
+              `[ripple-insert] strategy=${strategy.name} verify=fail reason=${verified.reason ?? "unknown"}`,
+            );
+            continue;
+          }
         }
       }
 
       console.info(
-        `[ripple-p85] insert strategy=${strategy.name} len=${text.length}`,
+        `[ripple-insert] strategy=${strategy.name} status=ok len=${text.length}`,
       );
       return {
         detail: strategyDetail(strategy.name, text),
@@ -138,7 +177,7 @@ export async function runInsertWithFallback(
     } catch (e: unknown) {
       lastError = e;
       console.warn(
-        `[ripple-p85] insert strategy ${strategy.name} failed:`,
+        `[ripple-insert] strategy=${strategy.name} status=fail error=`,
         e instanceof Error ? e.message : e,
       );
     }

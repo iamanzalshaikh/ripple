@@ -103,22 +103,38 @@ export async function verifyTypingObservation(args: {
     const name = (after.focusedA11y.name ?? "").toLowerCase();
     const value = (after.focusedA11y.value ?? "").toLowerCase();
     const beforeValue = (args.before.focusedA11y?.value ?? "").toLowerCase();
+    const placeholderName =
+      /\btype\s+a\s+message\b/i.test(name) ||
+      /\bcompose\b/i.test(name) ||
+      /\bwrite\s+a\s+(?:message|mail|email)\b/i.test(name) ||
+      /\bsubject\b/i.test(name);
 
     if (snippet.length >= 4 && !controlIsDocument) {
       // WhatsApp / web contenteditables keep placeholder in `name` and typed
       // text in `value`. Prefer value (and value growth) over name.
       const inValue = value.includes(snippet);
-      const inName = name.includes(snippet);
+      const valueGrew =
+        value.length > beforeValue.length ||
+        (beforeValue.length === 0 && value.length > 0);
       const valueGrewWithText =
-        value.length > beforeValue.length &&
+        valueGrew &&
         (inValue ||
           snippet
             .split(/\s+/)
             .filter((w) => w.length >= 4)
             .some((w) => value.includes(w)));
 
+      // Value match / growth wins — never fail solely because placeholder name
+      // still says "Type a message…".
+      if (inValue || valueGrewWithText) {
+        return { ok: true, before: args.before, after };
+      }
+      if (placeholderName && inEditField && valueGrew) {
+        return { ok: true, before: args.before, after };
+      }
+
+      const inName = !placeholderName && name.includes(snippet);
       if (!inValue && !inName && !valueGrewWithText) {
-        // Only fail when neither name nor value shows the typed text.
         if (!value.trim()) {
           return {
             ok: false,

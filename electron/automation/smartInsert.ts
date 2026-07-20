@@ -33,7 +33,7 @@ import {
   isLinkedInTypingBlocked,
 } from "./adapters/linkedin/parseLinkedInCommand.js";
 import { isInstagramTabActive, isLinkedInTabActive, isWhatsAppTabActive } from "../focus/focusContext.js";
-import { replaceWhatsAppComposerViaExtension } from "../bridge/nativeMessagingBridge.js";
+import { insertWhatsAppComposeText } from "./adapters/whatsapp/whatsappComposeInsert.js";
 import {
   isContextualInstagramComposeCommand,
   isInstagramTypingBlocked,
@@ -50,6 +50,8 @@ import {
 } from "./keyboard.js";
 import { runInsertWithFallback } from "./input/inputStrategy.js";
 import { captureObservation } from "../agent/observe.js";
+import { getInsertTextA11yDiagnostics } from "../native/win32Bridge.js";
+import { pushUndoAction } from "./safety/undoStack.js";
 
 const TYPING_MAX = 280;
 
@@ -112,6 +114,20 @@ async function replaceTextInPlace(content: string): Promise<string> {
   const focus = getFocusContext();
   await restoreFocusContext();
   await delay(450);
+
+  try {
+    const diag = await getInsertTextA11yDiagnostics();
+    const previousText = diag?.focused?.value?.trim();
+    if (previousText) {
+      pushUndoAction({
+        kind: "restore_text_field",
+        previousText,
+        surface: focus?.processName,
+      });
+    }
+  } catch {
+    /* undo capture is best-effort */
+  }
 
   clipboard.writeText(content);
   await delay(80);
@@ -203,11 +219,9 @@ export async function smartInsertText(
   }
 
   if (whatsappCompose && !isEditOrRephraseCommand(cmd)) {
-    console.info("[ripple-desktop] WA compose — type into open chat via extension");
-    await restoreFocusContext();
-    await new Promise((r) => setTimeout(r, 400));
+    console.info("[ripple-desktop] WA compose — type into open chat (OS-first)");
     const body = formatMessageBody(parsed, text.trim() || cmd.trim());
-    return replaceWhatsAppComposerViaExtension(body);
+    return insertWhatsAppComposeText(body);
   }
 
   if (
@@ -220,10 +234,10 @@ export async function smartInsertText(
       return composeInstagramMessage({ text: formatted, send: false });
     }
     if (isWhatsAppTabActive()) {
-      console.info("[ripple-desktop] WA rephrase — replace in composer via extension");
-      await restoreFocusContext();
-      await new Promise((r) => setTimeout(r, 400));
-      return replaceWhatsAppComposerViaExtension(formatted);
+      console.info(
+        "[ripple-desktop] WA rephrase — replace in composer (OS-first)",
+      );
+      return insertWhatsAppComposeText(formatted, { replaceAll: true });
     }
     console.info("[ripple-desktop] edit/rephrase — replace in place (no new Gmail window)");
     return replaceTextInPlace(formatted);

@@ -92,12 +92,13 @@ describe("P8.5-P5.5 AI tools", () => {
       "ai.detect_element",
       "ai.reason_about_task",
       "ai.generate_action_plan",
+      "ai.synthesize_report",
     ]);
     for (const name of names) {
       expect(getRegisteredTool(name)).toBeDefined();
       expect(isKnownTool(name)).toBe(true);
     }
-    expect(TOOL_MANIFEST_VERSION).toBe("2.2.0");
+    expect(TOOL_MANIFEST_VERSION).toBe("2.3.0");
   });
 
   it("L0 routes explain this code to ai.explain_active_editor_file (not insert)", () => {

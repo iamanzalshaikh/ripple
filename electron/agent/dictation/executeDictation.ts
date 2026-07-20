@@ -8,7 +8,6 @@ import {
   getRevisionBuffer,
   startDictationSession,
 } from "./dictationSession.js";
-import { rewriteDictationBuffer } from "./dictationRewrite.js";
 
 export type DictationExecuteResult = {
   ok: boolean;
@@ -50,12 +49,12 @@ export async function executeDictationUtterance(
   }
 
   appendDictationUtterance(utterance);
-  const rewritten = rewriteDictationBuffer({
-    bufferText: getRevisionBuffer().text,
-    applyMemoryCorrections: true,
+  const { prepareComposeDictationText } = await import("./prepareComposeText.js");
+  const prepared = await prepareComposeDictationText(getRevisionBuffer().text, {
+    surface: "dictation",
   });
 
-  const confirmed = confirmDictationBuffer(rewritten.finalText);
+  const confirmed = confirmDictationBuffer(prepared.text);
   if (!confirmed.text) {
     return { ok: false, mode: "dictation", error: "empty_buffer" };
   }
@@ -67,7 +66,7 @@ export async function executeDictationUtterance(
       mode: "dictation",
       finalText: confirmed.text,
       inserted: false,
-      correctionKind: rewritten.kind,
+      correctionKind: prepared.kind,
     };
   }
 
@@ -80,7 +79,7 @@ export async function executeDictationUtterance(
       mode: "dictation",
       finalText: confirmed.text,
       inserted: true,
-      correctionKind: rewritten.kind,
+      correctionKind: prepared.kind,
     };
   } catch (e: unknown) {
     return {
@@ -88,7 +87,7 @@ export async function executeDictationUtterance(
       mode: "dictation",
       finalText: confirmed.text,
       inserted: false,
-      correctionKind: rewritten.kind,
+      correctionKind: prepared.kind,
       error: e instanceof Error ? e.message : "dictation_insert_failed",
     };
   }

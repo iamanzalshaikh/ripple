@@ -111,6 +111,13 @@ let currentUser: { id: string; email: string; onboarding_completed: boolean } | 
   null;
 let isQuitting = false;
 
+/** W0.7 — single-flight dedupe for command:execute (see handler for detail). */
+const COMMAND_DEDUPE_WINDOW_MS = 1500;
+const inFlightCommandExecutions = new Map<
+  string,
+  { startedAt: number; promise: Promise<unknown> }
+>();
+
 async function ensureValidAccessToken(): Promise<string | null> {
   const access = await getAccessToken();
   if (access) return access;
@@ -488,61 +495,106 @@ function registerIpc(): void {
     });
   });
 
-  ipcMain.handle("command:execute", async (_e, args) => {
-    clearPreprocessCache();
+  ipcMain.handle("command:execute", (_e, args) => {
     const snapshot = processTranscriptFromStt(args.command ?? "");
     const cmd = commandTextFromTranscript(snapshot);
-    setLastVoiceCommand(cmd);
-    logTranscriptStage("command_execute", {
-      ...snapshot,
-      text: cmd,
-    });
-    const preview = cmd.length > 200 ? `${cmd.slice(0, 200)}…` : cmd;
-    console.info(
-      `[ripple-desktop] command:execute (${cmd.length} chars): ${transcriptDebugLabel(preview, 80)}`,
-    );
-    const contextMetadata = {
-      ...(await buildContextMetadata()),
-      ...args.contextMetadata,
-    };
-    let selectedText = extractRephraseSourceText(cmd) ?? undefined;
-    if (!selectedText && isGmailComposeFocused()) {
-      const fromCompose = await readFocusedFieldText();
-      if (fromCompose?.trim()) {
-        selectedText = fromCompose.trim();
-        console.info(
-          `[ripple-desktop] Gmail compose — ${selectedText.length} chars from open body`,
+
+    // W0.7 — single-flight: the same utterance has been observed dispatching
+    // twice in quick succession (distinct command_ids, ~200-260ms apart —
+    // e.g. automation.open_project firing 3x for one "open horizon-backend").
+    // The exact upstream trigger wasn't pinned down live, so guard here at
+    // the actual execution boundary regardless of cause. The check-and-set
+    // below happens synchronously (no await in between) so two calls that
+    // arrive back-to-back can't both slip past the check before either
+    // registers itself — the previous version raced here since context
+    // building (buildContextMetadata, focused-text reads) ran before the
+    // map was populated.
+    const dedupeKey = cmd.trim().toLowerCase();
+    if (dedupeKey) {
+      const existing = inFlightCommandExecutions.get(dedupeKey);
+      if (existing && Date.now() - existing.startedAt < COMMAND_DEDUPE_WINDOW_MS) {
+        console.warn(
+          `[ripple-desktop] command:execute dedupe — reusing in-flight result for "${dedupeKey.slice(0, 60)}"`,
         );
+        return existing.promise;
       }
     }
-    if (!selectedText && isEditOrRephraseCommand(cmd)) {
-      if (isInstagramTabActive()) {
-        const fromComposer = await readInstagramComposerText();
-        if (fromComposer?.trim()) {
-          selectedText = fromComposer.trim();
+
+    const execution = (async () => {
+      clearPreprocessCache();
+      setLastVoiceCommand(cmd);
+      logTranscriptStage("command_execute", {
+        ...snapshot,
+        text: cmd,
+      });
+      const preview = cmd.length > 200 ? `${cmd.slice(0, 200)}…` : cmd;
+      console.info(
+        `[ripple-desktop] command:execute (${cmd.length} chars): ${transcriptDebugLabel(preview, 80)}`,
+      );
+      const contextMetadata = {
+        ...(await buildContextMetadata()),
+        ...args.contextMetadata,
+      };
+      let selectedText = extractRephraseSourceText(cmd) ?? undefined;
+      if (!selectedText && isGmailComposeFocused()) {
+        const fromCompose = await readFocusedFieldText();
+        if (fromCompose?.trim()) {
+          selectedText = fromCompose.trim();
           console.info(
-            `[ripple-desktop] DM rephrase — ${selectedText.length} chars from open composer`,
-          );
-        }
-      } else if (isWhatsAppTabActive()) {
-        await restoreFocusContext();
-        await new Promise((r) => setTimeout(r, 350));
-        const fromComposer = await readWhatsAppComposerText();
-        if (fromComposer?.trim()) {
-          selectedText = fromComposer.trim();
-          console.info(
-            `[ripple-desktop] WA rephrase — ${selectedText.length} chars from open composer`,
+            `[ripple-desktop] Gmail compose — ${selectedText.length} chars from open body`,
           );
         }
       }
+      if (!selectedText && isEditOrRephraseCommand(cmd)) {
+        if (isInstagramTabActive()) {
+          const fromComposer = await readInstagramComposerText();
+          if (fromComposer?.trim()) {
+            selectedText = fromComposer.trim();
+            console.info(
+              `[ripple-desktop] DM rephrase — ${selectedText.length} chars from open composer`,
+            );
+          }
+        } else if (isWhatsAppTabActive()) {
+          await restoreFocusContext();
+          await new Promise((r) => setTimeout(r, 350));
+          const fromComposer = await readWhatsAppComposerText();
+          if (fromComposer?.trim()) {
+            selectedText = fromComposer.trim();
+            console.info(
+              `[ripple-desktop] WA rephrase — ${selectedText.length} chars from open composer`,
+            );
+          }
+        }
+      }
+      return runDesktopCommand({
+        command: cmd,
+        sessionId: args.sessionId ?? sessionId,
+        contextMetadata,
+        selectedText,
+        getAccessToken: ensureValidAccessToken,
+      });
+    })();
+
+    if (dedupeKey) {
+      inFlightCommandExecutions.set(dedupeKey, {
+        startedAt: Date.now(),
+        promise: execution,
+      });
+      execution.finally(() => {
+        // Keep the entry through COMMAND_DEDUPE_WINDOW_MS after completion —
+        // covers duplicates that arrive just after the first finishes, not
+        // only ones that overlap it — then drop it so the phrase can be
+        // spoken again normally.
+        setTimeout(() => {
+          const current = inFlightCommandExecutions.get(dedupeKey);
+          if (current?.promise === execution) {
+            inFlightCommandExecutions.delete(dedupeKey);
+          }
+        }, COMMAND_DEDUPE_WINDOW_MS);
+      });
     }
-    return runDesktopCommand({
-      command: cmd,
-      sessionId: args.sessionId ?? sessionId,
-      contextMetadata,
-      selectedText,
-      getAccessToken: ensureValidAccessToken,
-    });
+
+    return execution;
   });
 
   ipcMain.handle(

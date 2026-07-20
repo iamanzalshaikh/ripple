@@ -1,5 +1,5 @@
 {
-  "version": "2.2.0",
+  "version": "2.3.0",
   "categories": {
     "desktop": [
       "desktop.type_text",
@@ -100,12 +100,13 @@
       "automation.run_tests"
     ],
     "ai": [
-      "ai.explain_active_editor_file",
       "ai.summarize_screen",
+      "ai.explain_active_editor_file",
       "ai.extract_context",
       "ai.detect_element",
       "ai.reason_about_task",
-      "ai.generate_action_plan"
+      "ai.generate_action_plan",
+      "ai.synthesize_report"
     ]
   },
   "tools": [
@@ -1091,17 +1092,6 @@
       }
     },
     {
-      "name": "ai.explain_active_editor_file",
-      "description": "Explain the focused Cursor/VS Code file in Ripple UI (read-only, no insert)",
-      "category": "ai",
-      "wave": 2,
-      "argsSchema": {
-        "style": {
-          "type": "string"
-        }
-      }
-    },
-    {
       "name": "ai.summarize_screen",
       "description": "OCR the active window and return a short screen summary",
       "category": "ai",
@@ -1109,6 +1099,17 @@
       "argsSchema": {
         "hwnd": {
           "type": "number"
+        }
+      }
+    },
+    {
+      "name": "ai.explain_active_editor_file",
+      "description": "Explain the focused Cursor/VS Code file in Ripple UI (read-only, no insert)",
+      "category": "ai",
+      "wave": 2,
+      "argsSchema": {
+        "style": {
+          "type": "string"
         }
       }
     },
@@ -1161,6 +1162,23 @@
           "required": true
         },
         "utterance": {
+          "type": "string"
+        }
+      }
+    },
+    {
+      "name": "ai.synthesize_report",
+      "description": "Synthesize a project report from WorkflowContext evidence (LLM or evidence-only fallback) and write Markdown under .ripple/reports",
+      "category": "ai",
+      "wave": 2,
+      "argsSchema": {
+        "schemaId": {
+          "type": "string"
+        },
+        "intent": {
+          "type": "string"
+        },
+        "projectRoot": {
           "type": "string"
         }
       }

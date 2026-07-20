@@ -346,6 +346,19 @@ function isSelfContainedDesktopCommand(command: string): boolean {
   ) {
     return true;
   }
+  // W0.4 — a full verb+object OS command must never be swallowed by a stale
+  // pending clarify just because it happens to be short. The old length-only
+  // heuristic below this function treated e.g. "Inspect the cursor window"
+  // (25 chars) as a likely answer to an unrelated "which folder?" clarify.
+  // Real clarify answers are bare nouns/numbers/yes-no, not action verbs.
+  if (
+    /^\s*(?:inspect|open|close|launch|restart|run|compare|copy|move|delete|rename|find|search|focus|switch|minimize|maximize|scroll|click|type|paste|screenshot|kill|uninstall)\b/i.test(
+      t,
+    ) &&
+    t.split(/\s+/).filter(Boolean).length >= 3
+  ) {
+    return true;
+  }
   return false;
 }
 

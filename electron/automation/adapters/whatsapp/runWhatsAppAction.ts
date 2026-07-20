@@ -1,8 +1,7 @@
-import { replaceWhatsAppComposerViaExtension } from "../../../bridge/nativeMessagingBridge.js";
-import { restoreFocusContext } from "../../../focus/focusContext.js";
 import { openWhatsAppInBrowser } from "./openWhatsApp.js";
 import { runWhatsAppMessageFlow } from "./whatsappAdapter.js";
 import { getLastVoiceCommand } from "../../../state/lastCommand.js";
+import { insertWhatsAppComposeText } from "./whatsappComposeInsert.js";
 
 export async function runWhatsAppBatch(
   data?: Record<string, unknown>,
@@ -30,9 +29,9 @@ export async function runWhatsAppBatch(
 
   if (kind === "replace_composer" || kind === "compose_message") {
     const text = typeof data?.text === "string" ? data.text : "";
-    await restoreFocusContext();
-    await new Promise((r) => setTimeout(r, 400));
-    return replaceWhatsAppComposerViaExtension(text);
+    return insertWhatsAppComposeText(text, {
+      replaceAll: kind === "replace_composer",
+    });
   }
 
   throw new Error(`Unknown WhatsApp action: ${String(kind)}`);

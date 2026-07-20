@@ -5,7 +5,7 @@ import {
   isWhatsAppMessagingCommand,
 } from "../adapters/whatsapp/parseContact.js";
 import { isContextualWhatsAppComposeCommand } from "../adapters/whatsapp/parseWhatsAppCommand.js";
-import { replaceWhatsAppComposerViaExtension } from "../../bridge/nativeMessagingBridge.js";
+import { insertWhatsAppComposeText } from "../adapters/whatsapp/whatsappComposeInsert.js";
 import type { FocusContext } from "../../focus/focusContext.js";
 import {
   isWeakFocusContext,
@@ -264,10 +264,10 @@ export async function runInsertText(data?: Record<string, unknown>): Promise<str
   if (isContextualWhatsAppComposeCommand()) {
     const body = text.trim() || getLastVoiceCommand()?.trim() || "";
     if (!body) throw new Error("No message text for WhatsApp compose");
-    console.info("[ripple-desktop] INSERT_TEXT → WhatsApp open-chat compose");
-    await restoreFocusContext();
-    await new Promise((r) => setTimeout(r, 400));
-    return replaceWhatsAppComposerViaExtension(body);
+    console.info(
+      "[ripple-desktop] INSERT_TEXT → WhatsApp open-chat compose (OS-first)",
+    );
+    return insertWhatsAppComposeText(body);
   }
 
   if (isWhatsAppMessagingCommand() && extractContactName()) {

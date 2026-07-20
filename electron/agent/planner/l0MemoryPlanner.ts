@@ -45,6 +45,9 @@ const FORGET =
 const GET_PREFS =
   /\b(?:show|get|what(?:'s| is) my)\b[\s\w'-]{0,20}?\b(?:preferences?|preferred ide)\b/i;
 
+const SHOW_RECENT_CONTEXT =
+  /\b(?:show|get|what(?:'s| is))\b[\s\w'-]{0,10}?\brecent\s+context\b/i;
+
 const GET_ACTIVE_WORKSPACE =
   /\b(?:explain (?:my )?active workspace|get active workspace|active workspace|what(?:'s| is) my (?:active|main|last) project|what was i working on|what project was i (?:on|in|working on)|which project was i (?:on|in|working on))\b/i;
 
@@ -302,6 +305,26 @@ export function tryL0MemoryPlan(
             tool: "memory.get_user_preferences",
             args: {},
             reason: "l0_memory_get_prefs",
+          },
+        ],
+        rawUtterance: rawCommand,
+        normalizedUtterance: normalized,
+        source: "L0",
+      },
+    };
+  }
+
+  if (SHOW_RECENT_CONTEXT.test(text) || SHOW_RECENT_CONTEXT.test(nrm)) {
+    return {
+      kind: "plan",
+      plan: {
+        goal: "Recall recent project context",
+        confidence: 0.91,
+        steps: [
+          {
+            tool: "memory.get_recent_context",
+            args: { limit: 8 },
+            reason: "l0_memory_recent_context",
           },
         ],
         rawUtterance: rawCommand,

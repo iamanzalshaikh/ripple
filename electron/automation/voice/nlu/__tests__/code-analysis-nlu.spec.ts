@@ -26,4 +26,22 @@ describe("code analysis NLU", () => {
     expect(out.nlu.toLowerCase()).toMatch(/find any existing code issues/);
     expect(out.nlu.toLowerCase()).not.toMatch(/open my any existing code issues/);
   });
+
+  it("does not rewrite find missing requirements to open my", () => {
+    const raw = "Find missing requirements in my current project";
+    expect(isCodeAnalysisUtterance(raw)).toBe(true);
+    const nlu = normalizeForNlu(raw);
+    expect(nlu.toLowerCase()).toMatch(/find missing requirements/);
+    expect(nlu.toLowerCase()).not.toMatch(/open my missing/);
+  });
+
+  it("does not rewrite find security/dependency phrases to open my", () => {
+    for (const raw of [
+      "Find security issues in dependencies",
+      "Find outdated dependencies in the project",
+    ]) {
+      const nlu = normalizeForNlu(raw);
+      expect(nlu.toLowerCase()).not.toMatch(/^open my/);
+    }
+  });
 });

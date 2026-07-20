@@ -36,6 +36,17 @@ function extractAppTarget(rawFile: string): {
   return { filename: m[1]!.trim(), application };
 }
 
+/**
+ * Wave 0 T6 — "create a file called X inside Documents/C:\…" is a filesystem
+ * create, not an editor Save As. These patterns used to greedily match and
+ * route to desktop.save_file with filename="X inside C:\…".
+ */
+function isFilesystemCreateLocation(filename: string): boolean {
+  return /\s+(?:inside|in)\s+(?:my\s+|the\s+)?(?:downloads?|documents?|desktop|[a-zA-Z]:\\)/i.test(
+    filename,
+  );
+}
+
 /** "save the file as meetingnotes.txt inside documents" */
 export function parseSaveFileCommand(
   command?: string | null,
@@ -119,6 +130,8 @@ export function parseSaveFileCommand(
   for (const { re, file, folder } of patterns) {
     const m = cmd.match(re);
     if (!m?.[file]?.trim()) continue;
+    // Create-file patterns below must not steal filesystem "inside/in" creates.
+    if (isFilesystemCreateLocation(m[file]!)) continue;
     const target = extractAppTarget(m[file]!);
     return {
       kind: "save_file",

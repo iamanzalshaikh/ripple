@@ -28,6 +28,8 @@ import {
   copyPathToDestination,
 } from "../../../automation/desktop/osControlOps.js";
 import { resolveItemBySpokenName } from "../../../automation/desktop/itemResolve.js";
+import { pushUndoAction } from "../../../automation/safety/undoStack.js";
+import { undoCreatePath } from "../../../automation/safety/undoRunner.js";
 import {
   hasRegisteredTool,
   registerTool,
@@ -584,14 +586,25 @@ const FILESYSTEM_TOOLS: RegisteredTool[] = [
       if (!dest) return { ok: false, error: "missing_arg:destinationFolder" };
       return wrapFileOp(async () => {
         if (isAbsolute(source) && existsSync(source)) {
-          const { resolveParentPath } = await import(
-            "../../../automation/desktop/fileOperations.js"
-          );
-          const destDir = resolveParentPath(dest);
+          // W0.3: an absolute destination (e.g. "C:\...\Desktop\Test 2") is a
+          // real target, even when the folder doesn't exist yet — never route
+          // it through resolveParentPath, which only recognizes well-known
+          // folder keywords and silently collapses anything else to Desktop.
+          let destDir = dest;
+          if (!isAbsolute(dest)) {
+            const { resolveDestinationDir } = await import(
+              "../../../automation/desktop/fileOperations.js"
+            );
+            destDir = resolveDestinationDir(dest, source);
+          }
           const target = copyPathToDestination(source, destDir);
+          pushUndoAction(undoCreatePath(target));
           return `Copied to ${target}`;
         }
-        return copyItemBySpokenName(source, dest, parentHint(args));
+        const msg = await copyItemBySpokenName(source, dest, parentHint(args));
+        const m = msg.match(/Copied to (.+)$/);
+        if (m?.[1]) pushUndoAction(undoCreatePath(m[1]));
+        return msg;
       });
     },
   },
@@ -633,11 +646,18 @@ const FILESYSTEM_TOOLS: RegisteredTool[] = [
         if (!statSync(sourcePath).isDirectory()) {
           throw new Error(`not_a_folder:${sourcePath}`);
         }
-        const { resolveParentPath } = await import(
-          "../../../automation/desktop/fileOperations.js"
-        );
-        const destDir = resolveParentPath(dest);
+        // W0.3: see filesystem.copy_file — don't collapse a real absolute
+        // destination through resolveParentPath's well-known-keyword lookup.
+        let destDir = dest;
+        if (!isAbsolute(dest)) {
+          const { resolveDestinationDir } = await import(
+            "../../../automation/desktop/fileOperations.js"
+          );
+          destDir = resolveDestinationDir(dest, sourcePath);
+        }
         const target = copyPathToDestination(sourcePath, destDir);
+        // Undo copy = delete the created destination tree.
+        pushUndoAction(undoCreatePath(target));
         return `Copied folder to ${target}`;
       });
     },

@@ -28,4 +28,23 @@ describe("parseSaveFileCommand", () => {
     expect(intent?.filename).toBe("server.js");
     expect(intent?.application).toBe("cursor");
   });
+
+  it("does not steal filesystem create-file with inside path (Wave 0 T6)", () => {
+    expect(
+      parseSaveFileCommand(
+        "Create a file called test.txt inside C:\\Ripple-Test",
+      ),
+    ).toBeNull();
+    expect(
+      parseSaveFileCommand(
+        "Create a file called notes.txt inside Documents",
+      ),
+    ).toBeNull();
+  });
+
+  it("still parses bare create a file called as save", () => {
+    const intent = parseSaveFileCommand("create a file called notes");
+    expect(intent?.kind).toBe("save_file");
+    expect(intent?.filename).toBe("notes.txt");
+  });
 });

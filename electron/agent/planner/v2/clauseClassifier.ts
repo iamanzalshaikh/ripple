@@ -395,6 +395,26 @@ export function classifyClause(
     return record(index, raw, normalized, "UNKNOWN", {}, "too_short", 0.2, "unsupported");
   }
 
+  // Wave 0 T6: filesystem create-with-parent must beat SAVE_FILE's greedy
+  // "create a file called …" patterns (those steal "inside Documents"/paths).
+  const locatedCreate = parseFileOperationCommand(normalized);
+  if (
+    locatedCreate &&
+    (locatedCreate.kind === "create_file" ||
+      locatedCreate.kind === "create_folder") &&
+    locatedCreate.parent
+  ) {
+    return record(
+      index,
+      raw,
+      normalized,
+      "FILE_MUTATE",
+      {},
+      "parseFileOperationCommand",
+      0.93,
+    );
+  }
+
   const save = parseSaveFileCommand(normalized);
   if (save) {
     return record(index, raw, normalized, "SAVE_FILE", {

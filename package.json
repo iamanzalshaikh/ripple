@@ -43,6 +43,9 @@
     "test:ui-os-phase1": "node scripts/ui-test-p85-os.mjs --os-only --phase1-only",
     "test:ui-os-e7": "node scripts/ui-test-p85-os.mjs --os-only --e7-only",
     "test:ui-os-e7-clipboard": "node scripts/ui-test-p85-os.mjs --os-only --e7-clipboard-only",
+    "test:ui-wave0": "node scripts/ui-test-wave0.mjs",
+    "test:wave0:playwright": "playwright test --project=wave0",
+    "test:wave0:playwright:ui": "playwright test --project=wave0 --ui",
     "test:ui-p5-qa": "node scripts/ui-test-p5-qa-matrix.mjs",
     "test:ui-p5-qa-only": "node scripts/ui-test-p5-qa-matrix.mjs --os-only --reuse-dev",
     "test:ui-test56": "node scripts/ui-test-test56-cdp.mjs --all",
@@ -66,6 +69,7 @@
     "zustand": "^5.0.5"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@tailwindcss/vite": "^4.3.0",
     "@types/node": "^24.10.4",
     "@types/react": "^19.1.2",

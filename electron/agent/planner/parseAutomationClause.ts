@@ -247,6 +247,14 @@ export function parseAutomationClause(
     return { kind: "run_script", scriptPath: "build.ps1" };
   }
 
+  // Hard block: "run/open/launch X as admin(istrator)" belongs to
+  // os.run_as_admin (l0OsControlPlanner), never the literal shell passthrough
+  // below. Defense-in-depth even though planner ordering already prevents
+  // this in the normal pipeline (W0.5).
+  if (/\bas\s+admin(?:istrator)?\s*$/i.test(cmd)) {
+    return null;
+  }
+
   const runCmd =
     cmd.match(/^run (.+?)(?:\s+in terminal)?$/) ??
     nrm.match(/^run (.+?)(?:\s+in terminal)?$/);

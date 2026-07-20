@@ -1,4 +1,4 @@
-import { basename } from "node:path";
+import { basename, dirname } from "node:path";
 import { existsSync, statSync } from "node:fs";
 
 /** Collapse spoken punctuation/spacing differences inside folder names. */
@@ -75,6 +75,27 @@ export function normalizeWindowsPath(path: string): string {
 export function folderLabelFromPath(path: string): string {
   const cleaned = path.trim().replace(/[\\/,]+$/, "");
   return basename(cleaned);
+}
+
+/**
+ * Collapse a repo nested inside an identically-named container:
+ * `…/school-management/school-management` → `…/school-management`.
+ * The outer folder is what users name; the inner is a clone/init artifact.
+ */
+export function collapseDuplicateLeaf(path: string): string {
+  const cleaned = path.trim().replace(/[\\/]+$/, "");
+  const leaf = folderLabelFromPath(cleaned);
+  const parent = dirname(cleaned);
+  const parentLeaf = folderLabelFromPath(parent);
+  if (
+    leaf &&
+    parentLeaf &&
+    normalizeFolderLabel(leaf) === normalizeFolderLabel(parentLeaf) &&
+    existsSync(parent)
+  ) {
+    return parent;
+  }
+  return cleaned;
 }
 
 export function tokenizeFolderHint(hint: string): string[] {

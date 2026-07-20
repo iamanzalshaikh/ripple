@@ -7,6 +7,10 @@ import {
   unlinkSync,
 } from "node:fs";
 import { dirname } from "node:path";
+import { clipboard } from "electron";
+import { restoreFocusContext } from "../../focus/focusContext.js";
+import { delay } from "../delay.js";
+import { pasteFromClipboard, selectAll } from "../keyboard.js";
 import type { UndoAction } from "./undoStack.js";
 import { isDirectoryPath } from "./undoTrash.js";
 
@@ -58,6 +62,20 @@ export async function reverseUndoAction(action: UndoAction): Promise<string> {
       }
       copyFileSync(action.backupPath, action.path);
       return `Restored file from backup → ${action.path}`;
+    }
+    case "restore_text_field": {
+      const priorClipboard = clipboard.readText();
+      await restoreFocusContext();
+      await delay(450);
+      clipboard.writeText(action.previousText);
+      await delay(80);
+      await selectAll();
+      await delay(60);
+      await pasteFromClipboard();
+      clipboard.writeText(priorClipboard);
+      return action.surface
+        ? `Restored previous text in ${action.surface}`
+        : "Restored previous text";
     }
     default:
       throw new Error("Unknown undo action");

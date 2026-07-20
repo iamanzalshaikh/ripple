@@ -8,9 +8,12 @@ const COPY_FILE =
 const MOVE_FOLDER =
   /^\s*move\s+(?:the\s+)?folder\s+(.+?)\s+to\s+(?:my\s+|the\s+)?(.+?)\s*$/i;
 const COMPARE_DIRS =
-  /^\s*compare\s+(?:the\s+)?(?:folders?|director(?:y|ies))\s+(.+?)\s+(?:and|with|to)\s+(.+?)\s*$/i;
+  /^\s*compare\s+(?:the\s+|these\s+(?:two\s+)?|those\s+(?:two\s+)?|my\s+|two\s+)?(?:folders?|director(?:y|ies))\s*[:,]?\s+(.+?)\s+(?:and|with|to)\s+(.+?)\s*$/i;
 const COMPARE_FILES =
-  /^\s*compare\s+(?:the\s+)?files?\s+(.+?)\s+(?:and|with|to)\s+(.+?)\s*$/i;
+  /^\s*compare\s+(?:the\s+|these\s+(?:two\s+)?|those\s+(?:two\s+)?|my\s+|two\s+)?files?\s*[:,]?\s+(.+?)\s+(?:and|with|to)\s+(.+?)\s*$/i;
+/** Trailing "in/on Downloads|Documents|Desktop" belongs to the whole phrase, not the second folder name. */
+const TRAILING_LOCATION =
+  /\s+(?:in|on)\s+(?:my\s+)?(downloads?|documents?|desktop)\s*$/i;
 const RUN_ADMIN =
   /^\s*(?:run|open|launch)\s+(.+?)\s+as\s+admin(?:istrator)?\s*$/i;
 const APP_PROPS =
@@ -22,6 +25,21 @@ const INSPECT =
 
 function strip(value: string): string {
   return value.replace(/^["']|["']$/g, "").trim();
+}
+
+/**
+ * "copy Reports to a new folder called Archive" — the destination clause is
+ * "a new folder called Archive", not a folder name at all. Strip the filler
+ * down to "Archive" so downstream resolution isn't handed unparseable prose
+ * (which used to silently collapse to Desktop — see FEATURE_GAPS/W0.3).
+ */
+const NEW_FOLDER_PHRASE =
+  /^(?:a\s+)?(?:brand[\s-]new\s+|new\s+)?folder\s+(?:called|named)\s+(.+)$/i;
+
+function extractFolderName(raw: string): string {
+  const stripped = strip(raw);
+  const m = stripped.match(NEW_FOLDER_PHRASE);
+  return m?.[1] ? strip(m[1]) : stripped;
 }
 
 function planResult(
@@ -65,7 +83,10 @@ export function tryL0OsControlPlan(
       "Compare directories",
       0.9,
       "filesystem.compare_directories",
-      { left: strip(cmpDirs[1]), right: strip(cmpDirs[2]) },
+      {
+        left: strip(cmpDirs[1].replace(TRAILING_LOCATION, "")),
+        right: strip(cmpDirs[2].replace(TRAILING_LOCATION, "")),
+      },
       "l0_os_compare_dirs",
     );
   }
@@ -78,14 +99,16 @@ export function tryL0OsControlPlan(
       "Compare files",
       0.9,
       "filesystem.compare_files",
-      { left: strip(cmpFiles[1]), right: strip(cmpFiles[2]) },
+      {
+        left: strip(cmpFiles[1].replace(TRAILING_LOCATION, "")),
+        right: strip(cmpFiles[2].replace(TRAILING_LOCATION, "")),
+      },
       "l0_os_compare_files",
     );
   }
 
-  const parts = getCompoundParts(rawCommand, normalized);
-  if (parts && parts.length >= 2) return null;
-
+  // Copy/move with "to a new folder called X" must beat the compound gate —
+  // "folder … to … folder" is a single OS action, not two clauses.
   const copyFolder = text.match(COPY_FOLDER) ?? nrm.match(COPY_FOLDER);
   if (copyFolder?.[1] && copyFolder?.[2]) {
     return planResult(
@@ -96,7 +119,7 @@ export function tryL0OsControlPlan(
       "filesystem.copy_folder",
       {
         sourceName: strip(copyFolder[1]),
-        destinationFolder: strip(copyFolder[2]),
+        destinationFolder: extractFolderName(copyFolder[2]),
       },
       "l0_os_copy_folder",
     );
@@ -112,7 +135,7 @@ export function tryL0OsControlPlan(
       "filesystem.move_folder",
       {
         sourceName: strip(moveFolder[1]),
-        destinationFolder: strip(moveFolder[2]),
+        destinationFolder: extractFolderName(moveFolder[2]),
       },
       "l0_os_move_folder",
     );
@@ -128,11 +151,14 @@ export function tryL0OsControlPlan(
       "filesystem.copy_file",
       {
         sourceName: strip(copyFile[1]),
-        destinationFolder: strip(copyFile[2]),
+        destinationFolder: extractFolderName(copyFile[2]),
       },
       "l0_os_copy_file",
     );
   }
+
+  const parts = getCompoundParts(rawCommand, normalized);
+  if (parts && parts.length >= 2) return null;
 
   const admin = text.match(RUN_ADMIN) ?? nrm.match(RUN_ADMIN);
   if (admin?.[1]) {

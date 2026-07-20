@@ -80,7 +80,7 @@ function stubCtx(command: string): ToolContext {
       resolved: {},
       capabilities: {
         capturedAt: 0,
-        manifestVersion: "2.2.0",
+        manifestVersion: "2.3.0",
         registeredTools: [],
         native: { sendInput: true, uia: false, ocr: false, sidecarUp: false },
         extensions: {},
@@ -119,7 +119,7 @@ describe("P8.5-P5.6 OS Control", () => {
     rmSync(tempDir, { recursive: true, force: true });
   });
 
-  it("registers OS control tools and bumps manifest to 2.2.0", () => {
+  it("registers OS control tools and bumps manifest to 2.3.0", () => {
     const osNames = listPhase56OsToolNames();
     expect(osNames).toEqual([
       "os.run_as_admin",
@@ -145,7 +145,7 @@ describe("P8.5-P5.6 OS Control", () => {
         "filesystem.compare_directories",
       ]),
     );
-    expect(TOOL_MANIFEST_VERSION).toBe("2.2.0");
+    expect(TOOL_MANIFEST_VERSION).toBe("2.3.0");
   });
 
   it("copies files/folders and compares trees", () => {

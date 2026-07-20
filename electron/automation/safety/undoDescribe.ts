@@ -12,6 +12,8 @@ export function describeUndoAction(action: UndoAction): string {
       return `delete ${basename(action.path)}`;
     case "create":
       return `create ${basename(action.path)}`;
+    case "restore_text_field":
+      return action.surface ? `text edit in ${action.surface}` : "text edit";
     default:
       return "last action";
   }

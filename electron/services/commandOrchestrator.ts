@@ -6,6 +6,7 @@ import {
   resolveWhatsAppComposeDictationText,
   looksLikeRippleOsCommand,
 } from "../automation/adapters/whatsapp/whatsappVoiceOverride.js";
+import { resolveGmailComposeDictationText } from "../automation/adapters/gmail/gmailComposeDictation.js";
 import { applyWhatsAppRephraseOverride } from "../automation/adapters/whatsapp/whatsappRephraseOverride.js";
 import { applyNotionVoiceOverride } from "../automation/adapters/notion/notionVoiceOverride.js";
 import { normalizeTranscript } from "../automation/voice/normalizeTranscript.js";
@@ -101,8 +102,7 @@ import {
   compoundUnresolvedQuestion,
   tryL0CompoundPlan,
 } from "../agent/planner/l0CompoundPlanner.js";
-import { tryCompoundGate, isCompoundUtterance } from "../agent/planner/compoundGate.js";
-import { isDeveloperWorkflowUtterance } from "../agent/planner/developerWorkflowPlanner.js";
+import { isCompoundUtterance } from "../agent/planner/compoundGate.js";
 import { shouldBlockLegacyDesktopRouters } from "../agent/planner/p85LegacyGate.js";
 import { shouldBypassP85Planner } from "../agent/planner/gptFallbackPolicy.js";
 import { executeCompoundPartialPlan } from "../agent/planner/compoundPartialExecutor.js";
@@ -346,25 +346,6 @@ function buildDesktopInputPayload(command: string): CommandResultPayload | null 
   return buildTypingPayloadFromInput(command, parsed);
 }
 
-function emitCompoundClarifyResult(
-  command: string,
-  effectiveCommand: string,
-  gate: Extract<PlannerPipelineResult, { kind: "clarify" }>,
-  world: Awaited<ReturnType<typeof buildWorldModel>>,
-): RunCommandResult {
-  beginClarificationRound({
-    originalCommand: command,
-    normalizedUtterance: effectiveCommand,
-    question: gate.question,
-    reason: gate.reason,
-    plan: gate.plan,
-    world,
-  });
-  showClarifyQuestionOnOverlay(gate.question);
-  logConversationTurn(command, "rephrase");
-  return { ok: false, message: gate.question };
-}
-
 function emitCompoundPartialResult(
   command: string,
   effectiveCommand: string,
@@ -463,32 +444,19 @@ async function tryP85FastPath(
     );
   }
 
-  const skipCompoundForDevWorkflow = isDeveloperWorkflowUtterance(
-    effectiveCommand,
-    normalizedForGate,
-  );
-  if (skipCompoundForDevWorkflow) {
-    console.info(
-      "[ripple-p85] developer workflow — skipping compound v2 gate for CODE_REPAIR utterance",
-    );
-  }
-
-  const compoundGate = skipCompoundForDevWorkflow
-    ? null
-    : tryCompoundGate(effectiveCommand, normalizedForGate);
-  if (compoundGate?.kind === "clarify") {
-    return emitCompoundClarifyResult(command, effectiveCommand, compoundGate, world);
-  }
-  if (compoundGate?.kind === "partial") {
-    return emitCompoundPartialResult(
-      command,
-      effectiveCommand,
-      compoundGate,
-      world,
-      detail,
-      getAccessToken,
-    );
-  }
+  // W0.2b: tryCompoundGate used to be called HERE, before L0 ever got a
+  // chance to run — so a dedicated L0 carve-out for "and"-joined phrasing
+  // (e.g. l0OsControlPlanner's COMPARE_DIRS: "compare these two folders A
+  // and B") never got the opportunity to match; this generic gate saw the
+  // "and" first and force-split the utterance into unresolved clauses
+  // instead, producing a false "I understood part of that..." failure even
+  // though the full L0 pipeline (called a few lines below via
+  // runPlannerPipelineAsync) already resolves it correctly on its own —
+  // runPlannerPipeline's internal `??` chain tries every dedicated L0
+  // planner FIRST and only falls back to tryCompoundGate afterward. Removed
+  // the duplicate early call entirely; the pipeline below already handles
+  // compound-gate results identically via emitCompoundPartialResult / the
+  // clarify branch further down.
 
   const pipeline = await runPlannerPipelineAsync({
     command: effectiveCommand,
@@ -835,7 +803,10 @@ async function runBackendCommandFlow(
     data = waOverride;
   }
 
-  const waCompose = applyWhatsAppComposeDictationOverride(input.command, data);
+  const waCompose = await applyWhatsAppComposeDictationOverride(
+    input.command,
+    data,
+  );
   if (waCompose) {
     data = waCompose;
   }
@@ -1222,15 +1193,21 @@ export async function runDesktopCommand(
       };
     }
 
-    // WhatsApp compose focused: type speech into the message box before
-    // workflow/p85 can mis-route phrases like "start our new project".
-    const waComposeText = resolveWhatsAppComposeDictationText(input.command);
-    if (waComposeText) {
+    // Focused web compose (WhatsApp / Gmail): correct + type before planner
+    // can mis-route phrases like "start our new project".
+    const focusedCompose = await (async () => {
+      const wa = await resolveWhatsAppComposeDictationText(input.command);
+      if (wa) return { surface: "whatsapp" as const, text: wa };
+      const gmail = await resolveGmailComposeDictationText(input.command);
+      if (gmail) return { surface: "gmail" as const, text: gmail };
+      return null;
+    })();
+    if (focusedCompose) {
       const composePayload = buildTypingPayload(input.command, {
-        text: waComposeText,
+        text: focusedCompose.text,
       });
       console.info(
-        `[ripple-desktop] WhatsApp compose dictation (early) — typing ${waComposeText.length} chars`,
+        `[ripple-desktop] ${focusedCompose.surface} compose dictation (early) — typing ${focusedCompose.text.length} chars`,
       );
       setLastCommandIntent(composePayload.intent);
       const execution = await runCommandActions(
@@ -1249,7 +1226,7 @@ export async function runDesktopCommand(
         composePayload,
         execution,
         "fast",
-        { detail: "whatsapp-compose-dictation" },
+        { detail: `${focusedCompose.surface}-compose-dictation` },
       );
       logConversationTurn(input.command, "success", {
         intent: composePayload.intent,
@@ -1263,8 +1240,8 @@ export async function runDesktopCommand(
         tools: ["INSERT_TEXT"],
         tool: "INSERT_TEXT",
         status: "SUCCESS",
-        result: `Typed into WhatsApp: ${waComposeText.slice(0, 80)}`,
-        source: "whatsapp-compose",
+        result: `Typed into ${focusedCompose.surface}: ${focusedCompose.text.slice(0, 80)}`,
+        source: `${focusedCompose.surface}-compose`,
       });
       return { ok: true, data: { ...composePayload, execution } };
     }

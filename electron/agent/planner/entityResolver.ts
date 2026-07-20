@@ -11,6 +11,12 @@ import {
   INHERIT_PROJECT_ROOT,
   isInheritedProjectRoot,
 } from "./inheritContext.js";
+import type { WorkflowContext } from "./workflowTypes.js";
+import {
+  WORKFLOW_CONTEXT_REF,
+  WORKFLOW_EVIDENCE_REF,
+} from "./workflowTypes.js";
+import { buildEvidenceBundle } from "../evidence/normalizeEvidence.js";
 
 export type EntityResolveInput = {
   utterance: string;
@@ -69,6 +75,7 @@ export async function bindStepArgs(
   tool: string,
   args: Record<string, unknown>,
   resolved: ResolvedEntities,
+  workflow?: WorkflowContext,
 ): Promise<Record<string, unknown>> {
   const merged = { ...args, ...resolved };
   const projectRoot =
@@ -77,9 +84,10 @@ export async function bindStepArgs(
   if (projectRoot) {
     if (isInheritedProjectRoot(merged.projectRoot)) {
       if (
-        tool.startsWith("automation.") &&
-        tool !== "automation.open_project" &&
-        tool !== "automation.open_terminal"
+        (tool.startsWith("automation.") &&
+          tool !== "automation.open_project" &&
+          tool !== "automation.open_terminal") ||
+        tool === "ai.synthesize_report"
       ) {
         merged.projectRoot = projectRoot;
       }
@@ -92,6 +100,49 @@ export async function bindStepArgs(
     }
     if (merged.parentFolder === INHERIT_PROJECT_ROOT) {
       merged.parentFolder = projectRoot;
+    }
+  }
+
+  // Explicit evidence/context refs — never implicit string interpolation.
+  if (workflow) {
+    for (const [key, value] of Object.entries(merged)) {
+      if (value === WORKFLOW_EVIDENCE_REF) {
+        merged[key] = buildEvidenceBundle(workflow).bundle;
+      } else if (value === WORKFLOW_CONTEXT_REF) {
+        merged[key] = {
+          workflowId: workflow.workflowId,
+          intent: workflow.intent,
+          schemaId: workflow.schemaId,
+          project: workflow.project,
+          userRequest: workflow.userRequest,
+          presentation: workflow.presentation,
+          evidenceCount: workflow.evidence.length,
+          stepCount: workflow.steps.length,
+          omissions: workflow.omissions,
+        };
+      }
+    }
+    // Always attach workflow handle for synthesis/report tools.
+    if (
+      tool === "ai.synthesize_report" ||
+      tool === "automation.write_report_artifact"
+    ) {
+      merged._workflow = workflow;
+      if (!merged.projectRoot && workflow.project?.rootPath) {
+        merged.projectRoot = workflow.project.rootPath;
+      }
+      if (!merged.schemaId && workflow.schemaId) {
+        merged.schemaId = workflow.schemaId;
+      }
+      if (!merged.intent && workflow.intent) {
+        merged.intent = workflow.intent;
+      }
+      if (
+        typeof merged.presentation === "string" &&
+        ["none", "inline", "open", "reveal", "ide"].includes(merged.presentation)
+      ) {
+        workflow.presentation = merged.presentation as WorkflowContext["presentation"];
+      }
     }
   }
 

@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { wellKnownFolderPath, resolveWellKnownFolderKey } from "./wellKnownFolders.js";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, isAbsolute, join } from "node:path";
 import { dialog, shell } from "electron";
 import { guidedMissingParent } from "../planner/guidedResponses.js";
 import { openFile, openFolder } from "./openFolder.js";
@@ -40,13 +40,42 @@ async function movePathViaPowerShell(
 
 export function resolveParentPath(name?: string): string {
   if (!name?.trim()) return wellKnownFolderPath("desktop");
-  const key = resolveWellKnownFolderKey(name);
+  const trimmed = name.trim();
+
+  // W0.3: a real absolute path (e.g. "C:\...\Desktop\Test 2") is the actual
+  // destination even when it doesn't exist yet — never fall through to the
+  // "unknown folder → Desktop" default below, which silently discards it.
+  if (isAbsolute(trimmed)) return trimmed;
+
+  const key = resolveWellKnownFolderKey(trimmed);
   if (key) return wellKnownFolderPath(key);
 
   console.warn(
-    `[ripple-desktop] Unknown parent folder "${name.trim()}" — using Desktop`,
+    `[ripple-desktop] Unknown parent folder "${trimmed}" — using Desktop`,
   );
   return wellKnownFolderPath("desktop");
+}
+
+/**
+ * Like resolveParentPath, but for copy/move destinations where we also know
+ * the source being moved — an unrecognized bare name (e.g. "Archive",
+ * "TestFolder") is never a real folder Ripple can guess with certainty, but
+ * defaulting it to Desktop is worse than defaulting it to a sibling of the
+ * source (wave0 TEST 10: "creates TestFolder inside current workspace, NOT
+ * Desktop\TestFolder"). Absolute paths and well-known folders still win.
+ */
+export function resolveDestinationDir(
+  destination: string,
+  sourcePath: string,
+): string {
+  const trimmed = destination.trim();
+  if (!trimmed) return wellKnownFolderPath("desktop");
+  if (isAbsolute(trimmed)) return trimmed;
+
+  const key = resolveWellKnownFolderKey(trimmed);
+  if (key) return wellKnownFolderPath(key);
+
+  return join(dirname(sourcePath), trimmed);
 }
 
 export async function createFolder(
@@ -163,7 +192,7 @@ export async function moveFile(
   parent?: string,
 ): Promise<string> {
   const sourcePath = await resolveItemBySpokenName(sourceName, parent);
-  const destDir = resolveParentPath(destination);
+  const destDir = resolveDestinationDir(destination, sourcePath);
   mkdirSync(destDir, { recursive: true });
 
   const targetPath = join(destDir, basename(sourcePath));

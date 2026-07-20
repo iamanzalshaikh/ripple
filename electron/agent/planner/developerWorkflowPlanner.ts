@@ -12,6 +12,17 @@ import {
   setPendingCodeRepair,
 } from "./codeRepairSession.js";
 import { proposeCodeRepairsFromDiagnostics } from "../../automation/shell/proposeCodeRepairs.js";
+import { classifySemanticIntent } from "./semanticIntentRouter.js";
+
+/** Specialized Semantic intents must not collapse into generic scan+lint success. */
+function isSpecializedSemanticOwned(
+  rawCommand: string,
+  normalized: string,
+): boolean {
+  const intent = classifySemanticIntent(rawCommand, normalized);
+  if (intent.intent === "NONE" || intent.intent === "CODE_ANALYSIS") return false;
+  return intent.confidence >= 0.4;
+}
 
 const CODE_DISCOVERY =
   /\b(?:find|identify|analy[sz]e|inspect|debug|audit|review)\b[\s\S]*\b(?:code|codebase|issues?|errors?|bugs?|broken|affected files?|project)\b/i;
@@ -249,6 +260,10 @@ export function tryDeveloperWorkflowPlan(
   const confirm = tryCodeRepairConfirmPlan(rawCommand, normalized);
   if (confirm) return confirm;
 
+  if (isSpecializedSemanticOwned(rawCommand, normalized)) {
+    return null;
+  }
+
   const text = rawCommand.trim();
   const nrm = normalized.trim();
   const path = extractWindowsPath(text) ?? extractWindowsPath(nrm);
@@ -439,6 +454,9 @@ export function isDeveloperWorkflowUtterance(
     (REPAIR_CONFIRM.test(text) || REPAIR_CONFIRM.test(nrm))
   ) {
     return true;
+  }
+  if (isSpecializedSemanticOwned(text, nrm)) {
+    return false;
   }
   const hasPath = Boolean(extractWindowsPath(text) ?? extractWindowsPath(nrm));
   const discovery =

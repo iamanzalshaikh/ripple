@@ -34,6 +34,17 @@ export function parseSimpleCompoundPartForGate(
   const createInApp = parseCreateFileInAppCommand(normalized);
   if (createInApp) return createInApp;
 
+  // Wave 0 T6: filesystem create-with-parent before greedy save-file create patterns.
+  const fileOpEarly = parseNativeCommandStrict(normalized);
+  if (
+    fileOpEarly &&
+    (fileOpEarly.kind === "create_file" || fileOpEarly.kind === "create_folder") &&
+    "parent" in fileOpEarly &&
+    fileOpEarly.parent
+  ) {
+    return fileOpEarly;
+  }
+
   const save = parseSaveFileCommand(normalized);
   if (save) return save;
 

@@ -69,10 +69,25 @@ describe("P8.5-P5.2 insert strategy ladder", () => {
   });
 
   it("falls back to clipboard paste when sendkeys fails", async () => {
-    const { simulateTyping } = await import("../../automation/keyboard.js");
+    const { selectAll, simulateTyping } = await import(
+      "../../automation/keyboard.js"
+    );
     vi.mocked(simulateTyping).mockRejectedValueOnce(new Error("sendkeys fail"));
     const { strategy } = await runInsertWithFallback("hello world");
     expect(strategy).toBe("clipboard_paste");
+    expect(selectAll).not.toHaveBeenCalled();
+  });
+
+  it("selects all before clipboard paste only for explicit replacement", async () => {
+    const { selectAll, simulateTyping } = await import(
+      "../../automation/keyboard.js"
+    );
+    vi.mocked(simulateTyping).mockRejectedValueOnce(new Error("sendkeys fail"));
+    const { strategy } = await runInsertWithFallback("replacement", {
+      replaceAll: true,
+    });
+    expect(strategy).toBe("clipboard_paste");
+    expect(selectAll).toHaveBeenCalledTimes(1);
   });
 
   it("uses vision only after native, sendkeys, and clipboard fail", async () => {
@@ -98,5 +113,26 @@ describe("P8.5-P5.2 insert strategy ladder", () => {
     });
     expect(strategy).toBe("sendkeys");
     expect(verifyTypingObservation).toHaveBeenCalledTimes(2);
+  });
+
+  it("accepts unverifiable editable insert without duplicating via retry", async () => {
+    const { simulateTyping } = await import("../../automation/keyboard.js");
+    runInputSequenceNative.mockResolvedValue({ ok: true });
+    verifyTypingObservation.mockResolvedValueOnce({
+      ok: false,
+      reason: "a11y_name_mismatch",
+      before: {},
+      after: {
+        focusedA11y: { controlType: "ControlType.Edit" },
+      },
+    });
+
+    const { strategy } = await runInsertWithFallback("web compose text", {
+      verify: true,
+      acceptUnverifiableEdit: true,
+    });
+
+    expect(strategy).toBe("native_text");
+    expect(simulateTyping).not.toHaveBeenCalled();
   });
 });

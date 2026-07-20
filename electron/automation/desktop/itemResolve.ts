@@ -41,6 +41,12 @@ export async function resolveItemBySpokenName(
     return trimmed;
   }
 
+  // Absolute Windows path that doesn't currently exist — still return it so
+  // callers can emit a clear source_not_found instead of searching Desktop.
+  if (/^[a-zA-Z]:[\\/]/.test(trimmed) || trimmed.startsWith("\\\\")) {
+    return trimmed;
+  }
+
   if (parent) {
     const parentPath = resolveParentPath(parent);
     const direct = join(parentPath, trimmed);

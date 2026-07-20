@@ -219,6 +219,80 @@ const AI_TOOLS: RegisteredTool[] = [
       });
     },
   },
+  {
+    definition: def({
+      name: "ai.synthesize_report",
+      description:
+        "Synthesize evidence into a Markdown report under .ripple/reports (LLM when available; otherwise evidence-only partial)",
+      category: "ai",
+      risk: "low",
+      priority: 62,
+      cost: 10,
+      idempotent: true,
+      requires: ["ai"],
+      argsSchema: {
+        schemaId: { type: "string" },
+        intent: { type: "string" },
+        projectRoot: { type: "string" },
+      },
+      examples: [
+        "save a security review report",
+        "create a roadmap report in the project",
+      ],
+    }),
+    execute: async (ctx, args) => {
+      const workflow =
+        (args._workflow as import("../workflowTypes.js").WorkflowContext | undefined) ??
+        ctx.execution.workflow;
+      if (!workflow) {
+        return { ok: false, error: "missing_workflow_context" };
+      }
+      if (typeof args.schemaId === "string" && args.schemaId.trim()) {
+        workflow.schemaId = args.schemaId.trim();
+      }
+      if (typeof args.intent === "string" && args.intent.trim()) {
+        workflow.intent = args.intent.trim();
+      }
+      if (
+        typeof args.presentation === "string" &&
+        ["none", "inline", "open", "reveal", "ide"].includes(args.presentation)
+      ) {
+        workflow.presentation = args.presentation as
+          | "none"
+          | "inline"
+          | "open"
+          | "reveal"
+          | "ide";
+      }
+      if (typeof args.projectRoot === "string" && args.projectRoot.trim()) {
+        const root = args.projectRoot.trim();
+        workflow.project = {
+          name: root.split(/[/\\]/).filter(Boolean).pop() || "project",
+          rootPath: root,
+        };
+      }
+      if (!workflow.project?.rootPath && typeof ctx.execution.resolved.projectRoot === "string") {
+        const root = ctx.execution.resolved.projectRoot.trim();
+        if (root) {
+          workflow.project = {
+            name: root.split(/[/\\]/).filter(Boolean).pop() || "project",
+            rootPath: root,
+          };
+        }
+      }
+
+      return wrapAi(async () => {
+        const { synthesizeAndWriteReport } = await import(
+          "../../reports/synthesizeReport.js"
+        );
+        const result = await synthesizeAndWriteReport(workflow);
+        if (!result.ok) {
+          throw new Error(result.error || result.message);
+        }
+        return result;
+      });
+    },
+  },
 ];
 
 let phase5AiRegistered = false;

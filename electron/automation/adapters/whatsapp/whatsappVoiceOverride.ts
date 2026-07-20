@@ -1,4 +1,5 @@
 import { normalizeTranscript } from "../../voice/normalizeTranscript.js";
+import { isEditOrRephraseCommand } from "../../commandIntent.js";
 import {
   commandImpliesSend,
   extractContactName,
@@ -9,6 +10,7 @@ import { rememberContact } from "./buildReferentialWhatsApp.js";
 import type { CommandResultPayload, RippleAction } from "../../types.js";
 import { isWhatsAppTabActive } from "../../../focus/focusContext.js";
 import { parseDesktopInputFallback } from "../../../agent/parseDesktopInput.js";
+import { prepareComposeDictationText } from "../../../agent/dictation/prepareComposeText.js";
 
 /** Clear Ripple/OS commands — never treat as chat dictation. */
 export function looksLikeRippleOsCommand(cmd: string): boolean {
@@ -28,17 +30,25 @@ function isWeakBackendResult(result: CommandResultPayload): boolean {
 /**
  * Text to type into WhatsApp compose when the tab is focused and the utterance
  * is chat dictation (not a messaging workflow / Ripple OS command).
- * Used both as an early desktop fast-path and as a backend NOOP override.
+ * Applies P7.2 corrections + P7.4 memory + optional AI dictation_clean.
  */
-export function resolveWhatsAppComposeDictationText(
+export async function resolveWhatsAppComposeDictationText(
   command: string,
-): string | null {
+): Promise<string | null> {
   if (!isWhatsAppTabActive()) return null;
   const cmd = normalizeTranscript(command).trim();
   if (cmd.length < 2) return null;
   if (isWhatsAppMessagingCommand(cmd)) return null;
   if (looksLikeRippleOsCommand(cmd)) return null;
-  return cmd;
+  // "Make this more confident" etc. is an edit instruction on text already in
+  // the composer, not new dictation — let it fall through to the backend edit
+  // / rephrase flow (shouldRouteToBackendFirst → applyWhatsAppRephraseOverride)
+  // instead of being typed here as literal new message content.
+  if (isEditOrRephraseCommand(cmd)) return null;
+  const prepared = await prepareComposeDictationText(cmd, {
+    surface: "whatsapp",
+  });
+  return prepared.text.length >= 1 ? prepared.text : null;
 }
 
 /**
@@ -47,11 +57,11 @@ export function resolveWhatsAppComposeDictationText(
  * Fixes: conversational utterances becoming NOOP / web_search while the
  * message input already has keyboard focus.
  */
-export function applyWhatsAppComposeDictationOverride(
+export async function applyWhatsAppComposeDictationOverride(
   command: string,
   result: CommandResultPayload,
-): CommandResultPayload | null {
-  const cmd = resolveWhatsAppComposeDictationText(command);
+): Promise<CommandResultPayload | null> {
+  const cmd = await resolveWhatsAppComposeDictationText(command);
   if (!cmd) return null;
   if (!isWeakBackendResult(result)) return null;
 

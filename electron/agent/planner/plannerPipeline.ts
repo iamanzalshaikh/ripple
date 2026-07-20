@@ -28,6 +28,7 @@ import { tryL0AiPlan } from "./l0AiPlanner.js";
 import { tryL0MemoryPlan } from "./l0MemoryPlanner.js";
 import { tryL0OsControlPlan } from "./l0OsControlPlanner.js";
 import { tryDeveloperWorkflowPlan } from "./developerWorkflowPlanner.js";
+import { trySemanticIntentPlan } from "./semanticIntentRouter.js";
 import type { L0PlannerResult } from "./planTypes.js";
 
 function isCompoundDeferReason(reason: string): boolean {
@@ -124,7 +125,15 @@ export function runPlannerPipeline(
     return result;
   }
 
+  // Semantic Intent (Layer-1 meaning) before generic developer workflow / adapters.
   const earlyL0 =
+    applyDedicatedL0Plan(
+      trySemanticIntentPlan(raw, normalized),
+      raw,
+      normalized,
+      input.world,
+      started,
+    ) ??
     applyDedicatedL0Plan(
       tryDeveloperWorkflowPlan(raw, normalized),
       raw,
@@ -161,14 +170,14 @@ export function runPlannerPipeline(
       started,
     ) ??
     applyDedicatedL0Plan(
-      tryL0AutomationPlan(raw, normalized),
+      tryL0OsControlPlan(raw, normalized),
       raw,
       normalized,
       input.world,
       started,
     ) ??
     applyDedicatedL0Plan(
-      tryL0OsControlPlan(raw, normalized),
+      tryL0AutomationPlan(raw, normalized),
       raw,
       normalized,
       input.world,

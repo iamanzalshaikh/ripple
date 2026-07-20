@@ -28,6 +28,7 @@ import { isNotionPlannerUtterance } from "./l0NotionPlanner.js";
 import { isFilesystemPlannerUtterance } from "./l0FilesystemPlanner.js";
 import { isCreateFileInAppCommand } from "./planCreateFileInApp.js";
 import { isDeveloperWorkflowUtterance } from "./developerWorkflowPlanner.js";
+import { isSemanticIntentUtterance } from "./semanticIntentRouter.js";
 
 /** True when utterance has ≥2 compound clauses (and/_then/comma boundaries). */
 export function isCompoundUtterance(
@@ -67,6 +68,7 @@ export function tryCompoundGate(
   if (isNotionPlannerUtterance(rawCommand, normalized)) return null;
   if (isFilesystemPlannerUtterance(rawCommand, normalized)) return null;
   if (isDeveloperWorkflowUtterance(rawCommand, normalized)) return null;
+  if (isSemanticIntentUtterance(rawCommand, normalized)) return null;
   if (
     isCreateFileInAppCommand(rawCommand) ||
     isCreateFileInAppCommand(normalized)

@@ -17,6 +17,7 @@ import { searchItemsByNameAsync } from "../desktop/searchFiles.js";
 import { getUserPreferences } from "../../storage/userPreferences.js";
 import { applyCorrectionsToUtterance } from "../../storage/voiceCorrections.js";
 import {
+  collapseDuplicateLeaf,
   folderLabelFromPath,
   normalizeFolderLabel,
   normalizeWindowsPath,
@@ -122,6 +123,7 @@ type ScoredPath = { path: string; score: number };
 function rankDirectoryHits(spoken: string, paths: string[]): ScoredPath[] {
   const label = folderLabelFromPath(spoken);
   const ranked = paths
+    .map((path) => collapseDuplicateLeaf(path))
     .map((path) => ({
       path,
       score: Math.max(

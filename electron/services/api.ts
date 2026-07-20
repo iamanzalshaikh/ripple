@@ -308,6 +308,53 @@ export async function apiExecuteCommand(
   }
 }
 
+export type ProjectAnalysisApiReport = {
+  schemaId: string;
+  title: string;
+  summary: string;
+  findings: Array<{
+    title: string;
+    status: "confirmed" | "potential" | "informational" | "needs_review";
+    confidence: number;
+    severity?: "low" | "medium" | "high" | "critical";
+    file?: string;
+    line?: number;
+    detail: string;
+    evidenceIds?: string[];
+  }>;
+  sections: Record<string, string>;
+  limitations: string[];
+};
+
+export async function apiProjectAnalysis(
+  accessToken: string,
+  body: {
+    schemaId: string;
+    intent: string;
+    userRequest: string;
+    project?: { name?: string; rootPath?: string } | null;
+    evidence: unknown[];
+    omissions?: Record<string, unknown>;
+    stepSummaries?: Array<{ index: number; tool: string; ok: boolean }>;
+  },
+): Promise<
+  ApiResponse<{ report: ProjectAnalysisApiReport; usage: Record<string, unknown> }>
+> {
+  try {
+    const res = await apiFetch(`${API_BASE}/commands/project-analysis`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+    return parseJson(res);
+  } catch {
+    return connectionError();
+  }
+}
+
 export async function apiStartSession(
   accessToken: string,
   args?: { device?: string; context_type?: string; action_source?: string },

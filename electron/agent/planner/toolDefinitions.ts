@@ -702,6 +702,18 @@ export const PLANNER_TOOLS: ToolDefinition[] = [
     },
   },
   {
+    name: "ai.synthesize_report",
+    description:
+      "Synthesize a project report from WorkflowContext evidence (LLM or evidence-only fallback) and write Markdown under .ripple/reports",
+    category: "ai",
+    wave: 2,
+    argsSchema: {
+      schemaId: { type: "string" },
+      intent: { type: "string" },
+      projectRoot: { type: "string" },
+    },
+  },
+  {
     name: "memory.get_user_preferences",
     description: "Read preferred IDE, terminal, browser, and related habits",
     category: "memory",
@@ -905,7 +917,7 @@ export const PLANNER_TOOLS: ToolDefinition[] = [
   },
 ];
 
-export const TOOL_MANIFEST_VERSION = "2.2.0";
+export const TOOL_MANIFEST_VERSION = "2.3.0";
 
 export function getToolManifest(): {
   version: string;

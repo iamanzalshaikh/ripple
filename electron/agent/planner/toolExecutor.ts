@@ -39,6 +39,17 @@ import {
   setActiveWorkspace,
 } from "../../storage/workContext.js";
 import { recordUsage } from "../../storage/usageStats.js";
+import {
+  boundOutputPreview,
+  capEvidence,
+  normalizeToolOutputToEvidence,
+} from "../evidence/normalizeEvidence.js";
+import {
+  touchWorkflow,
+  type WorkflowContext,
+} from "./workflowTypes.js";
+import { intentToSchemaId } from "../reports/reportSchemas.js";
+import { basename } from "node:path";
 
 export interface ToolExecutorOptions {
   command: string;
@@ -53,6 +64,8 @@ export interface ToolExecutorOptions {
    * Prevents recursive draft loops.
    */
   aiPlanDepth?: number;
+  /** Shared evidence-driven workflow (preserved across nested drafts). */
+  workflow?: WorkflowContext;
 }
 
 export interface StepExecutionRecord {
@@ -87,10 +100,21 @@ export async function executePlanFromStep(
   options: ToolExecutorOptions,
   priorRecords: StepExecutionRecord[] = [],
 ): Promise<ToolExecutorSummary> {
+  const semanticIntent = plan.goal?.startsWith("Semantic:")
+    ? plan.goal.replace(/^Semantic:\s*/, "").trim()
+    : undefined;
+  const schemaId = semanticIntent
+    ? intentToSchemaId(semanticIntent) ?? undefined
+    : undefined;
+
   const ctx = createExecutionContext({
     world: options.world,
     resolved: options.resolved ?? {},
     capabilities: options.capabilities ?? emptyCapabilities(),
+    workflow: options.workflow,
+    intent: semanticIntent,
+    command: options.command,
+    schemaId,
   });
 
   // Prefer live Cursor/VS Code workspace, then sticky P6 memory.
@@ -108,6 +132,12 @@ export async function executePlanFromStep(
     if (chosen) {
       ctx.resolved.projectRoot = chosen;
       ctx.currentFolder = chosen;
+      if (ctx.workflow && !ctx.workflow.project) {
+        ctx.workflow.project = {
+          name: basename(chosen),
+          rootPath: chosen,
+        };
+      }
     }
   }
 
@@ -160,6 +190,7 @@ export async function executePlanFromStep(
       step.tool,
       step.args,
       ctx.resolved,
+      ctx.workflow,
     );
 
     const pass2 = permissionPass2ForStep(step.tool, resolvedArgs);
@@ -218,13 +249,24 @@ export async function executePlanFromStep(
         step.tool.startsWith("memory.") ||
         step.tool.startsWith("context."))
     ) {
-      console.info(`[ripple-desktop] ${step.tool} result:\n${enriched.output}`);
+      // Bound preview only — never dump full evidence/secrets into logs.
+      console.info(
+        `[ripple-desktop] ${step.tool} result:\n${boundOutputPreview(enriched.output)}`,
+      );
     }
 
     ctx.recentTool = step.tool;
     ctx.lastStepOutput = enriched.output;
 
+    if (ctx.workflow) {
+      captureStepEvidence(ctx.workflow, index, step.tool, enriched);
+    }
+
     if (!enriched.ok) {
+      if (ctx.workflow) {
+        ctx.workflow.status = "failed";
+        touchWorkflow(ctx.workflow);
+      }
       return { ok: false, records, replanned: false };
     }
 
@@ -247,7 +289,13 @@ export async function executePlanFromStep(
           const nested = await executePlanFromStep(
             adopted,
             0,
-            { ...options, plan: adopted, aiPlanDepth: 1 },
+            {
+              ...options,
+              plan: adopted,
+              aiPlanDepth: 1,
+              workflow: ctx.workflow,
+              resolved: ctx.resolved,
+            },
             [],
           );
           records.push(...nested.records.map((r) => ({
@@ -255,6 +303,10 @@ export async function executePlanFromStep(
             index: records.length + r.index,
           })));
           if (!nested.ok) {
+            if (ctx.workflow) {
+              ctx.workflow.status = "failed";
+              touchWorkflow(ctx.workflow);
+            }
             return { ok: false, records, replanned: false };
           }
         } else {
@@ -278,8 +330,46 @@ export async function executePlanFromStep(
     await refreshExecutionContext(ctx, options.world);
   }
 
+  if (ctx.workflow) {
+    ctx.workflow.status = records.every((r) => r.result.ok) ? "succeeded" : "partial";
+    touchWorkflow(ctx.workflow);
+  }
+
   return { ok: records.every((r) => r.result.ok), records, replanned: false };
 }
+
+function captureStepEvidence(
+  workflow: WorkflowContext,
+  index: number,
+  tool: string,
+  result: ToolResult,
+): void {
+  const started = new Date().toISOString();
+  const { items, omissions } = normalizeToolOutputToEvidence({
+    tool,
+    stepIndex: index,
+    output: result.output ?? result.error,
+    ok: result.ok,
+    omissions: workflow.omissions,
+  });
+  workflow.omissions = omissions;
+  const capped = capEvidence([...workflow.evidence, ...items], workflow.omissions);
+  workflow.evidence = capped;
+  workflow.steps.push({
+    index,
+    tool,
+    ok: result.ok,
+    error: result.error,
+    outputPreview: boundOutputPreview(result.output ?? result.error),
+    evidenceIds: items.map((i) => i.id),
+    startedAt: started,
+    finishedAt: new Date().toISOString(),
+    observationOk: result.observation?.ok,
+    observationReason: result.observation?.reason,
+  });
+  touchWorkflow(workflow);
+}
+
 
 function updateExecutionBindings(
   ctx: ExecutionContext,

@@ -10,7 +10,7 @@ function extractBackendText(result: CommandResultPayload): string {
   return "";
 }
 
-/** Rephrase / tone on open WhatsApp chat — paste AI text into composer via extension. */
+/** Rephrase / tone on open WhatsApp chat — replace composer via OS-first insert. */
 export function applyWhatsAppRephraseOverride(
   command: string,
   result: CommandResultPayload,
@@ -18,7 +18,14 @@ export function applyWhatsAppRephraseOverride(
   if (!isWhatsAppTabActive() || !isEditOrRephraseCommand(command)) return null;
 
   const text = extractBackendText(result);
-  if (!text.trim()) return null;
+  if (!text.trim()) {
+    console.warn(
+      `[ripple-desktop] WA rephrase — backend gave no usable text (intent=${result.intent}, actions=${
+        result.actions?.map((a) => a.type).join(",") || "none"
+      }, result=${typeof result.result === "string" ? JSON.stringify(result.result.slice(0, 80)) : typeof result.result}) — falling through, nothing will be typed`,
+    );
+    return null;
+  }
 
   const onlySuggestions =
     result.actions?.length === 1 && result.actions[0]?.type === "SHOW_SUGGESTIONS";

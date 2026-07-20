@@ -18,6 +18,13 @@ vi.mock("../../storage/voiceCorrections.js", () => ({
     text.replace(/\bher rides\b/gi, "HerRidez"),
 }));
 
+vi.mock("../dictation/aiRewriteDictation.js", () => ({
+  isDictationAiRewriteEnabled: () => false,
+  aiRewriteDictation: vi.fn(async () => null),
+  analyzeDictationCorrection: vi.fn(async () => null),
+  generateDictationCorrection: vi.fn(async () => null),
+}));
+
 vi.mock("../../automation/actions/insertText.js", () => ({
   runInsertText: vi.fn(async () => "typed"),
 }));
@@ -54,6 +61,71 @@ describe("P8.5-P7 Whisper Flow", () => {
     expect(result.text.toLowerCase()).not.toContain("noo");
   });
 
+  it("revises comma-anchored single 'no' self-correction", () => {
+    const result = applyCorrectionHeuristics(
+      "Meet tomorrow, no day after tomorrow at 9 o'clock",
+    );
+    expect(result.kind).toBe("replace_tail");
+    expect(result.text.toLowerCase()).toContain("day after tomorrow");
+    expect(result.text.toLowerCase()).toContain("9 o'clock");
+    expect(result.text.toLowerCase()).not.toMatch(/tomorrow,\s*no\b/);
+  });
+
+  it("revises live ASR 'tomorrow, no, day after' with comma after no", () => {
+    const result = applyCorrectionHeuristics(
+      "Meet tomorrow, no, day after tomorrow at 8 o'clock",
+    );
+    expect(result.kind).toBe("replace_tail");
+    expect(result.text.toLowerCase()).toContain("day after tomorrow");
+    expect(result.text.toLowerCase()).toContain("8 o'clock");
+    expect(result.text.toLowerCase()).not.toMatch(/\bno\b/);
+    expect(result.text.toLowerCase()).not.toMatch(/meet tomorrow/);
+  });
+
+  it("revises 'Monday no Tuesday' weekday swap", () => {
+    const result = applyCorrectionHeuristics(
+      "Send the report Monday no Tuesday",
+    );
+    expect(result.kind).toBe("replace_tail");
+    expect(result.text.toLowerCase()).toContain("tuesday");
+    expect(result.text.toLowerCase()).not.toContain("monday");
+  });
+
+  it("revises 'tomorrow no Friday' day swap", () => {
+    const result = applyCorrectionHeuristics(
+      "Call Rahul tomorrow no Friday",
+    );
+    expect(result.kind).toBe("replace_tail");
+    expect(result.text.toLowerCase()).toContain("friday");
+    expect(result.text.toLowerCase()).toContain("rahul");
+    expect(result.text.toLowerCase()).not.toContain("tomorrow");
+  });
+
+  it("revises clause when shared phrase restarts after no", () => {
+    const result = applyCorrectionHeuristics(
+      "I will tell you one thing, just text me at 9 o'clock, no, just text me at 10",
+    );
+    expect(result.kind).toBe("replace_tail");
+    expect(result.text.toLowerCase()).toContain("10");
+    expect(result.text.toLowerCase()).toContain("one thing");
+    expect(result.text.toLowerCase()).not.toMatch(/9\s*o/);
+    expect(result.text.toLowerCase()).not.toMatch(/\bno\b/);
+  });
+
+  it("does not treat 'money, no debt' as a self-correction", () => {
+    const result = applyCorrectionHeuristics("I have money, no debt at all");
+    expect(result.kind).not.toBe("replace_tail");
+    expect(result.text.toLowerCase()).toContain("money");
+    expect(result.text.toLowerCase()).toContain("debt");
+  });
+
+  it("does not duplicate articles in legacy fallback", () => {
+    const result = applyCorrectionHeuristics(
+      "meet at the office, no, the cafe",
+    );
+    expect(result.text).not.toMatch(/\bthe\s+the\b/i);
+  });
+
   it("deletes a spoken phrase", () => {
     const result = applyCorrectionHeuristics(
       "See you tomorrow remove tomorrow",
@@ -61,6 +133,13 @@ describe("P8.5-P7 Whisper Flow", () => {
     expect(result.kind).toBe("delete_phrase");
     expect(result.text.toLowerCase()).not.toContain("tomorrow");
     expect(result.text.toLowerCase()).toContain("see you");
+  });
+
+  it("legacy delete removes only the last matching occurrence", () => {
+    const result = applyCorrectionHeuristics(
+      "tomorrow is better than tomorrow remove tomorrow",
+    );
+    expect(result.text.match(/\btomorrow\b/gi)).toHaveLength(1);
   });
 
   it("makes professional tone", () => {
@@ -74,11 +153,11 @@ describe("P8.5-P7 Whisper Flow", () => {
     );
   });
 
-  it("session buffer confirms only after rewrite", () => {
+  it("session buffer confirms only after rewrite", async () => {
     startDictationSession();
     appendDictationUtterance("hello tomorrow");
     expect(getRevisionBuffer().confirmed).toBe(false);
-    const rewritten = rewriteDictationBuffer({
+    const rewritten = await rewriteDictationBuffer({
       bufferText: getRevisionBuffer().text + " no no day after tomorrow",
     });
     const confirmed = confirmDictationBuffer(rewritten.finalText);
@@ -86,8 +165,8 @@ describe("P8.5-P7 Whisper Flow", () => {
     expect(confirmed.text.toLowerCase()).toContain("day after tomorrow");
   });
 
-  it("applies P6 memory corrections (her rides → HerRidez)", () => {
-    const out = rewriteDictationBuffer({
+  it("applies P6 memory corrections (her rides → HerRidez)", async () => {
+    const out = await rewriteDictationBuffer({
       bufferText: "open her rides folder please",
       applyMemoryCorrections: true,
     });

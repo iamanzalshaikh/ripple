@@ -3,34 +3,15 @@ import { basename, join } from "node:path";
 import { searchIndexedDirectories } from "../../storage/fileIndex.js";
 import { getLastProjectPath } from "../../storage/workContext.js";
 import { rankChoices } from "../../storage/usageStats.js";
-import { dirname } from "node:path";
 import {
+  collapseDuplicateLeaf,
   folderLabelFromPath,
   normalizeFolderLabel,
   scoreFolderNameMatch,
 } from "./projectPathNormalize.js";
 import { findProjectRoot, looksLikeProjectRoot } from "./projectResolver.js";
 
-/**
- * Collapse a repo nested inside an identically-named container:
- * `…/school-management/school-management` → `…/school-management`.
- * The outer folder is what users name; the inner is a clone/init artifact.
- */
-export function collapseDuplicateLeaf(path: string): string {
-  const cleaned = path.trim().replace(/[\\/]+$/, "");
-  const leaf = folderLabelFromPath(cleaned);
-  const parent = dirname(cleaned);
-  const parentLeaf = folderLabelFromPath(parent);
-  if (
-    leaf &&
-    parentLeaf &&
-    normalizeFolderLabel(leaf) === normalizeFolderLabel(parentLeaf) &&
-    existsSync(parent)
-  ) {
-    return parent;
-  }
-  return cleaned;
-}
+export { collapseDuplicateLeaf };
 
 export type ScoredProjectIdentity = {
   path: string;

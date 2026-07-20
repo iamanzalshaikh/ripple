@@ -5,6 +5,7 @@ describe("parseUndoCommand", () => {
   it("parses English undo", () => {
     expect(parseUndoCommand("undo last action")).toEqual({ kind: "undo_last" });
     expect(parseUndoCommand("Undo")).toEqual({ kind: "undo_last" });
+    expect(parseUndoCommand("Undo last copy")).toEqual({ kind: "undo_last" });
   });
 
   it("parses Hinglish wapas karo", () => {

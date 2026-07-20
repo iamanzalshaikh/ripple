@@ -170,7 +170,7 @@ describe("P8.5-P6 memory + context", () => {
       expect(getRegisteredTool(name)).toBeDefined();
       expect(isKnownTool(name)).toBe(true);
     }
-    expect(TOOL_MANIFEST_VERSION).toBe("2.2.0");
+    expect(TOOL_MANIFEST_VERSION).toBe("2.3.0");
   });
 
   it("stores preferred IDE preference", async () => {
