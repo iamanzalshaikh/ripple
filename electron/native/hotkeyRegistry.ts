@@ -2,6 +2,7 @@ import { globalShortcut } from "electron";
 import {
   cancelVoiceSession,
   handleShortcutPress,
+  handleTransformShortcutPress,
 } from "../windows/overlay.js";
 import {
   isDictationModeEnabled,
@@ -12,7 +13,7 @@ import { getSidecarCapabilities, isNativeClientAuthenticated } from "./nativeCli
 export type HotkeyBinding = {
   accelerator: string;
   label: string;
-  action: "command" | "dictation" | "voice" | "cancel_voice";
+  action: "command" | "dictation" | "transform" | "voice" | "cancel_voice";
 };
 
 const DEFAULT_BINDINGS: HotkeyBinding[] = [
@@ -21,15 +22,32 @@ const DEFAULT_BINDINGS: HotkeyBinding[] = [
     label: "Command mode",
     action: "command",
   },
+  // Primary dictation — Shift+Space (simple; avoids Alt chords stolen by ChatGPT).
   {
-    accelerator: "Alt+Space",
+    accelerator: "Shift+Space",
     label: "Dictation mode",
+    action: "dictation",
+  },
+  {
+    accelerator: "Control+Shift+Space",
+    label: "Dictation (backup)",
     action: "dictation",
   },
   {
     accelerator: "Alt+Shift+Space",
     label: "Dictation (legacy)",
     action: "dictation",
+  },
+  // P8 — Transforms: one key (F9). Ctrl+Alt+Space kept as backup only.
+  {
+    accelerator: "F9",
+    label: "Transforms (rewrite selection)",
+    action: "transform",
+  },
+  {
+    accelerator: "Control+Alt+Space",
+    label: "Transforms (backup)",
+    action: "transform",
   },
   { accelerator: "Escape", label: "Cancel voice", action: "cancel_voice" },
 ];
@@ -46,6 +64,10 @@ function runHotkeyAction(action: HotkeyBinding["action"]): void {
     cancelVoiceSession();
     return;
   }
+  if (action === "transform") {
+    void handleTransformShortcutPress();
+    return;
+  }
   void handleShortcutPress(modeForAction(action));
 }
 
@@ -56,19 +78,23 @@ function sidecarOwnsHotkeys(): boolean {
   );
 }
 
-/** P7 — register global hotkeys (sidecar RegisterHotKey preferred; Electron fallback). */
+/** P7 — register global hotkeys (sidecar RegisterHotKey preferred; Electron fills gaps). */
 export function registerNativeHotkeys(
   bindings: HotkeyBinding[] = DEFAULT_BINDINGS,
-): { registered: string[]; failed: string[]; source: "sidecar" | "electron" } {
-  if (sidecarOwnsHotkeys()) {
-    console.info(
-      "[ripple-native] using sidecar hotkeys (Ctrl+Space=command, Alt+Space=dictation, Esc=cancel)",
-    );
-    return { registered: [], failed: [], source: "sidecar" };
-  }
-
+): { registered: string[]; failed: string[]; source: "sidecar" | "electron" | "mixed" } {
   const ok: string[] = [];
   const failed: string[] = [];
+
+  // Always register Electron bindings too when sidecar is partial / missing a
+  // chord. Duplicate RegisterHotKey is fine — Electron globalShortcut fails
+  // soft if already taken. This fixes "press 2–3 times" when Alt+Space dies
+  // and sidecar aborted the whole set.
+  const sidecar = sidecarOwnsHotkeys();
+  if (sidecar) {
+    console.info(
+      "[ripple-native] sidecar hotkeys active — also registering Electron backups (Shift+Space=dictation)",
+    );
+  }
 
   for (const binding of bindings) {
     if (registered.includes(binding.accelerator)) continue;
@@ -81,7 +107,7 @@ export function registerNativeHotkeys(
       registered.push(binding.accelerator);
       ok.push(binding.accelerator);
       console.info(
-        `[ripple-native] hotkey registered: ${binding.accelerator} (${binding.label}) [Electron fallback]`,
+        `[ripple-native] hotkey registered: ${binding.accelerator} (${binding.label}) [Electron]`,
       );
     } else {
       failed.push(binding.accelerator);
@@ -89,7 +115,11 @@ export function registerNativeHotkeys(
     }
   }
 
-  return { registered: ok, failed, source: "electron" };
+  return {
+    registered: ok,
+    failed,
+    source: sidecar ? (ok.length ? "mixed" : "sidecar") : "electron",
+  };
 }
 
 export function unregisterNativeHotkeys(): void {

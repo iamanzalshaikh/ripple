@@ -53,8 +53,8 @@ describe("P7.3 WhatsApp OS-first compose insertion", () => {
       focused: { value: "" },
     });
     runInsertWithFallback.mockResolvedValue({
-      detail: "Typed 5 characters (native_text)",
-      strategy: "native_text",
+      detail: "Pasted 5 characters (clipboard_paste)",
+      strategy: "clipboard_paste",
     });
     replaceWhatsAppComposerViaExtension.mockResolvedValue(
       "Updated WhatsApp message",
@@ -64,17 +64,37 @@ describe("P7.3 WhatsApp OS-first compose insertion", () => {
   it("uses the OS insert ladder before the extension", async () => {
     const result = await insertWhatsAppComposeText("hello");
 
-    expect(result).toContain("native_text");
+    expect(result).toContain("clipboard_paste");
     expect(runInsertWithFallback).toHaveBeenCalledWith(
       "hello",
       expect.objectContaining({
         verify: true,
         includeVision: false,
         acceptUnverifiableEdit: true,
+        abortLadderOnPartialNativeFail: true,
+        preferFirst: "clipboard_paste",
       }),
     );
     expect(replaceWhatsAppComposerViaExtension).not.toHaveBeenCalled();
     expect(selectAll).not.toHaveBeenCalled();
+  });
+
+  it("prefers clipboard paste for compose messages to avoid native double-type", async () => {
+    const msg = "I want to meet you tomorrow.";
+    runInsertWithFallback.mockResolvedValue({
+      detail: `Pasted ${msg.length} characters (clipboard_paste)`,
+      strategy: "clipboard_paste",
+    });
+
+    await insertWhatsAppComposeText(msg);
+
+    expect(runInsertWithFallback).toHaveBeenCalledWith(
+      msg,
+      expect.objectContaining({
+        preferFirst: "clipboard_paste",
+        abortLadderOnPartialNativeFail: true,
+      }),
+    );
   });
 
   it("clears the composer before OS insert when replaceAll is set", async () => {

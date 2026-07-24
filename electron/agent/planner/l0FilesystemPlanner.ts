@@ -33,7 +33,11 @@ export type FilesystemPlannerIntent =
   | { kind: "list_directory"; parentFolder: string };
 
 function normalizeCmd(command: string): string {
-  return command.trim().toLowerCase().replace(/\s+/g, " ");
+  return command
+    .trim()
+    .toLowerCase()
+    .replace(/[.?!]+$/g, "")
+    .replace(/\s+/g, " ");
 }
 
 export function parseFilesystemSearchCommand(
@@ -86,6 +90,8 @@ export function parseFilesystemSearchCommand(
   const patterns = [
     /^(?:find|search(?:\s+for)?|locate|look\s+for)\s+(?:my\s+|the\s+)?(.+?)\s*$/,
     /^(?:where\s+is|where's)\s+(?:my\s+|the\s+)?(.+?)\s*$/,
+    // "Show me all PDF files inside my Downloads" (also after accidental open rewrite)
+    /^(?:show|list|find|open)\s+(?:me\s+)?(?:all\s+)?(?:the\s+)?(pdf|docx?|xlsx?|pptx?|txt|png|jpe?g|csv|zip)(?:\s+files?)?\s+(?:in|on|inside)\s+(?:my\s+|the\s+)?(?:downloads?|documents?|desktop)\s*$/,
   ];
 
   for (const pattern of patterns) {
@@ -323,7 +329,9 @@ export function tryL0FilesystemPlan(
   rawCommand: string,
   normalized: string,
 ): L0PlannerResult | null {
-  const intent = parseFilesystemPlannerIntent(rawCommand);
+  const intent =
+    parseFilesystemPlannerIntent(rawCommand) ??
+    parseFilesystemPlannerIntent(normalized);
   if (!intent) return null;
 
   if (intent.kind === "list_directory") {

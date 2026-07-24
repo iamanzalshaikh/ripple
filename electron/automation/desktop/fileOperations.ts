@@ -63,17 +63,38 @@ export function resolveParentPath(name?: string): string {
  * defaulting it to Desktop is worse than defaulting it to a sibling of the
  * source (wave0 TEST 10: "creates TestFolder inside current workspace, NOT
  * Desktop\TestFolder"). Absolute paths and well-known folders still win.
+ *
+ * Wave 1: if a bare name already exists under Desktop / Documents / Downloads
+ * (e.g. user said "to Finance" and Desktop\Finance was created earlier),
+ * prefer that existing folder over inventing Downloads\Finance beside the
+ * source file.
  */
 export function resolveDestinationDir(
   destination: string,
   sourcePath: string,
 ): string {
-  const trimmed = destination.trim();
+  const trimmed = destination.trim().replace(/[.,!?;:]+$/g, "");
   if (!trimmed) return wellKnownFolderPath("desktop");
   if (isAbsolute(trimmed)) return trimmed;
 
   const key = resolveWellKnownFolderKey(trimmed);
   if (key) return wellKnownFolderPath(key);
+
+  const existingRoots = [
+    wellKnownFolderPath("desktop"),
+    wellKnownFolderPath("documents"),
+    wellKnownFolderPath("downloads"),
+  ];
+  for (const root of existingRoots) {
+    const candidate = join(root, trimmed);
+    try {
+      if (existsSync(candidate) && statSync(candidate).isDirectory()) {
+        return candidate;
+      }
+    } catch {
+      /* ignore */
+    }
+  }
 
   return join(dirname(sourcePath), trimmed);
 }

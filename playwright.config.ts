@@ -1,14 +1,17 @@
 import { defineConfig, devices } from "@playwright/test";
 
 /**
- * Playwright config for Ripple Wave 0 OS trust suite.
+ * Playwright config for Ripple OS trust / Semantic OS suites.
  *
- * Wave 0 does NOT drive a browser page — it drives the real Electron app via
- * the OS test file bridge (see tests/helpers/osBridge.ts). Chromium is only
- * used as a Playwright project host so `npx playwright test --ui` works.
+ * These projects do NOT drive a browser page — they drive the real Electron
+ * app via the OS test file bridge (tests/helpers/osBridge.ts). Chromium is
+ * only used as a Playwright project host so `npx playwright test --ui` works.
  *
  * Start Ripple first: `npm run dev`
- * Then: `npx playwright test --ui` or `npx playwright test --project=wave0`
+ * Then:
+ *   npx playwright test --project=wave0
+ *   npx playwright test --project=wave1
+ *   npx playwright test --project=wave1 --ui
  */
 export default defineConfig({
   testDir: "./tests",
@@ -29,8 +32,13 @@ export default defineConfig({
       use: { ...devices["Desktop Chrome"] },
     },
     {
+      name: "wave1",
+      testMatch: /wave1\.spec\.ts/,
+      use: { ...devices["Desktop Chrome"] },
+    },
+    {
       name: "chromium",
-      testIgnore: /wave0\.spec\.ts/,
+      testIgnore: /wave[01]\.spec\.ts/,
       use: { ...devices["Desktop Chrome"] },
     },
   ],

@@ -22,7 +22,10 @@
       "filesystem.rename",
       "filesystem.move",
       "filesystem.open",
-      "window.inspect"
+      "window.inspect",
+      "window.maximize",
+      "window.minimize",
+      "window.snap"
     ],
     "apps": [
       "desktop.launch_app",
@@ -1470,6 +1473,43 @@
       "wave": 2,
       "argsSchema": {
         "query": {
+          "type": "string"
+        }
+      }
+    },
+    {
+      "name": "window.maximize",
+      "description": "Maximize foreground or named window",
+      "category": "desktop",
+      "wave": 2,
+      "argsSchema": {
+        "app": {
+          "type": "string"
+        }
+      }
+    },
+    {
+      "name": "window.minimize",
+      "description": "Minimize foreground or named window",
+      "category": "desktop",
+      "wave": 2,
+      "argsSchema": {
+        "app": {
+          "type": "string"
+        }
+      }
+    },
+    {
+      "name": "window.snap",
+      "description": "Snap window to left or right half of screen",
+      "category": "desktop",
+      "wave": 2,
+      "argsSchema": {
+        "side": {
+          "type": "string",
+          "required": true
+        },
+        "app": {
           "type": "string"
         }
       }

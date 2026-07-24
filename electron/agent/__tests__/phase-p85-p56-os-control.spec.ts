@@ -50,6 +50,13 @@ vi.mock("../../native/win32Bridge.js", () => ({
       className: "Chrome_WidgetWin_1",
     },
   ]),
+  applyWindowLayoutNative: vi.fn(async (mode: string) => ({
+    ok: true,
+    mode,
+    hwnd: 11,
+    title: "jkf — Cursor",
+  })),
+  isWin32NativeAvailable: vi.fn(() => true),
 }));
 
 function stubWorld(): WorldModel {
@@ -126,6 +133,9 @@ describe("P8.5-P5.6 OS Control", () => {
       "os.get_app_properties",
       "os.get_running_apps",
       "window.inspect",
+      "window.maximize",
+      "window.minimize",
+      "window.snap",
     ]);
     for (const name of [
       ...osNames,
@@ -223,6 +233,49 @@ describe("P8.5-P5.6 OS Control", () => {
     if (inspect?.kind === "plan") {
       expect(inspect.plan.steps[0]?.tool).toBe("window.inspect");
     }
+
+    const snap = tryL0OsControlPlan(
+      "Put this app on the left side of my screen.",
+      "put this app on the left side of my screen",
+    );
+    expect(snap?.kind).toBe("plan");
+    if (snap?.kind === "plan") {
+      expect(snap.plan.steps[0]?.tool).toBe("window.snap");
+      expect(snap.plan.steps[0]?.args.side).toBe("left");
+    }
+
+    const max = tryL0OsControlPlan(
+      "Make this full screen.",
+      "make this full screen",
+    );
+    expect(max?.kind).toBe("plan");
+    if (max?.kind === "plan") {
+      expect(max.plan.steps[0]?.tool).toBe("window.maximize");
+    }
+
+    const vague = tryL0OsControlPlan(
+      "Put the Chrome window somewhere useful.",
+      "put the chrome window somewhere useful",
+    );
+    expect(vague?.kind).toBe("clarify");
+  });
+
+  it("executes window.snap / maximize via mocks", async () => {
+    const snapped = await executeToolForExecutor(
+      "window.snap",
+      stubCtx("snap left"),
+      { side: "left" },
+    );
+    expect(snapped.ok).toBe(true);
+    expect(String(snapped.output)).toMatch(/Snapped left/i);
+
+    const maxed = await executeToolForExecutor(
+      "window.maximize",
+      stubCtx("maximize"),
+      {},
+    );
+    expect(maxed.ok).toBe(true);
+    expect(String(maxed.output)).toMatch(/Maximized/i);
   });
 
   it("executes get_running_apps and window.inspect via mocks", async () => {

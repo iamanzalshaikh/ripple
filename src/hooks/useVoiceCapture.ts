@@ -1,6 +1,14 @@
 import { useCallback, useRef } from "react";
 
 const CHUNK_MS = 300;
+/**
+ * P9.6 — quiet/whisper mode gain boost. Whisper-level speech sits well below
+ * normal talking volume (roughly 3-8x quieter in amplitude); autoGainControl
+ * alone targets normal speech loudness and often isn't aggressive enough on
+ * its own, so we add a fixed software boost on top of it via a Web Audio
+ * GainNode before the recorder ever sees the signal.
+ */
+const QUIET_MODE_GAIN = 3.0;
 
 function pickMimeType(): string {
   const candidates = [
@@ -28,36 +36,86 @@ function filenameForMime(mimeType: string): string {
   return "voice.webm";
 }
 
+export interface VoiceCaptureStartOptions {
+  /** P9.6 — boost + de-noise-suppress for soft/whispered speech. */
+  quiet?: boolean;
+}
+
 export function useVoiceCapture() {
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const micStreamRef = useRef<MediaStream | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
   const partsRef = useRef<Blob[]>([]);
   const mimeTypeRef = useRef("audio/webm");
 
   const stopTracks = useCallback(() => {
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
+    // The recorded stream is a synthetic WebAudio destination in quiet mode —
+    // stopping its tracks doesn't release the physical mic, so stop that too.
+    micStreamRef.current?.getTracks().forEach((t) => t.stop());
+    micStreamRef.current = null;
+    if (audioContextRef.current) {
+      void audioContextRef.current.close().catch(() => undefined);
+      audioContextRef.current = null;
+    }
   }, []);
 
-  const start = useCallback(async (): Promise<void> => {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    streamRef.current = stream;
-    partsRef.current = [];
+  const start = useCallback(
+    async (options?: VoiceCaptureStartOptions): Promise<void> => {
+      const quiet = options?.quiet === true;
+      const micStream = await navigator.mediaDevices.getUserMedia({
+        audio: quiet
+          ? {
+              // Noise suppression / echo cancellation are tuned around normal
+              // speech + background noise; on breathy, low-amplitude whisper
+              // audio they frequently misclassify the voice itself as noise
+              // and attenuate it. Auto gain control alone is kept on and
+              // supplemented with an explicit software boost below.
+              autoGainControl: true,
+              noiseSuppression: false,
+              echoCancellation: false,
+            }
+          : true,
+      });
+      micStreamRef.current = micStream;
+      partsRef.current = [];
 
-    const preferred = pickMimeType();
-    const recorder = new MediaRecorder(
-      stream,
-      preferred ? { mimeType: preferred } : undefined,
-    );
-    recorderRef.current = recorder;
+      let recordStream = micStream;
+      if (quiet) {
+        const AudioCtx =
+          window.AudioContext ??
+          (window as unknown as { webkitAudioContext: typeof AudioContext })
+            .webkitAudioContext;
+        const audioContext = new AudioCtx();
+        audioContextRef.current = audioContext;
+        const source = audioContext.createMediaStreamSource(micStream);
+        const gain = audioContext.createGain();
+        gain.gain.value = QUIET_MODE_GAIN;
+        const destination = audioContext.createMediaStreamDestination();
+        source.connect(gain);
+        gain.connect(destination);
+        recordStream = destination.stream;
+      }
+      streamRef.current = recordStream;
 
-    recorder.ondataavailable = (ev) => {
-      if (ev.data.size > 0) partsRef.current.push(ev.data);
-    };
+      const preferred = pickMimeType();
+      const recorder = new MediaRecorder(
+        recordStream,
+        preferred ? { mimeType: preferred } : undefined,
+      );
+      recorderRef.current = recorder;
 
-    recorder.start(CHUNK_MS);
-    mimeTypeRef.current = recorder.mimeType || preferred || "audio/webm";
-  }, []);
+      recorder.ondataavailable = (ev) => {
+        if (ev.data.size > 0) partsRef.current.push(ev.data);
+      };
+
+      recorder.start(CHUNK_MS);
+      mimeTypeRef.current = recorder.mimeType || preferred || "audio/webm";
+    },
+    [],
+  );
 
   const stopAndGetBuffer = useCallback(async (): Promise<VoiceRecordingResult> => {
     const recorder = recorderRef.current;

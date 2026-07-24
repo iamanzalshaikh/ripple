@@ -7,6 +7,7 @@ import {
   looksLikeRippleOsCommand,
 } from "../automation/adapters/whatsapp/whatsappVoiceOverride.js";
 import { resolveGmailComposeDictationText } from "../automation/adapters/gmail/gmailComposeDictation.js";
+import { resolveFocusedFieldDictationText } from "../agent/dictation/focusedFieldDictation.js";
 import { applyWhatsAppRephraseOverride } from "../automation/adapters/whatsapp/whatsappRephraseOverride.js";
 import { applyNotionVoiceOverride } from "../automation/adapters/notion/notionVoiceOverride.js";
 import { normalizeTranscript } from "../automation/voice/normalizeTranscript.js";
@@ -1193,13 +1194,15 @@ export async function runDesktopCommand(
       };
     }
 
-    // Focused web compose (WhatsApp / Gmail): correct + type before planner
-    // can mis-route phrases like "start our new project".
+    // Focused editable field: correct + type before planner can mis-route
+    // chatty speech (e.g. Notepad/Cursor) the way WhatsApp/Gmail already do.
     const focusedCompose = await (async () => {
       const wa = await resolveWhatsAppComposeDictationText(input.command);
       if (wa) return { surface: "whatsapp" as const, text: wa };
       const gmail = await resolveGmailComposeDictationText(input.command);
       if (gmail) return { surface: "gmail" as const, text: gmail };
+      const field = await resolveFocusedFieldDictationText(input.command);
+      if (field) return { surface: "focused-field" as const, text: field };
       return null;
     })();
     if (focusedCompose) {

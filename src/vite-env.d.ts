@@ -87,6 +87,7 @@ interface RippleApi {
   endVoice: (args: {
     streamId: string;
     sessionId?: string;
+    language?: string;
   }) => Promise<{ ok: boolean; message?: string; data?: unknown }>;
   cancelVoice: (streamId: string) => Promise<{ ok: boolean; message?: string }>;
   executeCommand: (args: {
@@ -97,6 +98,8 @@ interface RippleApi {
   executeDictation: (args: {
     text: string;
     insert?: boolean;
+    requestedLanguage?: string;
+    detectedLanguage?: string;
   }) => Promise<{
     ok: boolean;
     mode: "dictation";
@@ -104,7 +107,110 @@ interface RippleApi {
     inserted?: boolean;
     error?: string;
     correctionKind?: string;
+    session?: {
+      sessionId: number;
+      utteranceCount: number;
+      elapsedMs: number;
+      remainingMs: number;
+      windowMs: number;
+    };
+    transform?: boolean;
+    originalText?: string;
   }>;
+  getDictationSessionStatus: () => Promise<{
+    ok: boolean;
+    session: {
+      sessionId: number;
+      utteranceCount: number;
+      elapsedMs: number;
+      remainingMs: number;
+      windowMs: number;
+    } | null;
+  }>;
+  language: {
+    get: () => Promise<{ ok: boolean; language?: string; message?: string }>;
+    set: (language: string) => Promise<{ ok: boolean; language?: string; message?: string }>;
+  };
+  quietMode: {
+    get: () => Promise<{ ok: boolean; quietMode?: boolean; message?: string }>;
+    set: (enabled: boolean) => Promise<{ ok: boolean; quietMode?: boolean; message?: string }>;
+  };
+  dictionary: {
+    list: () => Promise<{
+      ok: boolean;
+      message?: string;
+      items?: Array<{
+        spokenForm: string;
+        canonicalForm: string;
+        source: string;
+        updatedAt: string;
+      }>;
+    }>;
+    add: (args: {
+      spokenForm: string;
+      canonicalForm: string;
+    }) => Promise<{
+      ok: boolean;
+      message?: string;
+      entry?: {
+        spokenForm: string;
+        canonicalForm: string;
+        source: string;
+        updatedAt: string;
+      };
+    }>;
+    remove: (spokenForm: string) => Promise<{ ok: boolean; message?: string }>;
+  };
+  snippets: {
+    list: () => Promise<{
+      ok: boolean;
+      message?: string;
+      items?: Array<{
+        trigger: string;
+        expansion: string;
+        createdAt: string;
+        updatedAt: string;
+      }>;
+    }>;
+    add: (args: {
+      trigger: string;
+      expansion: string;
+    }) => Promise<{
+      ok: boolean;
+      message?: string;
+      entry?: {
+        trigger: string;
+        expansion: string;
+        createdAt: string;
+        updatedAt: string;
+      };
+    }>;
+    remove: (trigger: string) => Promise<{ ok: boolean; message?: string }>;
+  };
+  styles: {
+    list: () => Promise<{
+      ok: boolean;
+      message?: string;
+      items?: Array<{
+        processName: string;
+        tone: "professional" | "casual" | "neutral";
+        updatedAt: string;
+      }>;
+    }>;
+    set: (args: {
+      processName: string;
+      tone: "professional" | "casual" | "neutral";
+    }) => Promise<{
+      ok: boolean;
+      message?: string;
+      entry?: {
+        processName: string;
+        tone: "professional" | "casual" | "neutral";
+        updatedAt: string;
+      };
+    }>;
+    remove: (processName: string) => Promise<{ ok: boolean; message?: string }>;
+  };
   getTelemetrySummary: () => Promise<{
     ok: boolean;
     message?: string;
@@ -243,7 +349,7 @@ interface RippleApi {
   onVoiceToggle: (
     cb: (payload: {
       action: "start" | "stop" | "cancel";
-      mode?: "command" | "dictation";
+      mode?: "command" | "dictation" | "transform";
     }) => void,
   ) => () => void;
   pickDisambiguation?: (path: string | null) => Promise<{ ok: boolean }>;

@@ -50,8 +50,15 @@ export function OverlayPage() {
   const streamIdRef = useRef<string>("");
   const recordingRef = useRef(false);
   const busyRef = useRef(false);
-  const voiceModeRef = useRef<"command" | "dictation">("command");
-  const [voiceMode, setVoiceMode] = useState<"command" | "dictation">("command");
+  const voiceModeRef = useRef<"command" | "dictation" | "transform">("command");
+  const [voiceMode, setVoiceMode] = useState<"command" | "dictation" | "transform">(
+    "command",
+  );
+  const [sessionInfo, setSessionInfo] = useState<{
+    utteranceCount: number;
+    remainingMs: number;
+  } | null>(null);
+  const [detectedLanguage, setDetectedLanguage] = useState<string | null>(null);
 
   const voice = useVoiceCapture();
 
@@ -104,12 +111,29 @@ export function OverlayPage() {
       setRepairBusy(false);
       setPhase("idle");
     });
+    const unsubTransformHint = api.onIpcEvent?.(
+      "overlay:transform-hint",
+      (payload) => {
+        const msg =
+          payload &&
+          typeof payload === "object" &&
+          "message" in payload &&
+          typeof (payload as { message: unknown }).message === "string"
+            ? (payload as { message: string }).message
+            : "Select text first, then F9";
+        setVoiceMode("transform");
+        voiceModeRef.current = "transform";
+        setError(msg);
+        setPhase("error");
+      },
+    );
     return () => {
       unsubShow?.();
       unsubHide?.();
       unsubClarify?.();
       unsubRepairShow?.();
       unsubRepairHide?.();
+      unsubTransformHint?.();
     };
   }, []);
 
@@ -127,17 +151,43 @@ export function OverlayPage() {
     setPhase(data.execution?.allSucceeded === false ? "error" : "result");
   }, []);
 
-  const runDictation = useCallback(async (text: string) => {
-    const res = await getRippleApi().executeDictation({ text, insert: true });
-    if (!res.ok) {
-      throw new Error(res.error ?? "Dictation failed");
-    }
-    console.info(
-      `[ripple-overlay] dictation final (${res.correctionKind}):`,
-      res.finalText,
-    );
-    setPhase("result");
-  }, []);
+  const runDictation = useCallback(
+    async (
+      text: string,
+      langOpts?: { requestedLanguage?: string; detectedLanguage?: string },
+    ) => {
+      const res = await getRippleApi().executeDictation({
+        text,
+        insert: true,
+        requestedLanguage: langOpts?.requestedLanguage,
+        detectedLanguage: langOpts?.detectedLanguage,
+      });
+      if (res.session) {
+        setSessionInfo({
+          utteranceCount: res.session.utteranceCount,
+          remainingMs: res.session.remainingMs,
+        });
+      }
+      if (!res.ok) {
+        throw new Error(res.error ?? (res.transform ? "Transform failed" : "Dictation failed"));
+      }
+      if (res.transform) {
+        console.info(
+          "[ripple-overlay] transform applied:",
+          res.originalText,
+          "→",
+          res.finalText,
+        );
+      } else {
+        console.info(
+          `[ripple-overlay] dictation final (${res.correctionKind}):`,
+          res.finalText,
+        );
+      }
+      setPhase("result");
+    },
+    [],
+  );
 
   const cancelRecording = useCallback(async () => {
     busyRef.current = false;
@@ -162,13 +212,19 @@ export function OverlayPage() {
     try {
       const { buffer, mimeType, filename } = await voice.stopAndGetBuffer();
 
-      const chunkRes = await getRippleApi().sendVoiceChunk({
-        streamId: streamIdRef.current,
-        sessionId: sessionIdRef.current,
-        chunk: new Uint8Array(buffer),
-        mimeType,
-        filename,
-      });
+      // P9.5 — read the language picker fresh each time (cheap local read) so
+      // a change takes effect on the very next utterance, no cross-window
+      // sync needed. Runs alongside the chunk upload to avoid adding latency.
+      const [chunkRes, languageRes] = await Promise.all([
+        getRippleApi().sendVoiceChunk({
+          streamId: streamIdRef.current,
+          sessionId: sessionIdRef.current,
+          chunk: new Uint8Array(buffer),
+          mimeType,
+          filename,
+        }),
+        getRippleApi().language.get().catch(() => ({ ok: false as const, language: undefined })),
+      ]);
       if (!chunkRes.ok) {
         setError(chunkRes.message ?? "Failed to upload audio");
         setPhase("error");
@@ -178,6 +234,7 @@ export function OverlayPage() {
       const endRes = await getRippleApi().endVoice({
         streamId: streamIdRef.current,
         sessionId: sessionIdRef.current,
+        language: languageRes.ok ? languageRes.language : undefined,
       });
 
       if (!endRes.ok) {
@@ -186,16 +243,28 @@ export function OverlayPage() {
         return;
       }
 
-      const text = (endRes.data as { text?: string } | undefined)?.text?.trim();
+      const endData = endRes.data as { text?: string; language?: string } | undefined;
+      const text = endData?.text?.trim();
       if (!text) {
         setError("No speech detected");
         setPhase("error");
         return;
       }
+      // P9.5 — Whisper's own detected language, distinct from what the
+      // picker requested; surfaced so a wrong auto-guess is visible instead
+      // of just producing silently-bad text.
+      const detectedLanguage = endData?.language;
+      setDetectedLanguage(detectedLanguage ?? null);
 
       console.info("[ripple-overlay] transcript raw:", text);
-      if (voiceModeRef.current === "dictation") {
-        await runDictation(text);
+      // Transforms reuses the dictation IPC/pipeline end to end — the main
+      // process routes to the rewrite path via the stashed selection, not
+      // anything decided here.
+      if (voiceModeRef.current === "dictation" || voiceModeRef.current === "transform") {
+        await runDictation(text, {
+          requestedLanguage: languageRes.ok ? languageRes.language : undefined,
+          detectedLanguage,
+        });
       } else {
         await runCommand(text);
       }
@@ -219,7 +288,18 @@ export function OverlayPage() {
     setPhase("listening");
 
     try {
-      await voice.start();
+      // P9.6 — read fresh each time, same reasoning as the language pref:
+      // cheap local read, always reflects the latest toggle with no
+      // cross-window state sync needed.
+      const quietRes = await getRippleApi().quietMode.get().catch(() => ({
+        ok: false as const,
+        quietMode: undefined,
+      }));
+      const quietOn = quietRes.ok ? quietRes.quietMode === true : false;
+      console.info(
+        `[ripple-overlay] mic capture quietMode=${quietOn ? "ON" : "OFF"}`,
+      );
+      await voice.start({ quiet: quietOn });
     } catch (e: unknown) {
       recordingRef.current = false;
       await getRippleApi().setOverlayVoiceActive(false);
@@ -233,7 +313,7 @@ export function OverlayPage() {
   useEffect(() => {
     const api = getRippleApi();
     const unsubToggle = api.onVoiceToggle(({ action, mode }) => {
-      if (mode === "command" || mode === "dictation") {
+      if (mode === "command" || mode === "dictation" || mode === "transform") {
         voiceModeRef.current = mode;
         setVoiceMode(mode);
       }
@@ -265,11 +345,22 @@ export function OverlayPage() {
   }, [voice]);
 
   const label = error && phase === "error" ? error.slice(0, 40) : LABELS[phase];
-  const modeBanner = voiceMode === "dictation" ? "Dictation" : "Command";
+  const modeBanner =
+    voiceMode === "transform" ? "Transforms" : voiceMode === "dictation" ? "Dictation" : "Command";
+  const sessionBadge =
+    voiceMode === "dictation" && sessionInfo
+      ? `${sessionInfo.utteranceCount} · ${Math.max(1, Math.ceil(sessionInfo.remainingMs / 60_000))}m left`
+      : null;
+  // P9.5 — surfaces Whisper's own detected language so a wrong auto-guess
+  // is visible instead of just producing silently-bad text.
+  const languageBadge =
+    phase === "result" && detectedLanguage ? `detected: ${detectedLanguage}` : null;
   const hotkeyHint =
-    voiceMode === "dictation"
-      ? "Alt+Space — stop · Esc — cancel"
-      : "Ctrl+Space — stop · Esc — cancel";
+    voiceMode === "transform"
+      ? "F9 — stop · Esc — cancel"
+      : voiceMode === "dictation"
+        ? "Shift+Space — stop · Esc — cancel"
+        : "Ctrl+Space — stop · Esc — cancel";
 
   const pickClarify = useCallback(async (path: string) => {
     await getRippleApi().pickDisambiguation?.(path);
@@ -421,13 +512,31 @@ export function OverlayPage() {
       <div className="voice-pill flex items-center gap-2.5 rounded-full border border-violet-500/40 bg-zinc-950/95 px-3.5 py-2 shadow-[0_8px_32px_rgba(0,0,0,0.55),0_0_24px_rgba(124,58,237,0.2)]">
         <span
           className={`rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide ${
-            voiceMode === "dictation"
-              ? "bg-emerald-500/20 text-emerald-300"
-              : "bg-violet-500/20 text-violet-300"
+            voiceMode === "transform"
+              ? "bg-amber-500/20 text-amber-300"
+              : voiceMode === "dictation"
+                ? "bg-emerald-500/20 text-emerald-300"
+                : "bg-violet-500/20 text-violet-300"
           }`}
         >
           {modeBanner}
         </span>
+        {sessionBadge ? (
+          <span
+            className="whitespace-nowrap text-[9px] font-medium text-zinc-500"
+            title="Dictation session — utterances · time left before a new session starts"
+          >
+            {sessionBadge}
+          </span>
+        ) : null}
+        {languageBadge ? (
+          <span
+            className="whitespace-nowrap text-[9px] font-medium text-zinc-500"
+            title="Language Whisper detected for this utterance"
+          >
+            {languageBadge}
+          </span>
+        ) : null}
         <div className="relative flex h-7 w-7 shrink-0 items-center justify-center">
           {phase === "listening" ? (
             <>

@@ -35,10 +35,10 @@ export async function verifyTypingObservation(args: {
   if (settleMs > 0) {
     await new Promise((r) => setTimeout(r, settleMs));
   }
-  const after = await captureObservation();
+  let after = await captureObservation();
 
   const fgBefore = args.before.foreground?.hwnd;
-  const fgAfter = after.foreground?.hwnd;
+  let fgAfter = after.foreground?.hwnd;
   const afterProc = after.foreground?.processName ?? "";
   const afterTitle = after.foreground?.windowTitle ?? "";
 
@@ -71,12 +71,46 @@ export async function verifyTypingObservation(args: {
       };
     }
   } else if (fgBefore && fgAfter && fgBefore !== fgAfter) {
-    return {
-      ok: false,
-      reason: "foreground_changed",
-      before: args.before,
-      after,
-    };
+    const beforeRipple = args.before.foreground
+      ? isRippleApplicationWindow(
+          args.before.foreground.processName ?? "",
+          args.before.foreground.windowTitle ?? "",
+        )
+      : false;
+
+    if (!beforeRipple) {
+      // Editor apps (Cursor/VS Code) can transiently swap the reported
+      // foreground hwnd right after a keystroke lands (IntelliSense/format
+      // popups) even though the text already landed correctly and focus
+      // settles back a beat later — reproduced live: dictation into Cursor
+      // was reported as foreground_changed while the inserted text was
+      // already correctly in the editor. Recheck once before failing so a
+      // transient swap doesn't produce a false negative.
+      await new Promise((r) => setTimeout(r, 200));
+      const resettled = await captureObservation();
+      if (resettled.foreground?.hwnd === fgBefore) {
+        after = resettled;
+        fgAfter = resettled.foreground?.hwnd;
+      } else {
+        return {
+          ok: false,
+          reason: "foreground_changed",
+          before: args.before,
+          after: resettled,
+        };
+      }
+    }
+    // else: "before" was Ripple's own overlay — moving focus to the real
+    // target app IS the expected outcome of every dictation insert (the
+    // overlay hides and the target app receives the text), not a
+    // foreground steal. Reproduced live: the "before" snapshot gets
+    // captured while the overlay still transiently reports itself as OS
+    // foreground (hideOverlay() hasn't fully handed off focus yet), which
+    // made verification fail on the very FIRST, already-successful insert
+    // attempt every time — the ladder then kept retrying the remaining
+    // strategies, and since none of them undo a prior successful insert,
+    // each retry re-typed/re-pasted on top of the already-correct text
+    // (a real, reproduced 4-5x duplicated-typing bug in Notepad).
   }
 
   const control = after.focusedA11y?.controlType?.toLowerCase() ?? "";

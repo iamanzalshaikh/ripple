@@ -49,6 +49,34 @@ describe("P8.5 L0 filesystem planner", () => {
     );
   });
 
+  it("parses show me all PDF files inside Downloads as search", () => {
+    expect(
+      parseFilesystemSearchCommand(
+        "Show me all PDF files inside my Downloads.",
+      )?.query,
+    ).toBe("pdf");
+    const plan = tryL0FilesystemPlan(
+      "Show me all PDF files inside my Downloads.",
+      "Show me all PDF files inside my Downloads.",
+    );
+    expect(plan?.kind).toBe("plan");
+    if (plan?.kind === "plan") {
+      expect(plan.plan.steps[0]?.tool).toBe("filesystem.search");
+      expect(plan.plan.steps[0]?.args.query).toBe("pdf");
+    }
+  });
+
+  it("does not route PDF listing through open_project after NLU open rewrite", () => {
+    const result = runPlannerPipeline({
+      command: "Open all PDF files inside my Downloads.",
+      world: stubWorld(),
+    });
+    expect(result.kind).toBe("execute");
+    if (result.kind === "execute") {
+      expect(result.plan.steps[0]?.tool).toBe("filesystem.search");
+    }
+  });
+
   it("does not treat find potential bug in current code as filesystem search", () => {
     expect(
       parseFilesystemSearchCommand("Find potential bug in my current code"),

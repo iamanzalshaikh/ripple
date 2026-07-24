@@ -20,6 +20,12 @@ import {
 } from "./nativeAppRegistry.js";
 import { resolveLaunchTarget } from "./resolveLaunchTarget.js";
 import { listVisibleWindows, type VisibleWindow } from "./windowEnum.js";
+import {
+  applyWindowLayoutNative,
+  type WindowLayoutMode,
+} from "../../native/win32Bridge.js";
+import { hideOverlay } from "../../windows/overlay.js";
+import { focusAppWindow } from "./windowManager.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -424,4 +430,44 @@ export async function inspectWindow(query?: string): Promise<{
     match: scored[0]?.w ?? null,
     candidates: scored.slice(0, 12).map((s) => s.w),
   };
+}
+
+async function focusOptionalApp(appHint?: string): Promise<void> {
+  const hint = appHint?.trim();
+  if (!hint) return;
+  const app = resolveNativeApp(hint);
+  if (!app) return;
+  await focusAppWindow(app);
+}
+
+export async function maximizeForegroundWindow(
+  appHint?: string,
+): Promise<string> {
+  hideOverlay();
+  await focusOptionalApp(appHint);
+  const res = await applyWindowLayoutNative("maximize");
+  if (!res.ok) throw new Error(res.error || "maximize_failed");
+  return `Maximized${res.title ? `: ${res.title}` : ""}`;
+}
+
+export async function minimizeForegroundWindow(
+  appHint?: string,
+): Promise<string> {
+  hideOverlay();
+  await focusOptionalApp(appHint);
+  const res = await applyWindowLayoutNative("minimize");
+  if (!res.ok) throw new Error(res.error || "minimize_failed");
+  return `Minimized${res.title ? `: ${res.title}` : ""}`;
+}
+
+export async function snapForegroundWindow(
+  side: "left" | "right",
+  appHint?: string,
+): Promise<string> {
+  hideOverlay();
+  await focusOptionalApp(appHint);
+  const mode: WindowLayoutMode = side === "left" ? "snapLeft" : "snapRight";
+  const res = await applyWindowLayoutNative(mode);
+  if (!res.ok) throw new Error(res.error || "snap_failed");
+  return `Snapped ${side}${res.title ? `: ${res.title}` : ""}`;
 }

@@ -138,6 +138,16 @@ export function parseAutomationClause(
     nrm.match(/^open (?:my\s+)?([\w][\w\s-]{1,48})$/i);
   if (openSpokenProject?.[1] && !extractWindowsPath(raw)) {
     const hint = openSpokenProject[1].trim();
+    // Listing / browse phrases mis-normalized to "open …" — never open_project.
+    if (
+      /\ball\b/i.test(hint) ||
+      /\b(?:pdf|files?)\b/i.test(hint) ||
+      /\b(?:inside|in|on)\s+(?:my\s+)?(?:downloads?|documents?|desktop)\b/i.test(
+        hint,
+      )
+    ) {
+      return null;
+    }
     if (
       !/^(?:cursor|notepad|chrome|edge|terminal|downloads?|documents?|desktop|whatsapp|youtube)$/i.test(
         hint,

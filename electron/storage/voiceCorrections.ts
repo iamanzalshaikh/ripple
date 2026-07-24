@@ -98,6 +98,16 @@ export function clearCorrections(): void {
   getRippleDb().prepare(`DELETE FROM voice_corrections`).run();
 }
 
+/** Phase 7.4 — Dictionary UI manual delete of a single entry. */
+export function removeCorrection(spokenForm: string): boolean {
+  const key = normalizeSpoken(spokenForm);
+  if (!key) return false;
+  const result = getRippleDb()
+    .prepare(`DELETE FROM voice_corrections WHERE spoken_form = ?`)
+    .run(key);
+  return (result.changes ?? 0) > 0;
+}
+
 /** Apply longest correction match inside an utterance. */
 export function applyCorrectionsToUtterance(text: string): string {
   let out = text;

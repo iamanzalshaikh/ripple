@@ -61,6 +61,7 @@ export type Win32Action =
   | "focusHwnd"
   | "closeHwnd"
   | "minimizeAll"
+  | "windowLayout"
   | "enumWindows"
   | "sendKeys"
   | "runSequence"

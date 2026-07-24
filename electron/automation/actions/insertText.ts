@@ -313,6 +313,15 @@ async function finishTypingResult(
     console.warn(
       `[ripple-desktop] typing observe: ${verified.reason ?? "failed"} fg=${verified.after.foreground?.processName ?? "?"}`,
     );
+    // Ladder already reported Typed/Pasted — WhatsApp/web composers often fail
+    // a11y verify even when text is correct. Retrying re-emits the full string
+    // (seen live as "I want to meet you tomorrow." typed twice).
+    if (/typed|pasted/i.test(message)) {
+      console.warn(
+        "[ripple-desktop] typing observe failed after successful insert — skipping retry to avoid duplicate",
+      );
+      return message;
+    }
     if (strict && expectedText?.trim()) {
       const recovered = await retryInsertAfterVerifyFail(
         expectedText,

@@ -8,9 +8,10 @@ import {
   readFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, basename } from "node:path";
 import { copyPathToDestination } from "../osControlOps.js";
 import { resolveParentPath, resolveDestinationDir } from "../fileOperations.js";
+import { wellKnownFolderPath } from "../wellKnownFolders.js";
 
 /**
  * W0.3 — copy destination truth. Regression for FEATURE_GAPS §3.1 /
@@ -104,5 +105,19 @@ describe("P8.5-P5.6 W0.3 — copy destination creates and uses the named folder"
 
     const destDir = resolveDestinationDir("Archive", sourceDir);
     expect(destDir).toBe(join(root, "Source", "Archive"));
+  });
+
+  it("resolveDestinationDir prefers an existing Desktop folder over inventing under Downloads (W1)", () => {
+    const desktop = wellKnownFolderPath("desktop");
+    const downloads = wellKnownFolderPath("downloads");
+    const finance = join(desktop, `__ripple_w1_finance_${Date.now()}`);
+    mkdirSync(finance, { recursive: true });
+    try {
+      const sourceFile = join(downloads, "invoice.pdf");
+      const dest = resolveDestinationDir(basename(finance), sourceFile);
+      expect(dest).toBe(finance);
+    } finally {
+      rmSync(finance, { recursive: true, force: true });
+    }
   });
 });

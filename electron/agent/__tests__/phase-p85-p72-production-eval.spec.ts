@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { rewriteDictationBuffer } from "../dictation/dictationRewrite.js";
+import {
+  cleanupWithinBounds,
+  rewriteDictationBuffer,
+} from "../dictation/dictationRewrite.js";
 import type { CorrectionDecision } from "../dictation/dictationCorrectionTypes.js";
 import { applyCorrectionDecision } from "../dictation/safeRewriteEngine.js";
 
@@ -347,6 +350,48 @@ describe("P7.2 production correction eval corpus", () => {
     const result = await rewriteDictationBuffer({ bufferText: input });
     expect(result.finalText).toBe(input);
     expect(result.decisionLog.applied).toBe(false);
+  });
+
+  it("19b — cleanup that deletes a greeting+name clause is rejected (live WhatsApp bug)", async () => {
+    const input = "Hello Tathir, How are you? Can we meet at 10 o'clock";
+    aiRewriteDictation.mockResolvedValueOnce("Can we meet at 10 o'clock?");
+    const result = await rewriteDictationBuffer({ bufferText: input });
+    expect(result.finalText).toBe(input);
+    expect(result.decisionLog.applied).toBe(false);
+    expect(result.decisionLog.reason).not.toBe("ai_cleanup");
+  });
+
+  it("19c — light punctuation cleanup that keeps greeting+name is accepted", async () => {
+    const input = "Hello Tathir, How are you? Can we meet at 10 o'clock";
+    aiRewriteDictation.mockResolvedValueOnce(
+      "Hello Tathir, how are you? Can we meet at 10 o'clock?",
+    );
+    const result = await rewriteDictationBuffer({ bufferText: input });
+    expect(result.finalText).toBe(
+      "Hello Tathir, how are you? Can we meet at 10 o'clock?",
+    );
+    expect(result.decisionLog.reason).toBe("ai_cleanup");
+  });
+
+  it("19d — cleanupWithinBounds rejects greeting drop without correction marker", () => {
+    expect(
+      cleanupWithinBounds(
+        "Hello Tathir, How are you? Can we meet at 10 o'clock",
+        "Can we meet at 10 o'clock?",
+      ),
+    ).toBe(false);
+    expect(
+      cleanupWithinBounds(
+        "Hey, how are you? I want to meet you at 9 o'clock tomorrow.",
+        "I want to meet you at 9 o'clock the day after tomorrow. Are you free?",
+      ),
+    ).toBe(false);
+    expect(
+      cleanupWithinBounds(
+        "Hello Tathir, How are you? Can we meet at 10 o'clock",
+        "Hello Tathir, how are you? Can we meet at 10 o'clock?",
+      ),
+    ).toBe(true);
   });
 
   it("20 — cleanup is skipped after a successful surgical correction", async () => {

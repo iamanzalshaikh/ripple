@@ -22,6 +22,9 @@ export type CommandTelemetryEvent = {
   latency_ms?: number;
   detail?: string;
   error_code?: string;
+  /** P9.5 observability — language requested (picker/"auto") vs Whisper's own detection. */
+  language?: string;
+  detected_language?: string;
   at: number;
 };
 
@@ -33,8 +36,8 @@ function persistEvent(event: CommandTelemetryEvent): void {
     getRippleDb()
       .prepare(
         `INSERT INTO command_telemetry
-          (command, planner_source, outcome, intent, confidence, latency_ms, detail, permission, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          (command, planner_source, outcome, intent, confidence, latency_ms, detail, permission, language, detected_language, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         event.command.slice(0, 500),
@@ -45,6 +48,8 @@ function persistEvent(event: CommandTelemetryEvent): void {
         event.latency_ms ?? null,
         event.detail ?? event.error_code ?? null,
         event.permission ?? null,
+        event.language ?? null,
+        event.detected_language ?? null,
         new Date(event.at).toISOString(),
       );
   } catch {
@@ -85,6 +90,8 @@ function rowToEvent(r: {
   latency_ms: number | null;
   detail: string | null;
   permission: string | null;
+  language: string | null;
+  detected_language: string | null;
   created_at: string;
 }): CommandTelemetryEvent {
   return {
@@ -96,6 +103,8 @@ function rowToEvent(r: {
     permission: r.permission ?? undefined,
     latency_ms: r.latency_ms ?? undefined,
     detail: r.detail ?? undefined,
+    language: r.language ?? undefined,
+    detected_language: r.detected_language ?? undefined,
     at: Date.parse(r.created_at) || Date.now(),
   };
 }
@@ -104,7 +113,7 @@ export function queryTelemetryFromDb(limit = 100): CommandTelemetryEvent[] {
   try {
     const rows = getRippleDb()
       .prepare(
-        `SELECT command, planner_source, outcome, intent, confidence, latency_ms, detail, permission, created_at
+        `SELECT command, planner_source, outcome, intent, confidence, latency_ms, detail, permission, language, detected_language, created_at
          FROM command_telemetry ORDER BY id DESC LIMIT ?`,
       )
       .all(limit) as Array<Parameters<typeof rowToEvent>[0]>;
@@ -121,7 +130,7 @@ export function queryTelemetrySince(days: number, limit = 2000): CommandTelemetr
     const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
     const rows = getRippleDb()
       .prepare(
-        `SELECT command, planner_source, outcome, intent, confidence, latency_ms, detail, permission, created_at
+        `SELECT command, planner_source, outcome, intent, confidence, latency_ms, detail, permission, language, detected_language, created_at
          FROM command_telemetry
          WHERE created_at >= ?
          ORDER BY id DESC LIMIT ?`,

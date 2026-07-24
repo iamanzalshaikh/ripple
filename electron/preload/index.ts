@@ -47,7 +47,7 @@ const api = {
     mimeType?: string;
     filename?: string;
   }) => ipcRenderer.invoke("voice:chunk", args),
-  endVoice: (args: { streamId: string; sessionId?: string }) =>
+  endVoice: (args: { streamId: string; sessionId?: string; language?: string }) =>
     ipcRenderer.invoke("voice:end", args),
   cancelVoice: (streamId: string) =>
     ipcRenderer.invoke("voice:cancel", { streamId }),
@@ -56,7 +56,12 @@ const api = {
     sessionId?: string;
     contextMetadata?: Record<string, unknown>;
   }) => ipcRenderer.invoke("command:execute", args),
-  executeDictation: (args: { text: string; insert?: boolean }) =>
+  executeDictation: (args: {
+    text: string;
+    insert?: boolean;
+    requestedLanguage?: string;
+    detectedLanguage?: string;
+  }) =>
     ipcRenderer.invoke("dictation:execute", args) as Promise<{
       ok: boolean;
       mode: "dictation";
@@ -64,6 +69,26 @@ const api = {
       inserted?: boolean;
       error?: string;
       correctionKind?: string;
+      session?: {
+        sessionId: number;
+        utteranceCount: number;
+        elapsedMs: number;
+        remainingMs: number;
+        windowMs: number;
+      };
+      transform?: boolean;
+      originalText?: string;
+    }>,
+  getDictationSessionStatus: () =>
+    ipcRenderer.invoke("dictation:sessionStatus") as Promise<{
+      ok: boolean;
+      session: {
+        sessionId: number;
+        utteranceCount: number;
+        elapsedMs: number;
+        remainingMs: number;
+        windowMs: number;
+      } | null;
     }>,
   getTelemetrySummary: () =>
     ipcRenderer.invoke("telemetry:summary") as Promise<{
@@ -202,6 +227,122 @@ const api = {
     }>,
   setOverlayVoiceActive: (active: boolean) =>
     ipcRenderer.invoke("overlay:voice-active", active),
+  language: {
+    get: () =>
+      ipcRenderer.invoke("language:get") as Promise<{
+        ok: boolean;
+        language?: string;
+        message?: string;
+      }>,
+    set: (language: string) =>
+      ipcRenderer.invoke("language:set", { language }) as Promise<{
+        ok: boolean;
+        language?: string;
+        message?: string;
+      }>,
+  },
+  quietMode: {
+    get: () =>
+      ipcRenderer.invoke("quietMode:get") as Promise<{
+        ok: boolean;
+        quietMode?: boolean;
+        message?: string;
+      }>,
+    set: (enabled: boolean) =>
+      ipcRenderer.invoke("quietMode:set", { enabled }) as Promise<{
+        ok: boolean;
+        quietMode?: boolean;
+        message?: string;
+      }>,
+  },
+  dictionary: {
+    list: () =>
+      ipcRenderer.invoke("dictionary:list") as Promise<{
+        ok: boolean;
+        message?: string;
+        items?: Array<{
+          spokenForm: string;
+          canonicalForm: string;
+          source: string;
+          updatedAt: string;
+        }>;
+      }>,
+    add: (args: { spokenForm: string; canonicalForm: string }) =>
+      ipcRenderer.invoke("dictionary:add", args) as Promise<{
+        ok: boolean;
+        message?: string;
+        entry?: {
+          spokenForm: string;
+          canonicalForm: string;
+          source: string;
+          updatedAt: string;
+        };
+      }>,
+    remove: (spokenForm: string) =>
+      ipcRenderer.invoke("dictionary:remove", { spokenForm }) as Promise<{
+        ok: boolean;
+        message?: string;
+      }>,
+  },
+  snippets: {
+    list: () =>
+      ipcRenderer.invoke("snippets:list") as Promise<{
+        ok: boolean;
+        message?: string;
+        items?: Array<{
+          trigger: string;
+          expansion: string;
+          createdAt: string;
+          updatedAt: string;
+        }>;
+      }>,
+    add: (args: { trigger: string; expansion: string }) =>
+      ipcRenderer.invoke("snippets:add", args) as Promise<{
+        ok: boolean;
+        message?: string;
+        entry?: {
+          trigger: string;
+          expansion: string;
+          createdAt: string;
+          updatedAt: string;
+        };
+      }>,
+    remove: (trigger: string) =>
+      ipcRenderer.invoke("snippets:remove", { trigger }) as Promise<{
+        ok: boolean;
+        message?: string;
+      }>,
+  },
+  styles: {
+    list: () =>
+      ipcRenderer.invoke("styles:list") as Promise<{
+        ok: boolean;
+        message?: string;
+        items?: Array<{
+          processName: string;
+          tone: "professional" | "casual" | "neutral";
+          updatedAt: string;
+        }>;
+      }>,
+    set: (args: {
+      processName: string;
+      tone: "professional" | "casual" | "neutral";
+    }) =>
+      ipcRenderer.invoke("styles:set", args) as Promise<{
+        ok: boolean;
+        message?: string;
+        entry?: {
+          processName: string;
+          tone: "professional" | "casual" | "neutral";
+          updatedAt: string;
+        };
+      }>,
+    remove: (processName: string) =>
+      ipcRenderer.invoke("styles:remove", { processName }) as Promise<{
+        ok: boolean;
+        message?: string;
+      }>,
+  },
   onIpcEvent: (channel: string, cb: (payload: unknown) => void): Unsubscribe => {
     const handler = (_: unknown, payload: unknown) => cb(payload);
     ipcRenderer.on(channel, handler);
@@ -215,14 +356,14 @@ const api = {
   onVoiceToggle: (
     cb: (payload: {
       action: "start" | "stop" | "cancel";
-      mode?: "command" | "dictation";
+      mode?: "command" | "dictation" | "transform";
     }) => void,
   ): Unsubscribe => {
     const handler = (
       _: unknown,
       payload: {
         action: "start" | "stop" | "cancel";
-        mode?: "command" | "dictation";
+        mode?: "command" | "dictation" | "transform";
       },
     ) => cb(payload);
     ipcRenderer.on("overlay:voice-toggle", handler);

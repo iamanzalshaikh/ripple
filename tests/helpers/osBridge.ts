@@ -16,6 +16,52 @@ export const W0 = join(W0_ROOT, "W0");
 export const SOURCE = join(W0, "Source");
 export const REPORTS = join(SOURCE, "Reports");
 export const DESKTOP = join(homedir(), "Desktop");
+export const DOWNLOADS = join(homedir(), "Downloads");
+
+/** Real production PDFs on this machine (Wave 1 live corpus). */
+export const TVS_ORBITER = join(DOWNLOADS, "TVS Orbiter - Brochure .pdf");
+export const TVS_APACHE_RTX = join(DOWNLOADS, "TVS Apache RTX - Brochure .pdf");
+export const TVS_APACHE_RTR200 = join(
+  DOWNLOADS,
+  "TVS Apache RTR 200 4V - Brocdure - Raj TVS_compressed.pdf",
+);
+export const TVS_APACHE_RTR310 = join(
+  DOWNLOADS,
+  "TVS Apache RTR 310 - Brochure.pdf",
+);
+
+/** Wave 1 human-corpus sandbox folders on Desktop.
+ * Avoid trailing "folder" in names — stripItemFiller drops that word
+ * ("work folder" → "work"). Use WorkFolder / OldTest instead. */
+export const W1_DESKTOP_FOLDERS = [
+  "Finance",
+  "Projects",
+  "Client",
+  "backup",
+  "WorkFolder",
+  "work", // leftover if someone said "work folder"
+  "OldTest",
+  "old test",
+  "old test folder",
+  "screenshots",
+  "Client Work",
+  "Archive",
+  "today's screenshots",
+  "todays screenshots",
+  "todays-screenshots",
+] as const;
+
+/** Wave 1 seed files created in Downloads for spoken resolve. */
+export const W1_DOWNLOAD_FILES = [
+  "latest proposal.txt",
+  "presentation.txt",
+  "invoice.pdf",
+  "contract.pdf",
+  "resume.pdf",
+  "notes.pdf",
+  // leftovers from earlier suite iterations
+  "presentation.pptx",
+] as const;
 
 export type BridgeResult = {
   id: string;

@@ -7,6 +7,7 @@ export type SignalKind =
   | "single_no"
   | "revision_cue"
   | "tone_directive"
+  | "snippet"
   | "none";
 
 export type CorrectionType =

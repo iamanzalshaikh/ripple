@@ -4,6 +4,10 @@ import { useSocketStore } from "../store/socketStore";
 import { getRippleApi } from "../lib/rippleApi";
 import { HistoryPage } from "./History";
 import { TelemetryPage } from "./Telemetry";
+import { DictionaryPage } from "./Dictionary";
+import { SnippetsPage } from "./Snippets";
+import { StylesPage } from "./Styles";
+import { LanguagePage } from "./Language";
 
 interface Props {
   user: RippleUser;
@@ -78,9 +82,15 @@ function DebugRow({
 }
 
 export function HomePage({ user, sessionId }: Props) {
-  const [view, setView] = useState<"dashboard" | "history" | "telemetry">(
-    "dashboard",
-  );
+  const [view, setView] = useState<
+    | "dashboard"
+    | "history"
+    | "telemetry"
+    | "dictionary"
+    | "snippets"
+    | "styles"
+    | "language"
+  >("dashboard");
   const [textCommand, setTextCommand] = useState("");
   const [commandBusy, setCommandBusy] = useState(false);
   const [commandResult, setCommandResult] = useState<string | null>(null);
@@ -157,6 +167,22 @@ export function HomePage({ user, sessionId }: Props) {
     );
   }
 
+  if (view === "dictionary") {
+    return <DictionaryPage onBack={() => setView("dashboard")} />;
+  }
+
+  if (view === "snippets") {
+    return <SnippetsPage onBack={() => setView("dashboard")} />;
+  }
+
+  if (view === "styles") {
+    return <StylesPage onBack={() => setView("dashboard")} />;
+  }
+
+  if (view === "language") {
+    return <LanguagePage onBack={() => setView("dashboard")} />;
+  }
+
   return (
     <div className="min-h-full bg-zinc-950 text-zinc-100">
       <header className="flex items-start justify-between border-b border-zinc-800 px-8 py-6">
@@ -165,6 +191,34 @@ export function HomePage({ user, sessionId }: Props) {
           <p className="mt-1 text-sm text-zinc-400">Signed in as {user.email}</p>
         </div>
         <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => setView("language")}
+            className="rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-300 transition hover:border-violet-500 hover:text-white"
+          >
+            Language
+          </button>
+          <button
+            type="button"
+            onClick={() => setView("styles")}
+            className="rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-300 transition hover:border-violet-500 hover:text-white"
+          >
+            Styles
+          </button>
+          <button
+            type="button"
+            onClick={() => setView("snippets")}
+            className="rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-300 transition hover:border-violet-500 hover:text-white"
+          >
+            Snippets
+          </button>
+          <button
+            type="button"
+            onClick={() => setView("dictionary")}
+            className="rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-300 transition hover:border-violet-500 hover:text-white"
+          >
+            Dictionary
+          </button>
           <button
             type="button"
             onClick={() => setView("telemetry")}

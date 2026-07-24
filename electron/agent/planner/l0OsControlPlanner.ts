@@ -3,10 +3,15 @@ import type { L0PlannerResult } from "./planTypes.js";
 
 const COPY_FOLDER =
   /^\s*copy\s+(?:the\s+)?folder\s+(.+?)\s+to\s+(?:my\s+|the\s+)?(.+?)\s*$/i;
+/** "copy X from Downloads to Desktop" — location must not stay inside sourceName. */
+const COPY_FILE_FROM =
+  /^\s*copy\s+(?:the\s+)?(?:file\s+)?(?:named\s+|called\s+)?(.+?)\s+from\s+(?:my\s+|the\s+)?(downloads?|documents?|desktop)\s+to\s+(?:my\s+|the\s+)?(.+?)\s*$/i;
 const COPY_FILE =
   /^\s*copy\s+(?:the\s+)?(?:file\s+)?(.+?)\s+to\s+(?:my\s+|the\s+)?(.+?)\s*$/i;
 const MOVE_FOLDER =
   /^\s*move\s+(?:the\s+)?folder\s+(.+?)\s+to\s+(?:my\s+|the\s+)?(.+?)\s*$/i;
+const MOVE_FILE_FROM =
+  /^\s*move\s+(?:the\s+)?(?:file\s+|folder\s+)?(?:named\s+|called\s+)?(.+?)\s+from\s+(?:my\s+|the\s+)?(downloads?|documents?|desktop)\s+to\s+(?:my\s+|the\s+)?(.+?)\s*$/i;
 const COMPARE_DIRS =
   /^\s*compare\s+(?:the\s+|these\s+(?:two\s+)?|those\s+(?:two\s+)?|my\s+|two\s+)?(?:folders?|director(?:y|ies))\s*[:,]?\s+(.+?)\s+(?:and|with|to)\s+(.+?)\s*$/i;
 const COMPARE_FILES =
@@ -22,6 +27,16 @@ const RUNNING =
   /^\s*(?:what apps are running|list running (?:apps|windows)|show running apps)\s*$/i;
 const INSPECT =
   /^\s*inspect\s+(?:the\s+)?(?:window\s+)?(.+?)\s*$/i;
+const SNAP_LEFT =
+  /^\s*(?:put|move|place|snap)\s+(?:this|the|my)?\s*(?:app|window)?\s*(?:on|to)\s+(?:the\s+)?left(?:\s+side)?(?:\s+of\s+(?:my\s+|the\s+)?screen)?\s*$/i;
+const SNAP_RIGHT =
+  /^\s*(?:put|move|place|snap)\s+(?:this|the|my)?\s*(?:app|window)?\s*(?:on|to)\s+(?:the\s+)?right(?:\s+side)?(?:\s+of\s+(?:my\s+|the\s+)?screen)?\s*$/i;
+const MAXIMIZE =
+  /^\s*(?:make\s+(?:this|it)\s+(?:full\s*screen|fullscreen)|(?:go\s+)?full\s*screen|(?:maximize|maximise)(?:\s+(?:this|the|my)?\s*(?:window|app)?)?)\s*$/i;
+const MINIMIZE_THIS =
+  /^\s*(?:minimize|minimise)\s+(?:this|the|my)?\s*(?:window|app)?\s*$/i;
+const SOMEWHERE_USEFUL =
+  /^\s*(?:put|move|place|arrange)\s+(?:the\s+)?(?:(?:chrome|edge|firefox|cursor|notepad|powerpoint|word|excel)\s+)?(?:window|app)\s+somewhere\s+useful\s*$/i;
 
 function strip(value: string): string {
   return value.replace(/^["']|["']$/g, "").trim();
@@ -37,9 +52,9 @@ const NEW_FOLDER_PHRASE =
   /^(?:a\s+)?(?:brand[\s-]new\s+|new\s+)?folder\s+(?:called|named)\s+(.+)$/i;
 
 function extractFolderName(raw: string): string {
-  const stripped = strip(raw);
+  const stripped = strip(raw).replace(/[.,!?;:]+$/g, "").trim();
   const m = stripped.match(NEW_FOLDER_PHRASE);
-  return m?.[1] ? strip(m[1]) : stripped;
+  return m?.[1] ? strip(m[1]).replace(/[.,!?;:]+$/g, "").trim() : stripped;
 }
 
 function planResult(
@@ -141,6 +156,23 @@ export function tryL0OsControlPlan(
     );
   }
 
+  const copyFileFrom = text.match(COPY_FILE_FROM) ?? nrm.match(COPY_FILE_FROM);
+  if (copyFileFrom?.[1] && copyFileFrom?.[2] && copyFileFrom?.[3]) {
+    return planResult(
+      rawCommand,
+      normalized,
+      `Copy ${copyFileFrom[1]} from ${copyFileFrom[2]} → ${copyFileFrom[3]}`,
+      0.9,
+      "filesystem.copy_file",
+      {
+        sourceName: strip(copyFileFrom[1]),
+        parentFolder: strip(copyFileFrom[2]),
+        destinationFolder: extractFolderName(copyFileFrom[3]),
+      },
+      "l0_os_copy_file_from",
+    );
+  }
+
   const copyFile = text.match(COPY_FILE) ?? nrm.match(COPY_FILE);
   if (copyFile?.[1] && copyFile?.[2]) {
     return planResult(
@@ -154,6 +186,23 @@ export function tryL0OsControlPlan(
         destinationFolder: extractFolderName(copyFile[2]),
       },
       "l0_os_copy_file",
+    );
+  }
+
+  const moveFileFrom = text.match(MOVE_FILE_FROM) ?? nrm.match(MOVE_FILE_FROM);
+  if (moveFileFrom?.[1] && moveFileFrom?.[2] && moveFileFrom?.[3]) {
+    return planResult(
+      rawCommand,
+      normalized,
+      `Move ${moveFileFrom[1]} from ${moveFileFrom[2]} → ${moveFileFrom[3]}`,
+      0.9,
+      "filesystem.move_file",
+      {
+        sourceName: strip(moveFileFrom[1]),
+        parentFolder: strip(moveFileFrom[2]),
+        destinationFolder: extractFolderName(moveFileFrom[3]),
+      },
+      "l0_os_move_file_from",
     );
   }
 
@@ -208,6 +257,65 @@ export function tryL0OsControlPlan(
       "window.inspect",
       { query: strip(inspect[1]) },
       "l0_os_window_inspect",
+    );
+  }
+
+  if (SOMEWHERE_USEFUL.test(text) || SOMEWHERE_USEFUL.test(nrm)) {
+    return {
+      kind: "clarify",
+      question:
+        "Where should I put it — left half, right half, or maximize / full screen?",
+      options: ["Left half", "Right half", "Maximize"],
+      confidence: 0.7,
+      reason: "window_arrange_ambiguous",
+    };
+  }
+
+  if (SNAP_LEFT.test(text) || SNAP_LEFT.test(nrm)) {
+    return planResult(
+      rawCommand,
+      normalized,
+      "Snap window left",
+      0.92,
+      "window.snap",
+      { side: "left" },
+      "l0_os_window_snap_left",
+    );
+  }
+
+  if (SNAP_RIGHT.test(text) || SNAP_RIGHT.test(nrm)) {
+    return planResult(
+      rawCommand,
+      normalized,
+      "Snap window right",
+      0.92,
+      "window.snap",
+      { side: "right" },
+      "l0_os_window_snap_right",
+    );
+  }
+
+  if (MAXIMIZE.test(text) || MAXIMIZE.test(nrm)) {
+    return planResult(
+      rawCommand,
+      normalized,
+      "Maximize window",
+      0.92,
+      "window.maximize",
+      {},
+      "l0_os_window_maximize",
+    );
+  }
+
+  if (MINIMIZE_THIS.test(text) || MINIMIZE_THIS.test(nrm)) {
+    return planResult(
+      rawCommand,
+      normalized,
+      "Minimize window",
+      0.9,
+      "window.minimize",
+      {},
+      "l0_os_window_minimize",
     );
   }
     

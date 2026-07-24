@@ -232,7 +232,11 @@ pub fn send_unicode_text(text: &str) -> Result<(), String> {
                 return Err("sendinput_unicode_failed".into());
             }
         }
-        std::thread::sleep(std::time::Duration::from_millis(8));
+        // W1 insert-matrix: 8ms/char raced Windows' own autocorrect/text-prediction
+        // at word boundaries (space), which intercepted and substituted whole words
+        // with placeholder characters — reproduced live in Notepad ("world" -> spaces,
+        // "flow test." -> dots). 20ms clears the race in testing.
+        std::thread::sleep(std::time::Duration::from_millis(20));
     }
     Ok(())
 }

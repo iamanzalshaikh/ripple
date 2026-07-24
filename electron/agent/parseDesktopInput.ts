@@ -128,10 +128,48 @@ export function isComposeTopicOnlyCommand(command: string): boolean {
 }
 
 /** Natural-language typing phrases — P9 L0 reflex layer. */
+/** Window snap / maximize / arrange — never treat as type_text payload. */
+export function isWindowLayoutUtterance(command: string): boolean {
+  const n = command.trim().toLowerCase().replace(/\s+/g, " ");
+  if (!n) return false;
+  if (
+    /\b(?:full\s*screen|fullscreen|maximize|maximise|snap|half\s+screen)\b/i.test(
+      n,
+    )
+  ) {
+    return true;
+  }
+  if (
+    /\b(?:left|right)\s+side\s+of\s+(?:my\s+|the\s+)?screen\b/i.test(n) ||
+    /\b(?:to\s+the\s+)?(?:left|right)\s+(?:half|side)\b/i.test(n)
+  ) {
+    return true;
+  }
+  if (
+    /\b(?:window|app)\b/i.test(n) &&
+    /\b(?:somewhere\s+useful|arrange|tile|snap)\b/i.test(n)
+  ) {
+    return true;
+  }
+  if (
+    /^(?:put|move|place|snap)\s+(?:this|the|my)\s+(?:app|window)\b/i.test(n)
+  ) {
+    return true;
+  }
+  if (/^(?:minimize|minimise)\s+(?:this|the|my)?\s*(?:window|app)?\s*$/i.test(n)) {
+    return true;
+  }
+  if (/^(?:make\s+)?(?:this|it)\s+(?:full\s*screen|fullscreen|maximized?)\s*$/i.test(n)) {
+    return true;
+  }
+  return false;
+}
+
 export function extractDirectTypingText(command: string): string | null {
   const cleaned = normalizeVoiceStutter(command);
   if (isComposeTopicOnlyCommand(cleaned)) return null;
   if (isGmailVoiceCommand(cleaned)) return null;
+  if (isWindowLayoutUtterance(cleaned)) return null;
 
   const patterns = [
     /^(?:can you\s+)?(?:please\s+)?type\s+karo\s+(.+)$/i,

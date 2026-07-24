@@ -162,6 +162,28 @@ export function isDesktopShellForeground(
   return !title || title === "program manager";
 }
 
+/** Windows IME / touch-keyboard chrome — steals FG briefly during dictation. */
+function isTransientInputShell(
+  ctx: Pick<FocusContext, "processName" | "windowTitle">,
+): boolean {
+  const proc = (ctx.processName ?? "").toLowerCase();
+  const title = (ctx.windowTitle ?? "").trim().toLowerCase();
+  if (
+    proc === "textinputhost" ||
+    proc === "tabtip" ||
+    proc === "tabtip.exe" ||
+    proc.includes("textinputhost")
+  ) {
+    return true;
+  }
+  if (proc === "explorer" || proc === "shellexperiencehost") {
+    return /input flyout|emoji|touch keyboard|handwriting|text input/.test(
+      title,
+    );
+  }
+  return false;
+}
+
 /** Shell HWNDs with no title are unreliable typing targets (steal focus from real apps). */
 export function isWeakFocusContext(
   ctx: Pick<FocusContext, "hwnd" | "processName" | "windowTitle">,
@@ -169,6 +191,7 @@ export function isWeakFocusContext(
   if (!ctx.hwnd) return true;
   if (isRippleOwnWindow(ctx.processName, ctx.windowTitle)) return true;
   if (isDesktopShellForeground(ctx)) return true;
+  if (isTransientInputShell(ctx)) return true;
   const title = (ctx.windowTitle ?? "").trim();
   const proc = (ctx.processName ?? "").toLowerCase();
   if (
@@ -472,15 +495,28 @@ export function isDesktopAppForeground(): boolean {
 /** True when WhatsApp Web is the focused context. */
 export function isWhatsAppTabActive(): boolean {
   const ctx = voiceCommandTarget ?? saved;
-  if (ctx) {
+  if (ctx && !isWeakFocusContext(ctx) && !isTransientInputShell(ctx)) {
+    // Real desktop app (Explorer folder, Calculator, …) — not WhatsApp.
+    // Do NOT treat Windows "Input Flyout" as desktop leave; that flash was
+    // clearing WA compose routing and causing insert-ladder double-type.
     if (isClearlyDesktopForeground(ctx)) return false;
     if (ctx.isWhatsApp) return true;
     if (ctx.activeTabUrl && /web\.whatsapp\.com/i.test(ctx.activeTabUrl)) return true;
     if (detectWhatsApp(ctx.windowTitle, ctx.processName)) return true;
     return false;
   }
-  if (voiceCommandTarget && isClearlyDesktopForeground(voiceCommandTarget)) {
-    return false;
+  // Prefer sticky WhatsApp over a transient Input Flyout voice target.
+  for (const candidate of [lastNonRippleFocus, saved]) {
+    if (
+      candidate &&
+      !isWeakFocusContext(candidate) &&
+      (candidate.isWhatsApp ||
+        detectWhatsApp(candidate.windowTitle, candidate.processName) ||
+        (candidate.activeTabUrl &&
+          /web\.whatsapp\.com/i.test(candidate.activeTabUrl)))
+    ) {
+      return true;
+    }
   }
   return getStickyWebSurface() === "whatsapp";
 }
@@ -850,6 +886,30 @@ export async function restoreFocusContext(): Promise<boolean> {
   }
 
   try {
+    // Prefer the WhatsApp/Chrome window the user is already looking at over a
+    // stale voice-target hwnd (unread badge flips 55↔56; second Chrome window).
+    // Yanking focus away is what feels like "WhatsApp went off the screen".
+    const raw = await getForegroundWindow();
+    if (raw?.hwnd) {
+      const current = buildFocusContextFromRaw(raw);
+      const sameHwnd = Number(raw.hwnd) === Number(target.hwnd);
+      if (sameHwnd) {
+        saved = { ...target, windowTitle: current.windowTitle || target.windowTitle };
+        lastNonRippleFocus = saved;
+        voiceCommandTarget = saved;
+        return true;
+      }
+      if (current.isWhatsApp && target.isWhatsApp) {
+        console.info(
+          `[ripple-desktop] focus restore keep current WhatsApp hwnd=${raw.hwnd} (skip stale target hwnd=${target.hwnd})`,
+        );
+        saved = current;
+        lastNonRippleFocus = current;
+        voiceCommandTarget = current;
+        return true;
+      }
+    }
+
     await focusWindowByHwnd(target.hwnd, target.windowTitle);
     await new Promise((r) => setTimeout(r, 350));
     saved = target;

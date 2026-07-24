@@ -49,6 +49,7 @@ public class RippleNative {
   [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(POINT Point);
   [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr hwnd, uint gaFlags);
   [DllImport("user32.dll")] public static extern IntPtr MonitorFromPoint(POINT pt, uint dwFlags);
+  [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
   [StructLayout(LayoutKind.Sequential)]
   public struct POINT { public int X; public int Y; }
   public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
@@ -109,6 +110,30 @@ switch ($Action) {
       if ([RippleNative]::ShowWindow($_.MainWindowHandle, 6)) { $count++ }
     }
     @{ count = $count } | ConvertTo-Json -Compress
+  }
+  'windowLayout' {
+    $h = [RippleNative]::GetForegroundWindow()
+    if ($h -eq [IntPtr]::Zero) {
+      @{ ok = $false; error = 'no_foreground' } | ConvertTo-Json -Compress
+      break
+    }
+    $mode = [string]$args.mode
+    if ($mode -eq 'maximize') {
+      [void][RippleNative]::ShowWindow($h, 3)
+    } elseif ($mode -eq 'minimize') {
+      [void][RippleNative]::ShowWindow($h, 6)
+    } elseif ($mode -eq 'snapLeft' -or $mode -eq 'snapRight') {
+      [void][RippleNative]::ShowWindow($h, 9)
+      $sw = [RippleNative]::GetSystemMetrics(0)
+      $sh = [RippleNative]::GetSystemMetrics(1)
+      $half = [int]($sw / 2)
+      $x = if ($mode -eq 'snapLeft') { 0 } else { $half }
+      [void][RippleNative]::SetWindowPos($h, [IntPtr]::Zero, $x, 0, $half, $sh, 0x0040)
+    } else {
+      @{ ok = $false; error = 'unknown_mode' } | ConvertTo-Json -Compress
+      break
+    }
+    @{ ok = $true; mode = $mode; hwnd = [int64]$h; title = (Get-Title $h) } | ConvertTo-Json -Compress
   }
   'enumWindows' {
     $list = New-Object System.Collections.Generic.List[object]
@@ -378,6 +403,30 @@ export async function minimizeAllWindowsNative(): Promise<number> {
   return res.count ?? 0;
 }
 
+export type WindowLayoutMode = "maximize" | "minimize" | "snapLeft" | "snapRight";
+
+export async function applyWindowLayoutNative(
+  mode: WindowLayoutMode,
+): Promise<{ ok: boolean; mode?: string; hwnd?: number; title?: string; error?: string }> {
+  if (!isWin32NativeAvailable()) {
+    return { ok: false, error: "win32_unavailable" };
+  }
+  const res = await invokeWin32<{
+    ok?: boolean;
+    mode?: string;
+    hwnd?: number;
+    title?: string;
+    error?: string;
+  }>("windowLayout", { mode });
+  return {
+    ok: res?.ok === true,
+    mode: res?.mode,
+    hwnd: typeof res?.hwnd === "number" ? res.hwnd : undefined,
+    title: res?.title,
+    error: res?.error,
+  };
+}
+
 export async function listVisibleWindowsNative(): Promise<VisibleWindow[]> {
   if (!isWin32NativeAvailable()) return [];
 
@@ -436,18 +485,50 @@ export type InputSequenceStep =
   | { type: "keys"; value: string; delayMs?: number }
   | { type: "text"; value: string; delayMs?: number };
 
+function sequenceRpcTimeoutMs(steps: InputSequenceStep[]): number {
+  // Sidecar sleeps ~20ms per UTF-16 unit; Electron default RPC timeout is 8s,
+  // which long dictation (300+ chars) exceeds → timeout + PowerShell retype.
+  let units = 0;
+  for (const step of steps) {
+    if (step.type === "text") units += step.value.length;
+    else units += 8;
+  }
+  return Math.min(120_000, Math.max(8_000, units * 30 + 12_000));
+}
+
+function isPartialTextInsertFailure(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return (
+    msg.includes("native_client_disconnected") ||
+    msg.includes("native_client_not_connected") ||
+    msg.includes("native_rpc_timeout")
+  );
+}
+
 export async function runInputSequenceNative(args: {
   hwnd?: number;
   titleHint?: string;
   delayMs?: number;
   steps: InputSequenceStep[];
 }): Promise<{ ok: boolean; foregroundHwnd?: number; foregroundTitle?: string }> {
+  const { beginNativeBusy, endNativeBusy } = await import(
+    "./nativeWatchdog.js"
+  );
+  const hasTextStep = args.steps.some(
+    (s) => s.type === "text" && s.value.length > 0,
+  );
+
   if (
     isNativeClientAuthenticated() &&
     getSidecarCapabilities()?.sendInput === true
   ) {
+    beginNativeBusy();
     try {
-      return (await callNativeRpc("run_input_sequence", args)) as {
+      return (await callNativeRpc(
+        "run_input_sequence",
+        args,
+        sequenceRpcTimeoutMs(args.steps),
+      )) as {
         ok: boolean;
         foregroundHwnd?: number;
         foregroundTitle?: string;
@@ -457,6 +538,13 @@ export async function runInputSequenceNative(args: {
         "[ripple-native] run_input_sequence RPC failed:",
         e instanceof Error ? e.message : e,
       );
+      // Partial SendInput may already be in the field — PowerShell fallback
+      // would append the full string again (seen live as WhatsApp double-type).
+      if (hasTextStep && isPartialTextInsertFailure(e)) {
+        return { ok: false };
+      }
+    } finally {
+      endNativeBusy();
     }
   }
   return invokeWin32("runSequence", args);

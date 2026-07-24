@@ -107,6 +107,15 @@ function migrateRippleSchema(database: DatabaseSync): void {
   if (telemetryNames.size > 0 && !telemetryNames.has("permission")) {
     database.exec(`ALTER TABLE command_telemetry ADD COLUMN permission TEXT`);
   }
+  // P9.5 observability — which language was requested vs what Whisper
+  // detected, so per-language accuracy is queryable instead of only visible
+  // as scattered console log lines.
+  if (telemetryNames.size > 0 && !telemetryNames.has("language")) {
+    database.exec(`ALTER TABLE command_telemetry ADD COLUMN language TEXT`);
+  }
+  if (telemetryNames.size > 0 && !telemetryNames.has("detected_language")) {
+    database.exec(`ALTER TABLE command_telemetry ADD COLUMN detected_language TEXT`);
+  }
 
   database.exec(`
     CREATE TABLE IF NOT EXISTS command_telemetry (
@@ -237,6 +246,14 @@ function migrateRippleSchema(database: DatabaseSync): void {
     )
   `);
 
+  const userPrefCols = database
+    .prepare(`PRAGMA table_info(user_preferences)`)
+    .all() as { name: string }[];
+  const userPrefNames = new Set(userPrefCols.map((c) => c.name));
+  if (userPrefNames.size > 0 && !userPrefNames.has("quiet_mode")) {
+    database.exec(`ALTER TABLE user_preferences ADD COLUMN quiet_mode TEXT`);
+  }
+
   database.exec(`
     CREATE TABLE IF NOT EXISTS active_workspace (
       id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -297,6 +314,23 @@ function migrateRippleSchema(database: DatabaseSync): void {
       name TEXT PRIMARY KEY NOT NULL,
       steps_json TEXT NOT NULL,
       created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `);
+
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS snippets (
+      trigger TEXT PRIMARY KEY NOT NULL,
+      expansion TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `);
+
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS style_profiles (
+      process_name TEXT PRIMARY KEY NOT NULL,
+      tone TEXT NOT NULL,
       updated_at TEXT NOT NULL
     )
   `);

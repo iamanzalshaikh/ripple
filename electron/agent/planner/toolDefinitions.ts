@@ -915,6 +915,34 @@ export const PLANNER_TOOLS: ToolDefinition[] = [
       query: { type: "string" },
     },
   },
+  {
+    name: "window.maximize",
+    description: "Maximize foreground or named window",
+    category: "desktop",
+    wave: 2,
+    argsSchema: {
+      app: { type: "string" },
+    },
+  },
+  {
+    name: "window.minimize",
+    description: "Minimize foreground or named window",
+    category: "desktop",
+    wave: 2,
+    argsSchema: {
+      app: { type: "string" },
+    },
+  },
+  {
+    name: "window.snap",
+    description: "Snap window to left or right half of screen",
+    category: "desktop",
+    wave: 2,
+    argsSchema: {
+      side: { type: "string", required: true },
+      app: { type: "string" },
+    },
+  },
 ];
 
 export const TOOL_MANIFEST_VERSION = "2.3.0";

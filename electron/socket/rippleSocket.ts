@@ -218,13 +218,18 @@ class RippleSocketManager {
     return res.data;
   }
 
-  async endVoice(streamId: string, sessionId?: string): Promise<unknown> {
+  async endVoice(
+    streamId: string,
+    sessionId?: string,
+    language?: string,
+  ): Promise<unknown> {
     const res = await this.emitWithAck<{ success: true; data: unknown }>(
       "voice:end",
       {
         stream_id: streamId,
         session_id: sessionId,
         upload_audio: false,
+        language,
       },
     );
     return res.data;

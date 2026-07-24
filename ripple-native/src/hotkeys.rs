@@ -107,15 +107,15 @@ fn run_message_loop(event_tx: broadcast::Sender<NativeEvent>) -> Result<(), Stri
             ),
             (
                 HOTKEY_DICTATION,
-                HOT_KEY_MODIFIERS(MOD_ALT | MOD_NOREPEAT),
+                HOT_KEY_MODIFIERS(MOD_SHIFT | MOD_NOREPEAT),
                 VK_SPACE,
-                "Alt+Space=dictation",
+                "Shift+Space=dictation",
             ),
             (
                 HOTKEY_DICTATION_ALT,
-                HOT_KEY_MODIFIERS(MOD_ALT | MOD_SHIFT | MOD_NOREPEAT),
+                HOT_KEY_MODIFIERS(MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT),
                 VK_SPACE,
-                "Alt+Shift+Space=dictation",
+                "Ctrl+Shift+Space=dictation",
             ),
             (
                 HOTKEY_CANCEL,
@@ -125,28 +125,31 @@ fn run_message_loop(event_tx: broadcast::Sender<NativeEvent>) -> Result<(), Stri
             ),
         ];
 
+        // Register what we can. Previously one failure (e.g. Ctrl+Space already
+        // taken) aborted the whole set — that made dictation feel like it needed
+        // 2–3 presses because the Electron/sidecar handoff was inconsistent.
         let mut registered_hotkeys: Vec<i32> = Vec::new();
         for (id, modifiers, vk, label) in hotkeys.iter().copied() {
             match RegisterHotKey(hwnd, id, modifiers, vk) {
                 Ok(()) => registered_hotkeys.push(id),
                 Err(e) => {
                     tracing::warn!(
-                        "win32 pump: RegisterHotKey unavailable for {label}: {e}; Electron fallback may handle hotkeys"
+                        "win32 pump: RegisterHotKey unavailable for {label}: {e}; Electron fallback may handle it"
                     );
-                    for registered_id in registered_hotkeys.drain(..) {
-                        let _ = UnregisterHotKey(hwnd, registered_id);
-                    }
-                    GLOBAL_HOTKEYS_ACTIVE.store(false, Ordering::Relaxed);
-                    break;
                 }
             }
         }
 
-        if registered_hotkeys.len() == hotkeys.len() {
+        if !registered_hotkeys.is_empty() {
             GLOBAL_HOTKEYS_ACTIVE.store(true, Ordering::Relaxed);
             tracing::info!(
-                "win32 pump: RegisterHotKey ready (Ctrl+Space=command, Alt+Space=dictation, Esc=cancel)"
+                "win32 pump: RegisterHotKey ready ({}/{} bindings; Ctrl+Space=command, Shift+Space=dictation, Esc=cancel)",
+                registered_hotkeys.len(),
+                hotkeys.len()
             );
+        } else {
+            GLOBAL_HOTKEYS_ACTIVE.store(false, Ordering::Relaxed);
+            tracing::warn!("win32 pump: no global hotkeys registered — Electron fallback required");
         }
 
         let mut msg = MSG::default();

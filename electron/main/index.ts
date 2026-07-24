@@ -388,11 +388,15 @@ function registerIpc(): void {
 
   ipcMain.handle(
     "voice:end",
-    async (_e, args: { streamId: string; sessionId?: string }) => {
+    async (
+      _e,
+      args: { streamId: string; sessionId?: string; language?: string },
+    ) => {
       try {
         const data = await rippleSocket.endVoice(
           args.streamId,
           args.sessionId ?? sessionId ?? undefined,
+          args.language,
         );
         const payload = data as { text?: string; language?: string };
         const text = payload?.text;
@@ -492,7 +496,222 @@ function registerIpc(): void {
     );
     return executeDictationUtterance(text, {
       insert: args?.insert !== false,
+      requestedLanguage:
+        typeof args?.requestedLanguage === "string" ? args.requestedLanguage : undefined,
+      detectedLanguage:
+        typeof args?.detectedLanguage === "string" ? args.detectedLanguage : undefined,
     });
+  });
+
+  // Phase 7.5 — multi-utterance dictation session window (~20 min).
+  ipcMain.handle("dictation:sessionStatus", async () => {
+    const { getSessionStatus } = await import(
+      "../agent/dictation/dictationSessionWindow.js"
+    );
+    return { ok: true, session: getSessionStatus() };
+  });
+
+  // Phase 9.5 — dictation language picker (Whisper language override).
+  ipcMain.handle("language:get", async () => {
+    const { getUserPreferences } = await import("../storage/userPreferences.js");
+    try {
+      return { ok: true, language: getUserPreferences().language || "auto" };
+    } catch (e: unknown) {
+      return {
+        ok: false,
+        message: e instanceof Error ? e.message : "language_get_failed",
+      };
+    }
+  });
+
+  ipcMain.handle("language:set", async (_e, args) => {
+    const { updateUserPreference } = await import("../storage/userPreferences.js");
+    const language = typeof args?.language === "string" ? args.language.trim() : "";
+    if (!language) return { ok: false, message: "missing_arg:language" };
+    try {
+      const prefs = updateUserPreference("language", language);
+      return { ok: true, language: prefs.language || "auto" };
+    } catch (e: unknown) {
+      return {
+        ok: false,
+        message: e instanceof Error ? e.message : "language_set_failed",
+      };
+    }
+  });
+
+  // Phase 9.6 — quiet/whisper dictation mode.
+  ipcMain.handle("quietMode:get", async () => {
+    const { getUserPreferences } = await import("../storage/userPreferences.js");
+    try {
+      return { ok: true, quietMode: getUserPreferences().quietMode === "1" };
+    } catch (e: unknown) {
+      return {
+        ok: false,
+        message: e instanceof Error ? e.message : "quiet_mode_get_failed",
+      };
+    }
+  });
+
+  ipcMain.handle("quietMode:set", async (_e, args) => {
+    const { updateUserPreference } = await import("../storage/userPreferences.js");
+    const enabled = args?.enabled === true;
+    try {
+      const prefs = updateUserPreference("quiet_mode", enabled ? "1" : "0");
+      return { ok: true, quietMode: prefs.quietMode === "1" };
+    } catch (e: unknown) {
+      return {
+        ok: false,
+        message: e instanceof Error ? e.message : "quiet_mode_set_failed",
+      };
+    }
+  });
+
+  // Phase 7.4 — Dictionary UI (personal spoken -> canonical corrections).
+  ipcMain.handle("dictionary:list", async () => {
+    const { listCorrections } = await import(
+      "../storage/voiceCorrections.js"
+    );
+    try {
+      return { ok: true, items: listCorrections(200) };
+    } catch (e: unknown) {
+      return {
+        ok: false,
+        message: e instanceof Error ? e.message : "dictionary_list_failed",
+      };
+    }
+  });
+
+  ipcMain.handle("dictionary:add", async (_e, args) => {
+    const { learnCorrection } = await import(
+      "../storage/voiceCorrections.js"
+    );
+    const spokenForm = typeof args?.spokenForm === "string" ? args.spokenForm.trim() : "";
+    const canonicalForm =
+      typeof args?.canonicalForm === "string" ? args.canonicalForm.trim() : "";
+    if (!spokenForm || !canonicalForm) {
+      return { ok: false, message: "Both fields are required" };
+    }
+    try {
+      const entry = learnCorrection({ spokenForm, canonicalForm, source: "dictionary_ui" });
+      return { ok: true, entry };
+    } catch (e: unknown) {
+      return {
+        ok: false,
+        message: e instanceof Error ? e.message : "dictionary_add_failed",
+      };
+    }
+  });
+
+  ipcMain.handle("dictionary:remove", async (_e, args) => {
+    const { removeCorrection } = await import(
+      "../storage/voiceCorrections.js"
+    );
+    const spokenForm = typeof args?.spokenForm === "string" ? args.spokenForm : "";
+    if (!spokenForm) return { ok: false, message: "missing_arg:spokenForm" };
+    try {
+      const removed = removeCorrection(spokenForm);
+      return { ok: removed };
+    } catch (e: unknown) {
+      return {
+        ok: false,
+        message: e instanceof Error ? e.message : "dictionary_remove_failed",
+      };
+    }
+  });
+
+  // Phase 7.2 — Snippets (voice-triggered text expansion).
+  ipcMain.handle("snippets:list", async () => {
+    const { listSnippets } = await import("../storage/snippets.js");
+    try {
+      return { ok: true, items: listSnippets(200) };
+    } catch (e: unknown) {
+      return {
+        ok: false,
+        message: e instanceof Error ? e.message : "snippets_list_failed",
+      };
+    }
+  });
+
+  ipcMain.handle("snippets:add", async (_e, args) => {
+    const { learnSnippet } = await import("../storage/snippets.js");
+    const trigger = typeof args?.trigger === "string" ? args.trigger.trim() : "";
+    const expansion =
+      typeof args?.expansion === "string" ? args.expansion.trim() : "";
+    if (!trigger || !expansion) {
+      return { ok: false, message: "Both fields are required" };
+    }
+    try {
+      const entry = learnSnippet({ trigger, expansion });
+      return { ok: true, entry };
+    } catch (e: unknown) {
+      return {
+        ok: false,
+        message: e instanceof Error ? e.message : "snippets_add_failed",
+      };
+    }
+  });
+
+  ipcMain.handle("snippets:remove", async (_e, args) => {
+    const { removeSnippet } = await import("../storage/snippets.js");
+    const trigger = typeof args?.trigger === "string" ? args.trigger : "";
+    if (!trigger) return { ok: false, message: "missing_arg:trigger" };
+    try {
+      return { ok: removeSnippet(trigger) };
+    } catch (e: unknown) {
+      return {
+        ok: false,
+        message: e instanceof Error ? e.message : "snippets_remove_failed",
+      };
+    }
+  });
+
+  // Phase 7.3 — Styles (per-app ambient dictation tone).
+  ipcMain.handle("styles:list", async () => {
+    const { listStyleProfiles } = await import("../storage/styleProfiles.js");
+    try {
+      return { ok: true, items: listStyleProfiles() };
+    } catch (e: unknown) {
+      return {
+        ok: false,
+        message: e instanceof Error ? e.message : "styles_list_failed",
+      };
+    }
+  });
+
+  ipcMain.handle("styles:set", async (_e, args) => {
+    const { setStyleProfile } = await import("../storage/styleProfiles.js");
+    const processName =
+      typeof args?.processName === "string" ? args.processName.trim() : "";
+    const tone = typeof args?.tone === "string" ? args.tone : "";
+    if (!processName || !["professional", "casual", "neutral"].includes(tone)) {
+      return { ok: false, message: "processName and a valid tone are required" };
+    }
+    try {
+      const entry = setStyleProfile({
+        processName,
+        tone: tone as "professional" | "casual" | "neutral",
+      });
+      return { ok: true, entry };
+    } catch (e: unknown) {
+      return {
+        ok: false,
+        message: e instanceof Error ? e.message : "styles_set_failed",
+      };
+    }
+  });
+
+  ipcMain.handle("styles:remove", async (_e, args) => {
+    const { removeStyleProfile } = await import("../storage/styleProfiles.js");
+    const processName = typeof args?.processName === "string" ? args.processName : "";
+    if (!processName) return { ok: false, message: "missing_arg:processName" };
+    try {
+      return { ok: removeStyleProfile(processName) };
+    } catch (e: unknown) {
+      return {
+        ok: false,
+        message: e instanceof Error ? e.message : "styles_remove_failed",
+      };
+    }
   });
 
   ipcMain.handle("command:execute", (_e, args) => {
@@ -854,6 +1073,43 @@ app.whenReady().then(async () => {
   startOsTestBridge(async (command) => {
     if (command === "__ripple_os_bridge_ping__") {
       return { ok: true, message: "pong", actionsOk: 0, actionsTotal: 0 };
+    }
+    // Wispr-Flow Phase 1 insert matrix: drive the real STT-skipped dictation
+    // pipeline (correction → insert ladder) with canned text so the matrix
+    // can be tested without a live microphone. Mirrors ipcMain "dictation:execute".
+    if (
+      command.startsWith("__ripple_dictate__::") ||
+      command.startsWith("__ripple_dictate_continue__::")
+    ) {
+      const continueSession = command.startsWith(
+        "__ripple_dictate_continue__::",
+      );
+      const prefix = continueSession
+        ? "__ripple_dictate_continue__::"
+        : "__ripple_dictate__::";
+      const text = command.slice(prefix.length);
+      const { executeDictationUtterance } = await import(
+        "../agent/dictation/executeDictation.js"
+      );
+      if (!continueSession) {
+        const { resetDictationSessionForTests } = await import(
+          "../agent/dictation/dictationSession.js"
+        );
+        resetDictationSessionForTests();
+      }
+      const result = await executeDictationUtterance(text, { insert: true });
+      return {
+        ok: result.ok,
+        message: result.ok
+          ? result.finalText
+          : `${result.error ?? "dictation_failed"} (finalText=${JSON.stringify(result.finalText)})`,
+        actionsOk: result.inserted ? 1 : 0,
+        actionsTotal: 1,
+        tools: "dictation.insert",
+        toolsList: ["dictation.insert"],
+        plannerKind: "execute",
+        intent: "dictation",
+      };
     }
     const world = await buildWorldModel();
     const pipeline = await runPlannerPipelineAsync({

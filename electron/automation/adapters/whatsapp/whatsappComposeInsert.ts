@@ -72,6 +72,11 @@ export async function insertWhatsAppComposeText(
 
   const beforeObserve = await captureObservation();
 
+  // Prefer clipboard for WhatsApp compose — char-by-char native/sendkeys plus
+  // a11y verify-retry was retyping the full string (double messages). Clipboard
+  // is instant, keeps @mentions, and avoids the ladder race.
+  const preferClipboard = options?.replaceAll !== true;
+
   try {
     const result = await runInsertWithFallback(body, {
       verify: process.env.RIPPLE_P85_INSERT_VERIFY !== "0",
@@ -79,6 +84,8 @@ export async function insertWhatsAppComposeText(
       includeVision: false,
       acceptUnverifiableEdit: true,
       replaceAll: options?.replaceAll === true,
+      preferFirst: preferClipboard ? "clipboard_paste" : undefined,
+      abortLadderOnPartialNativeFail: true,
     });
     console.info(
       `[ripple-insert] surface=whatsapp strategy=${result.strategy} status=ok`,

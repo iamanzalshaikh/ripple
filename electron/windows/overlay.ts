@@ -194,17 +194,27 @@ export function cancelVoiceSession(): void {
   void import("../agent/dictation/dictationSession.js").then((m) => {
     m.cancelDictationSession();
   });
+  // A cancelled recording must not leak a stashed selection into the next,
+  // unrelated dictation utterance.
+  void import("../agent/transform/transformSession.js").then((m) => {
+    m.takePendingSelection();
+  });
 }
 
 export async function handleShortcutPress(
   mode: "command" | "dictation" = "command",
+  // P8.4 naming: "uiMode" is display-only (Overlay banner/hotkey hint). It
+  // must never collide with Ripple's existing "Command" (Ctrl+Space agent)
+  // label, so Transforms reports itself as "transform" here even though it
+  // reuses the "dictation" session/IPC plumbing internally.
+  uiMode: "command" | "dictation" | "transform" = mode,
 ): Promise<void> {
   if (!overlayWindow || overlayWindow.isDestroyed()) {
     overlayWindow = createOverlayWindow();
   }
 
   if (voiceSessionActive) {
-    sendToOverlay("overlay:voice-toggle", { action: "stop", mode });
+    sendToOverlay("overlay:voice-toggle", { action: "stop", mode: uiMode });
     setOverlayState("processing");
     return;
   }
@@ -223,5 +233,78 @@ export async function handleShortcutPress(
   showOverlay();
   setVoiceSessionActive(true);
   setOverlayState("listening");
-  sendToOverlay("overlay:voice-toggle", { action: "start", mode });
+  sendToOverlay("overlay:voice-toggle", { action: "start", mode: uiMode });
+}
+
+/**
+ * P8 — Transforms entry point (F9 primary; Ctrl+Alt+Space backup).
+ * Naming (P8.4): Wispr's own materials call this "Command Mode" in pricing
+ * copy and "Transforms" in newer docs. Ripple already uses "Command" for the
+ * Ctrl+Space agent/planner mode (see hotkeyRegistry's "Command mode" label),
+ * so reusing that name here would collide with an unrelated, already-shipped
+ * feature. This module — and every user-facing surface — calls it
+ * "Transforms" only. Never label this "Command Mode".
+ *
+ * Captures the highlighted selection BEFORE the overlay can steal focus,
+ * stashes it, then hands off to the normal dictation start/stop/insert
+ * pipeline unchanged — executeDictationUtterance branches on the stashed
+ * selection to run the rewrite instead of a plain insert.
+ */
+let transformHotkeyBusy = false;
+
+/**
+ * P8 — Transforms entry point (F9 primary; Ctrl+Alt+Space backup).
+ * Naming (P8.4): Wispr's own materials call this "Command Mode" in pricing
+ * copy and "Transforms" in newer docs. Ripple already uses "Command" for the
+ * Ctrl+Space agent/planner mode (see hotkeyRegistry's "Command mode" label),
+ * so reusing that name here would collide with an unrelated, already-shipped
+ * feature. This module — and every user-facing surface — calls it
+ * "Transforms" only. Never label this "Command Mode".
+ *
+ * Captures the highlighted selection BEFORE the overlay can steal focus,
+ * stashes it, then hands off to the normal dictation start/stop/insert
+ * pipeline unchanged — executeDictationUtterance branches on the stashed
+ * selection to run the rewrite instead of a plain insert.
+ */
+export async function handleTransformShortcutPress(): Promise<void> {
+  try {
+    if (voiceSessionActive) {
+      await handleShortcutPress("dictation", "transform");
+      return;
+    }
+    // Block double-F9 while Ctrl+C selection capture is in flight.
+    if (transformHotkeyBusy) return;
+    transformHotkeyBusy = true;
+
+    const { readSelectedText } = await import("../agent/transform/selectionCapture.js");
+    const selection = await readSelectedText();
+    if (!selection) {
+      console.warn(
+        "[ripple-desktop] Transforms (F9): NO TEXT SELECTED — blue-highlight text in Notepad first, then press F9",
+      );
+      showOverlay();
+      sendToOverlay("overlay:state", "error");
+      sendToOverlay("overlay:transform-hint", {
+        message: "Select text first, then F9",
+      });
+      setTimeout(() => hideOverlay(), 2500);
+      return;
+    }
+
+    const { setPendingSelection } = await import("../agent/transform/transformSession.js");
+    setPendingSelection(selection);
+    console.info(
+      `[ripple-desktop] Transforms (F9): selection captured (${selection.length} chars) — speak rewrite instruction`,
+    );
+    await handleShortcutPress("dictation", "transform");
+  } catch (err) {
+    console.error("[ripple-desktop] Transforms (F9) failed:", err);
+    showOverlay();
+    sendToOverlay("overlay:transform-hint", {
+      message: "Transforms failed — try again",
+    });
+    setTimeout(() => hideOverlay(), 2500);
+  } finally {
+    transformHotkeyBusy = false;
+  }
 }

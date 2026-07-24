@@ -34,6 +34,8 @@ export type InsertFallbackOptions = {
   beforeObserve?: ObservationSnapshot;
   /** Skip strategies through this name (recovery after partial success). */
   skipThrough?: InsertStrategyName;
+  /** Put this strategy first (e.g. clipboard for long WhatsApp messages). */
+  preferFirst?: InsertStrategyName;
   /** Replace the whole focused field when clipboard is used. Default inserts at caret. */
   replaceAll?: boolean;
   /** Vision is optional and inappropriate for an already-focused web composer. */
@@ -44,6 +46,13 @@ export type InsertFallbackOptions = {
    * duplicating text when verification is impossible.
    */
   acceptUnverifiableEdit?: boolean;
+  /**
+   * After a strategy reports ok=false following a likely partial type (native
+   * disconnect mid-sequence), do not try later strategies that would re-emit
+   * the full string and duplicate. Caller should only set this for surfaces
+   * where partial append is preferable to double text.
+   */
+  abortLadderOnPartialNativeFail?: boolean;
 };
 
 async function tryNativeTextInsert(text: string): Promise<boolean> {
@@ -94,7 +103,7 @@ async function tryVisionInsert(text: string): Promise<boolean> {
 function strategiesToRun(
   options?: InsertFallbackOptions,
 ): Array<{ name: InsertStrategyName; run: (text: string) => Promise<boolean> }> {
-  const all = [
+  let all = [
     { name: "native_text" as const, run: tryNativeTextInsert },
     { name: "sendkeys" as const, run: trySendKeysInsert },
     {
@@ -105,6 +114,12 @@ function strategiesToRun(
   ].filter(
     (strategy) => strategy.name !== "vision" || options?.includeVision !== false,
   );
+  if (options?.preferFirst) {
+    const preferred = all.find((s) => s.name === options.preferFirst);
+    if (preferred) {
+      all = [preferred, ...all.filter((s) => s.name !== options.preferFirst)];
+    }
+  }
   if (!options?.skipThrough) return all;
   const idx = STRATEGY_ORDER.indexOf(options.skipThrough);
   if (idx < 0) return all;
@@ -137,7 +152,19 @@ export async function runInsertWithFallback(
     if (strategy.name === "vision" && !visionInsertEnabled()) continue;
     try {
       const ok = await strategy.run(text);
-      if (!ok) continue;
+      if (!ok) {
+        // native_text returned false after disconnect/timeout — field may
+        // already contain a partial type. Later strategies re-emit full text.
+        if (
+          strategy.name === "native_text" &&
+          options?.abortLadderOnPartialNativeFail
+        ) {
+          throw new Error(
+            "native_text_partial_or_failed — refusing retype to avoid duplicate",
+          );
+        }
+        continue;
+      }
 
       if (before && options?.verify !== false) {
         const verified = await verifyTypingObservation({

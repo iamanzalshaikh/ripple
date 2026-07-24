@@ -2,8 +2,29 @@ import { useEffect, useState } from "react";
 import { LoginPage } from "./pages/Login";
 import { HomePage } from "./pages/Home";
 import { OverlayPage } from "./pages/Overlay";
+import { FirstRunPage } from "./pages/FirstRun";
 import { useAuthStore } from "./store/authStore";
 import { useSocketStore } from "./store/socketStore";
+
+function firstRunKey(userId: string): string {
+  return `ripple:first-run-seen:${userId}`;
+}
+
+function hasSeenFirstRun(userId: string): boolean {
+  try {
+    return window.localStorage.getItem(firstRunKey(userId)) === "1";
+  } catch {
+    return true; // fail open — never block the app on storage errors
+  }
+}
+
+function markFirstRunSeen(userId: string): void {
+  try {
+    window.localStorage.setItem(firstRunKey(userId), "1");
+  } catch {
+    /* best-effort */
+  }
+}
 
 const isOverlay =
   typeof window !== "undefined" &&
@@ -14,6 +35,7 @@ export default function App() {
   const { loggedIn, user, sessionId, hydrate, loading } = useAuthStore();
   const bindSocketEvents = useSocketStore((s) => s.bindEvents);
   const [ready, setReady] = useState(isOverlay);
+  const [firstRunDone, setFirstRunDone] = useState(false);
 
   useEffect(() => {
     if (isOverlay) {
@@ -52,6 +74,17 @@ export default function App() {
 
   if (!loggedIn) {
     return <LoginPage />;
+  }
+
+  if (!firstRunDone && !hasSeenFirstRun(user!.id)) {
+    return (
+      <FirstRunPage
+        onDone={() => {
+          markFirstRunSeen(user!.id);
+          setFirstRunDone(true);
+        }}
+      />
+    );
   }
 
   return <HomePage user={user!} sessionId={sessionId} />;

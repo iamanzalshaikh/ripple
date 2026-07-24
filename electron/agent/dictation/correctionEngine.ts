@@ -267,7 +267,7 @@ export function replaceOverlappingTail(head: string, tail: string): string {
   return collapseSpaces(`${h} ${t}`);
 }
 
-function toProfessionalTone(text: string): string {
+export function toProfessionalTone(text: string): string {
   let out = stripFillers(text);
   out = out.replace(/\bgotta\b/gi, "need to");
   out = out.replace(/\bwanna\b/gi, "would like to");
@@ -277,6 +277,6 @@ function toProfessionalTone(text: string): string {
   return out.charAt(0).toUpperCase() + out.slice(1);
 }
 
-function toCasualTone(text: string): string {
+export function toCasualTone(text: string): string {
   return stripFillers(text).replace(/\bHello\b/g, "Hey");
 }

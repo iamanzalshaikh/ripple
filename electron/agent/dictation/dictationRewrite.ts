@@ -1,10 +1,18 @@
 import { applyCorrectionsToUtterance } from "../../storage/voiceCorrections.js";
+import { resolveSnippetTrigger } from "../../storage/snippets.js";
+import { getStyleProfileForProcess } from "../../storage/styleProfiles.js";
 import {
   aiRewriteDictation,
   analyzeDictationCorrection,
   generateDictationCorrection,
 } from "./aiRewriteDictation.js";
+import { toCasualTone, toProfessionalTone } from "./correctionEngine.js";
 import { detectCorrectionSignal } from "./correctionSignalDetector.js";
+import {
+  detectSpokenList,
+  formatSpokenList,
+  localCleanup,
+} from "./localCleanup.js";
 import type {
   CorrectionDecision,
   DictationDecisionLog,
@@ -18,6 +26,8 @@ export type DictationRewriteInput = {
   committedBuffer?: string;
   /** Apply P6 spoken→canonical mappings (P7.4). */
   applyMemoryCorrections?: boolean;
+  /** Foreground process name (P7.3 — per-app Styles tone). */
+  processName?: string;
 };
 
 export type DictationRewriteResult = ProductionDictationRewriteResult;
@@ -30,18 +40,91 @@ const DIRECTIVE_SIGNALS = new Set([
 ]);
 
 /**
- * Conservative fail-open guard for the always-on cleanup pass.
- * Reject output that dropped most of the content or ballooned (invented text),
- * so the worst case is typing the raw transcript — never worse than today.
+ * Spoken self-correction markers. When present, cleanup may legitimately
+ * drop earlier clauses. When absent, cleanup must stay near-literal.
  */
-function cleanupWithinBounds(before: string, after: string): boolean {
+const CORRECTION_MARKERS =
+  /\b(?:no(?:\s+no)?|nah|wait|actually|i\s+mean|scratch\s+that|instead)\b/i;
+
+const GREETING_LEAD =
+  /^(?:hello|hi|hey|dear|good\s+(?:morning|afternoon|evening))\b/i;
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function wordCount(text: string): number {
+  return text.trim().split(/\s+/).filter(Boolean).length;
+}
+
+/** Sentence / clause-ish units (greeting + question counts as two). */
+function clauseCount(text: string): number {
+  return text
+    .split(/[.!?]+/)
+    .map((p) => p.trim())
+    .filter((p) => wordCount(p) >= 2).length;
+}
+
+/**
+ * Addressee after a greeting — must survive cleanup
+ * ("Hello Tathir, …" must not become "Can we meet…?").
+ */
+function greetingAddressee(text: string): string | null {
+  const m = text.match(
+    /\b(?:hello|hi|hey|dear)\s+([A-Za-z][A-Za-z'’-]{1,40})\b/i,
+  );
+  return m?.[1] ?? null;
+}
+
+/**
+ * Conservative fail-open guard for the always-on cleanup pass.
+ * Rejects aggressive rewrites that delete greetings, names, or whole clauses
+ * when the user did not signal a self-correction.
+ */
+export function cleanupWithinBounds(before: string, after: string): boolean {
   const cleaned = after.trim();
   if (!cleaned) return false;
-  const b = before.trim().split(/\s+/).filter(Boolean).length;
-  const a = cleaned.split(/\s+/).filter(Boolean).length;
+  const src = before.trim();
+  const b = wordCount(src);
+  const a = wordCount(cleaned);
   if (b === 0) return false;
-  if (a < Math.max(1, Math.floor(b * 0.4))) return false;
+
+  const hasCorrectionMarker = CORRECTION_MARKERS.test(src);
+  // Without an explicit correction, keep ~75% of words (was 40% — too loose).
+  // With a marker, allow surgical drops down to ~40%.
+  const minRatio = hasCorrectionMarker ? 0.4 : 0.75;
+  if (a < Math.max(1, Math.floor(b * minRatio))) return false;
   if (a > b * 2 + 5) return false;
+
+  const charRatio = cleaned.length / Math.max(1, src.length);
+  if (!hasCorrectionMarker && charRatio < 0.7) return false;
+
+  const beforeClauses = clauseCount(src);
+  const afterClauses = clauseCount(cleaned);
+  if (
+    !hasCorrectionMarker &&
+    beforeClauses >= 2 &&
+    afterClauses < beforeClauses
+  ) {
+    return false;
+  }
+
+  if (
+    !hasCorrectionMarker &&
+    GREETING_LEAD.test(src) &&
+    !GREETING_LEAD.test(cleaned)
+  ) {
+    return false;
+  }
+
+  const name = greetingAddressee(src);
+  if (
+    name &&
+    !new RegExp(`\\b${escapeRegExp(name)}\\b`, "i").test(cleaned)
+  ) {
+    return false;
+  }
+
   return true;
 }
 
@@ -55,9 +138,52 @@ export async function rewriteDictationBuffer(
 ): Promise<DictationRewriteResult> {
   const started = Date.now();
   const committedBuffer = input.committedBuffer?.trim() ?? "";
-  const currentUtterance = input.utterance?.trim()
+  const rawUtterance = input.utterance?.trim()
     ? `${input.bufferText.trim()} ${input.utterance.trim()}`.trim()
     : input.bufferText.trim();
+
+  // Snippets (P7.2) — an utterance that IS a learned trigger phrase expands
+  // verbatim and skips everything else. A snippet is a precise, user-authored
+  // expansion; running it through correction/cleanup/AI-rewrite would risk
+  // the same over-aggressive rewriting found elsewhere in this pipeline.
+  const snippetExpansion = resolveSnippetTrigger(rawUtterance);
+  if (snippetExpansion) {
+    const log: DictationDecisionLog = {
+      input: rawUtterance,
+      layer1Signal: "snippet",
+      layer1AutoApplied: true,
+      layer2aCalled: false,
+      layer2aDecision: null,
+      layer2bCalled: false,
+      layer2bDecision: null,
+      applied: true,
+      dropped: [],
+      finalText: snippetExpansion,
+      latencyMs: Date.now() - started,
+      modelUsed: "snippet",
+      reason: "snippet_expansion",
+    };
+    console.info(`[ripple-dictation-decision] ${JSON.stringify(log)}`);
+    return {
+      finalText: snippetExpansion,
+      kind: "snippet",
+      beforeMemory: rawUtterance,
+      decisionLog: log,
+    };
+  }
+
+  // Personal dictionary (P7.4) must resolve BEFORE signal detection / the
+  // AI cleanup pass below — reproduced live: "hi nor" with nor->Noor taught
+  // came back as "Hi." because the always-on cleanup treated "nor" as noise
+  // and dropped it. Resolving known personal terms first protects them from
+  // ever being treated as filler/noise by anything downstream.
+  // cleanupWithinBounds also rejects greeting/name/clause drops without a
+  // spoken correction marker (e.g. "Hello Tathir…?" → "Can we meet…?").
+  const currentUtterance =
+    input.applyMemoryCorrections !== false
+      ? applyCorrectionsToUtterance(rawUtterance)
+      : rawUtterance;
+
   const signal = detectCorrectionSignal({
     currentUtterance,
     committedBuffer,
@@ -120,19 +246,42 @@ export async function rewriteDictationBuffer(
   // Directive signals (tone/delete/scratch) are excluded — they either applied
   // structurally or must stay literal. Fully fail-open via cleanupWithinBounds.
   if (!applied.applied && !DIRECTIVE_SIGNALS.has(signal.signal)) {
-    const cleaned = await aiRewriteDictation(currentUtterance, {
-      surface: "dictation",
-      previousText: committedBuffer || undefined,
-    });
-    if (
-      cleaned &&
-      cleaned.trim() !== currentUtterance.trim() &&
-      cleanupWithinBounds(currentUtterance, cleaned)
-    ) {
-      finalText = cleaned.trim();
+    // Explicit spoken lists ("first… second… third…") get deterministic local
+    // formatting instead of AI cleanup — an LLM has no reason to know you
+    // want a numbered list rather than reflowed prose, so this beats hoping.
+    const spokenList = detectSpokenList(currentUtterance);
+    if (spokenList) {
+      finalText = formatSpokenList(spokenList);
       cleanupApplied = true;
-      cleanupReason = "ai_cleanup";
-      modelUsed = "dictation_clean";
+      cleanupReason = "list_format";
+      modelUsed = "local-list-format";
+    } else {
+      const cleaned = await aiRewriteDictation(currentUtterance, {
+        surface: "dictation",
+        previousText: committedBuffer || undefined,
+      });
+      if (
+        cleaned &&
+        cleaned.trim() !== currentUtterance.trim() &&
+        cleanupWithinBounds(currentUtterance, cleaned)
+      ) {
+        finalText = cleaned.trim();
+        cleanupApplied = true;
+        cleanupReason = "ai_cleanup";
+        modelUsed = "dictation_clean";
+      } else {
+        // aiRewriteDictation fails open to null on ANY network/auth/timeout
+        // failure — previously that meant zero cleanup at all (raw transcript,
+        // every "um"/stutter, straight to the field) whenever the backend
+        // wasn't reachable. Local cleanup is a real baseline either way.
+        const local = localCleanup(currentUtterance);
+        if (local && local !== currentUtterance) {
+          finalText = local;
+          cleanupApplied = true;
+          cleanupReason = "local_cleanup";
+          modelUsed = "local-cleanup-v1";
+        }
+      }
     }
   }
 
@@ -143,6 +292,22 @@ export async function rewriteDictationBuffer(
       finalText = applyCorrectionsToUtterance(finalText);
     } catch {
       /* memory optional */
+    }
+  }
+
+  // Styles (P7.3) — ambient per-app tone default. Only when the user did NOT
+  // already give an explicit spoken tone instruction this utterance (that
+  // already ran via the directive signal above and must win) — this is the
+  // passive "in Slack, always keep it casual" behavior, not a one-off request.
+  let styleApplied: "professional" | "casual" | null = null;
+  if (signal.signal !== "tone_directive" && finalText.trim()) {
+    const tone = getStyleProfileForProcess(input.processName);
+    if (tone === "professional") {
+      finalText = toProfessionalTone(finalText);
+      styleApplied = "professional";
+    } else if (tone === "casual") {
+      finalText = toCasualTone(finalText);
+      styleApplied = "casual";
     }
   }
 
@@ -159,7 +324,7 @@ export async function rewriteDictationBuffer(
     finalText: finalText.trim(),
     latencyMs: Date.now() - started,
     modelUsed,
-    reason: cleanupReason,
+    reason: styleApplied ? `${cleanupReason}+style_${styleApplied}` : cleanupReason,
   };
   console.info(`[ripple-dictation-decision] ${JSON.stringify(log)}`);
 

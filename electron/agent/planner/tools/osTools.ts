@@ -2,7 +2,10 @@ import {
   getAppProperties,
   getRunningApps,
   inspectWindow,
+  maximizeForegroundWindow,
+  minimizeForegroundWindow,
   runAppAsAdmin,
+  snapForegroundWindow,
 } from "../../../automation/desktop/osControlOps.js";
 import {
   hasRegisteredTool,
@@ -133,6 +136,67 @@ const OS_TOOLS: RegisteredTool[] = [
     }),
     execute: async (_ctx, args) =>
       wrap(() => inspectWindow(str(args, "query") || undefined)),
+  },
+  {
+    definition: def({
+      name: "window.maximize",
+      description: "Maximize the foreground (or named) window / full screen",
+      category: "desktop",
+      risk: "low",
+      priority: 80,
+      cost: 2,
+      idempotent: true,
+      argsSchema: {
+        app: { type: "string" },
+      },
+      examples: ["make this full screen", "maximize this window"],
+    }),
+    execute: async (_ctx, args) =>
+      wrap(() => maximizeForegroundWindow(str(args, "app") || undefined)),
+  },
+  {
+    definition: def({
+      name: "window.minimize",
+      description: "Minimize the foreground (or named) window",
+      category: "desktop",
+      risk: "low",
+      priority: 80,
+      cost: 2,
+      idempotent: false,
+      argsSchema: {
+        app: { type: "string" },
+      },
+      examples: ["minimize this window"],
+    }),
+    execute: async (_ctx, args) =>
+      wrap(() => minimizeForegroundWindow(str(args, "app") || undefined)),
+  },
+  {
+    definition: def({
+      name: "window.snap",
+      description: "Snap the foreground window to left or right half of the screen",
+      category: "desktop",
+      risk: "low",
+      priority: 80,
+      cost: 2,
+      idempotent: true,
+      argsSchema: {
+        side: { type: "string", required: true },
+        app: { type: "string" },
+      },
+      examples: [
+        "put this app on the left side of my screen",
+        "snap window right",
+      ],
+    }),
+    execute: async (_ctx, args) =>
+      wrap(() => {
+        const sideRaw = str(args, "side").toLowerCase();
+        if (sideRaw !== "left" && sideRaw !== "right") {
+          throw new Error("missing_arg:side");
+        }
+        return snapForegroundWindow(sideRaw, str(args, "app") || undefined);
+      }),
   },
 ];
 

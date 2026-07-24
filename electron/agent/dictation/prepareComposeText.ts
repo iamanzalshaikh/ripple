@@ -12,12 +12,13 @@ export type PreparedComposeText = {
  */
 export async function prepareComposeDictationText(
   raw: string,
-  options?: { surface?: string; previousText?: string },
+  options?: { surface?: string; previousText?: string; processName?: string },
 ): Promise<PreparedComposeText> {
   const rewritten = await rewriteDictationBuffer({
     bufferText: raw.trim(),
     committedBuffer: options?.previousText,
     applyMemoryCorrections: true,
+    processName: options?.processName,
   });
   return {
     text: rewritten.finalText,

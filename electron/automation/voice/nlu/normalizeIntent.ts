@@ -49,11 +49,18 @@ export function normalizeForNlu(text: string): string {
       "open $1",
     );
 
-    // Casual verbs → open (skip recall phrases like "bring it back")
-    s = s.replace(
-      /\b(show\s+me|pull\s+up|bring\s+up|get\s+me|let\s+me\s+see|display|navigate\s+to|go\s+to|head\s+to|take\s+me\s+to|jump\s+to)\b/gi,
-      "open",
-    );
+    // Casual verbs → open (skip recall phrases like "bring it back").
+    // Keep list/search phrasing: "show me all PDF files in Downloads" must stay
+    // a show/list/search intent — never collapse to open_project.
+    const listingShow =
+      /\b(?:show\s+me|show|list|display|let\s+me\s+see)\b/i.test(s) &&
+      /\b(?:all\s+)?(?:the\s+)?(?:\w+\s+)?files?\b/i.test(s);
+    if (!listingShow) {
+      s = s.replace(
+        /\b(show\s+me|pull\s+up|bring\s+up|get\s+me|let\s+me\s+see|display|navigate\s+to|go\s+to|head\s+to|take\s+me\s+to|jump\s+to)\b/gi,
+        "open",
+      );
+    }
   } else {
     s = stripLeadingFillers(s);
   }
