@@ -473,17 +473,44 @@ async function enrichContextFromExtension(ctx: FocusContext): Promise<FocusConte
 }
 
 export function isInstagramFocused(): boolean {
-  if (!saved?.isInstagram) return false;
-  return isInstagramWindowTitle(saved.windowTitle);
+  const ctx = voiceCommandTarget ?? saved;
+  if (!ctx?.isInstagram) return false;
+  return isInstagramWindowTitle(ctx.windowTitle);
 }
 
-/** True when the captured window title looks like Instagram (even if isInstagram flag missed). */
+/**
+ * True when Instagram is the intended typing surface.
+ * Prefer the voice hotkey snapshot (like WhatsApp) so a stale saved IG tab
+ * cannot steal inserts when the user moved to ChatGPT / Cursor / etc.
+ */
 export function isInstagramTabActive(): boolean {
-  if (isInstagramFocused()) return true;
-  const ctx = saved;
-  if (!ctx) return false;
-  if (ctx.activeTabUrl && /instagram\.com/i.test(ctx.activeTabUrl)) return true;
-  return isInstagramWindowTitle(ctx.windowTitle);
+  const ctx = voiceCommandTarget ?? saved;
+  if (ctx && !isWeakFocusContext(ctx) && !isTransientInputShell(ctx)) {
+    if (isClearlyDesktopForeground(ctx)) return false;
+    if (ctx.isInstagram) return true;
+    if (ctx.activeTabUrl && /instagram\.com/i.test(ctx.activeTabUrl)) return true;
+    if (detectInstagram(ctx.windowTitle, ctx.processName, ctx.activeTabUrl)) {
+      return true;
+    }
+    return false;
+  }
+  for (const candidate of [lastNonRippleFocus, saved]) {
+    if (
+      candidate &&
+      !isWeakFocusContext(candidate) &&
+      (candidate.isInstagram ||
+        detectInstagram(
+          candidate.windowTitle,
+          candidate.processName,
+          candidate.activeTabUrl,
+        ) ||
+        (candidate.activeTabUrl &&
+          /instagram\.com/i.test(candidate.activeTabUrl)))
+    ) {
+      return true;
+    }
+  }
+  return getStickyWebSurface() === "instagram";
 }
 
 export function isDesktopAppForeground(): boolean {

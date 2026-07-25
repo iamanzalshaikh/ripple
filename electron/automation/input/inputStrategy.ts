@@ -181,16 +181,29 @@ export async function runInsertWithFallback(
             (control.includes("edit") ||
               control.includes("document") ||
               control.includes("text"));
-          if (unverifiableEditable) {
+          // Strategy already committed SendKeys/paste. Continuing the ladder
+          // re-emits the full string (live: Hello typed twice; Windows Search
+          // stole FG mid-ladder and got a second paste). Never retry after ok.
+          if (
+            unverifiableEditable ||
+            options?.acceptUnverifiableEdit === true ||
+            verified.reason === "foreground_changed"
+          ) {
             console.warn(
-              `[ripple-insert] strategy=${strategy.name} verify=unavailable editable=true; accepting to avoid duplicate retry`,
+              `[ripple-insert] strategy=${strategy.name} verify=fail reason=${verified.reason ?? "unknown"}; accepting committed insert to avoid duplicate`,
             );
           } else {
             console.warn(
-              `[ripple-insert] strategy=${strategy.name} verify=fail reason=${verified.reason ?? "unknown"}`,
+              `[ripple-insert] strategy=${strategy.name} verify=fail reason=${verified.reason ?? "unknown"}; refusing ladder retry to avoid duplicate`,
             );
-            continue;
           }
+          console.info(
+            `[ripple-insert] strategy=${strategy.name} status=ok len=${text.length}`,
+          );
+          return {
+            detail: strategyDetail(strategy.name, text),
+            strategy: strategy.name,
+          };
         }
       }
 

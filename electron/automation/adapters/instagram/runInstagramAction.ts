@@ -23,8 +23,15 @@ export async function runInstagramBatch(
   if (kind === "compose") {
     const text = typeof data?.text === "string" ? data.text.trim() : "";
     const send = data?.send === true;
+    const pasteOnly = data?.pasteOnly === true;
+    const replaceAll = data?.replaceAll === true;
     if (!text) throw new Error("Instagram message text missing");
-    return composeInstagramMessage({ text, send });
+    return composeInstagramMessage({
+      text,
+      send,
+      pasteOnly: pasteOnly || !replaceAll,
+      replaceAll,
+    });
   }
 
   throw new Error(`Unknown Instagram action: ${String(kind)}`);

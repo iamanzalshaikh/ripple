@@ -2,6 +2,7 @@ import { globalShortcut } from "electron";
 import {
   cancelVoiceSession,
   handleShortcutPress,
+  handleQuickCaptureShortcutPress,
   handleTransformShortcutPress,
 } from "../windows/overlay.js";
 import {
@@ -13,7 +14,13 @@ import { getSidecarCapabilities, isNativeClientAuthenticated } from "./nativeCli
 export type HotkeyBinding = {
   accelerator: string;
   label: string;
-  action: "command" | "dictation" | "transform" | "voice" | "cancel_voice";
+  action:
+    | "command"
+    | "dictation"
+    | "transform"
+    | "voice"
+    | "cancel_voice"
+    | "quick_capture";
 };
 
 const DEFAULT_BINDINGS: HotkeyBinding[] = [
@@ -49,6 +56,12 @@ const DEFAULT_BINDINGS: HotkeyBinding[] = [
     label: "Transforms (backup)",
     action: "transform",
   },
+  // P10.3 lite — Quick capture: new note, opens it, starts dictating.
+  {
+    accelerator: "Control+Alt+N",
+    label: "Quick capture (new note + dictate)",
+    action: "quick_capture",
+  },
   { accelerator: "Escape", label: "Cancel voice", action: "cancel_voice" },
 ];
 
@@ -66,6 +79,10 @@ function runHotkeyAction(action: HotkeyBinding["action"]): void {
   }
   if (action === "transform") {
     void handleTransformShortcutPress();
+    return;
+  }
+  if (action === "quick_capture") {
+    void handleQuickCaptureShortcutPress();
     return;
   }
   void handleShortcutPress(modeForAction(action));

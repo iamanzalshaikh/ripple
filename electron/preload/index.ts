@@ -47,10 +47,24 @@ const api = {
     mimeType?: string;
     filename?: string;
   }) => ipcRenderer.invoke("voice:chunk", args),
+  flushVoice: (args: {
+    streamId: string;
+    sessionId?: string;
+    language?: string;
+  }) => ipcRenderer.invoke("voice:flush", args),
   endVoice: (args: { streamId: string; sessionId?: string; language?: string }) =>
     ipcRenderer.invoke("voice:end", args),
   cancelVoice: (streamId: string) =>
     ipcRenderer.invoke("voice:cancel", { streamId }),
+  streaming: {
+    begin: (streamId: string) =>
+      ipcRenderer.invoke("streaming:begin", { streamId }) as Promise<{
+        ok: boolean;
+        message?: string;
+      }>,
+    clear: () =>
+      ipcRenderer.invoke("streaming:clear") as Promise<{ ok: boolean }>,
+  },
   executeCommand: (args: {
     command: string;
     sessionId?: string;
@@ -227,6 +241,24 @@ const api = {
     }>,
   setOverlayVoiceActive: (active: boolean) =>
     ipcRenderer.invoke("overlay:voice-active", active),
+  expandLanguageMenu: (itemCount: number) =>
+    ipcRenderer.invoke("overlay:expandLanguageMenu", itemCount) as Promise<{
+      ok: boolean;
+    }>,
+  collapseToIndicator: () =>
+    ipcRenderer.invoke("overlay:collapseToIndicator") as Promise<{ ok: boolean }>,
+  flowBar: {
+    openScratchpad: () =>
+      ipcRenderer.invoke("flowBar:openScratchpad") as Promise<{
+        ok: boolean;
+        message?: string;
+      }>,
+    startTransform: () =>
+      ipcRenderer.invoke("flowBar:startTransform") as Promise<{
+        ok: boolean;
+        message?: string;
+      }>,
+  },
   language: {
     get: () =>
       ipcRenderer.invoke("language:get") as Promise<{
@@ -342,6 +374,36 @@ const api = {
         ok: boolean;
         message?: string;
       }>,
+  },
+  notes: {
+    list: () =>
+      ipcRenderer.invoke("notes:list") as Promise<{
+        ok: boolean;
+        message?: string;
+        items?: Array<{
+          id: string;
+          title: string;
+          body: string;
+          createdAt: string;
+          updatedAt: string;
+        }>;
+      }>,
+    create: (args?: { title?: string; body?: string }) =>
+      ipcRenderer.invoke("notes:create", args ?? {}) as Promise<{
+        ok: boolean;
+        message?: string;
+        note?: { id: string; title: string; body: string; createdAt: string; updatedAt: string };
+      }>,
+    update: (args: { id: string; title?: string; body?: string }) =>
+      ipcRenderer.invoke("notes:update", args) as Promise<{
+        ok: boolean;
+        message?: string;
+        note?: { id: string; title: string; body: string; createdAt: string; updatedAt: string };
+      }>,
+    delete: (id: string) =>
+      ipcRenderer.invoke("notes:delete", { id }) as Promise<{ ok: boolean; message?: string }>,
+    setActiveNote: (id: string | null) =>
+      ipcRenderer.invoke("notes:setActiveNote", { id }) as Promise<{ ok: boolean }>,
   },
   onIpcEvent: (channel: string, cb: (payload: unknown) => void): Unsubscribe => {
     const handler = (_: unknown, payload: unknown) => cb(payload);

@@ -6,12 +6,15 @@ import {
 } from "../adapters/whatsapp/parseContact.js";
 import { isContextualWhatsAppComposeCommand } from "../adapters/whatsapp/parseWhatsAppCommand.js";
 import { insertWhatsAppComposeText } from "../adapters/whatsapp/whatsappComposeInsert.js";
+import { insertInstagramComposeText } from "../adapters/instagram/instagramComposeInsert.js";
 import type { FocusContext } from "../../focus/focusContext.js";
 import {
+  isInstagramTabActive,
   isWeakFocusContext,
   restoreFocusContext,
   resolveTypingFocusTarget,
 } from "../../focus/focusContext.js";
+import { isEditOrRephraseCommand } from "../commandIntent.js";
 import { getLastVoiceCommand } from "../../state/lastCommand.js";
 import { smartInsertText } from "../smartInsert.js";
 import {
@@ -261,6 +264,16 @@ export async function runInsertText(data?: Record<string, unknown>): Promise<str
     return finishTypingResult(msg, beforeObserve, text, true);
   }
 
+  {
+    const { getActiveNoteId } = await import("../../state/activeNoteFocus.js");
+    if (getActiveNoteId()) {
+      // Note path is handled in commandOrchestrator — never fall through to WA.
+      throw new Error(
+        "INSERT_TEXT refused: active Flow Note should use note-compose path",
+      );
+    }
+  }
+
   if (isContextualWhatsAppComposeCommand()) {
     const body = text.trim() || getLastVoiceCommand()?.trim() || "";
     if (!body) throw new Error("No message text for WhatsApp compose");
@@ -268,6 +281,18 @@ export async function runInsertText(data?: Record<string, unknown>): Promise<str
       "[ripple-desktop] INSERT_TEXT → WhatsApp open-chat compose (OS-first)",
     );
     return insertWhatsAppComposeText(body);
+  }
+
+  if (
+    isInstagramTabActive() &&
+    !isEditOrRephraseCommand(getLastVoiceCommand() ?? "")
+  ) {
+    const body = text.trim() || getLastVoiceCommand()?.trim() || "";
+    if (!body) throw new Error("No message text for Instagram compose");
+    console.info(
+      "[ripple-desktop] INSERT_TEXT → Instagram open-chat compose (OS-first)",
+    );
+    return insertInstagramComposeText(body);
   }
 
   if (isWhatsAppMessagingCommand() && extractContactName()) {

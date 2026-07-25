@@ -35,6 +35,9 @@ function isWeakBackendResult(result: CommandResultPayload): boolean {
 export async function resolveWhatsAppComposeDictationText(
   command: string,
 ): Promise<string | null> {
+  // Open Flow Note must win over sticky WhatsApp tab detection.
+  const { getActiveNoteId } = await import("../../../state/activeNoteFocus.js");
+  if (getActiveNoteId()) return null;
   if (!isWhatsAppTabActive()) return null;
   const cmd = normalizeTranscript(command).trim();
   if (cmd.length < 2) return null;

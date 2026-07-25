@@ -7,6 +7,10 @@
   --color-ripple-accent: #7c3aed;
   --color-ripple-accent-hover: #6d28d9;
   --font-sans: "Segoe UI", system-ui, -apple-system, sans-serif;
+  /* Flow Bar — instrument-panel feel for the floating HUD, distinct from
+     the app's UI sans everywhere else. Cascadia Code ships with Windows
+     Terminal/VS Code so it's very likely already installed. */
+  --font-hud: "Cascadia Code", "JetBrains Mono", "SF Mono", ui-monospace, "Consolas", monospace;
 }
 
 @layer base {
@@ -48,7 +52,8 @@
     -webkit-app-region: drag;
   }
 
-  .voice-pill {
+  .voice-pill,
+  .no-drag {
     -webkit-app-region: no-drag;
   }
 
@@ -75,5 +80,47 @@
       transform: scale(1.6);
       opacity: 0;
     }
+  }
+
+  /* Flow Bar — waveform meter (listening), pop-in (result), shake (error). */
+  .flowbar-wave-bar {
+    animation: flowbar-wave 0.9s ease-in-out infinite;
+    transform-origin: center;
+  }
+  .flowbar-wave-bar:nth-child(1) { animation-delay: 0ms; animation-duration: 0.82s; }
+  .flowbar-wave-bar:nth-child(2) { animation-delay: 110ms; animation-duration: 0.95s; }
+  .flowbar-wave-bar:nth-child(3) { animation-delay: 60ms; animation-duration: 0.74s; }
+  .flowbar-wave-bar:nth-child(4) { animation-delay: 180ms; animation-duration: 1.02s; }
+  .flowbar-wave-bar:nth-child(5) { animation-delay: 30ms; animation-duration: 0.88s; }
+
+  @keyframes flowbar-wave {
+    0%, 100% { transform: scaleY(0.28); }
+    50% { transform: scaleY(1); }
+  }
+
+  .flowbar-pop {
+    animation: flowbar-pop 0.32s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  }
+
+  @keyframes flowbar-pop {
+    0% { transform: scale(0.4); opacity: 0; }
+    60% { transform: scale(1.18); opacity: 1; }
+    100% { transform: scale(1); }
+  }
+
+  .flowbar-shake {
+    animation: flowbar-shake 0.42s ease-in-out;
+  }
+
+  @keyframes flowbar-shake {
+    0%, 100% { transform: translateX(0); }
+    20% { transform: translateX(-2.5px); }
+    40% { transform: translateX(2.5px); }
+    60% { transform: translateX(-1.5px); }
+    80% { transform: translateX(1.5px); }
+  }
+
+  .flowbar-spin {
+    animation: spin 0.9s cubic-bezier(0.65, 0, 0.35, 1) infinite;
   }
 }

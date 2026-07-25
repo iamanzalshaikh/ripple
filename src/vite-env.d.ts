@@ -84,12 +84,21 @@ interface RippleApi {
     mimeType?: string;
     filename?: string;
   }) => Promise<{ ok: boolean; message?: string; data?: unknown }>;
+  flushVoice: (args: {
+    streamId: string;
+    sessionId?: string;
+    language?: string;
+  }) => Promise<{ ok: boolean; message?: string; data?: unknown }>;
   endVoice: (args: {
     streamId: string;
     sessionId?: string;
     language?: string;
   }) => Promise<{ ok: boolean; message?: string; data?: unknown }>;
   cancelVoice: (streamId: string) => Promise<{ ok: boolean; message?: string }>;
+  streaming: {
+    begin: (streamId: string) => Promise<{ ok: boolean; message?: string }>;
+    clear: () => Promise<{ ok: boolean }>;
+  };
   executeCommand: (args: {
     command: string;
     sessionId?: string;
@@ -210,6 +219,31 @@ interface RippleApi {
       };
     }>;
     remove: (processName: string) => Promise<{ ok: boolean; message?: string }>;
+  };
+  notes: {
+    list: () => Promise<{
+      ok: boolean;
+      message?: string;
+      items?: Array<{
+        id: string;
+        title: string;
+        body: string;
+        createdAt: string;
+        updatedAt: string;
+      }>;
+    }>;
+    create: (args?: { title?: string; body?: string }) => Promise<{
+      ok: boolean;
+      message?: string;
+      note?: { id: string; title: string; body: string; createdAt: string; updatedAt: string };
+    }>;
+    update: (args: { id: string; title?: string; body?: string }) => Promise<{
+      ok: boolean;
+      message?: string;
+      note?: { id: string; title: string; body: string; createdAt: string; updatedAt: string };
+    }>;
+    delete: (id: string) => Promise<{ ok: boolean; message?: string }>;
+    setActiveNote: (id: string | null) => Promise<{ ok: boolean }>;
   };
   getTelemetrySummary: () => Promise<{
     ok: boolean;
@@ -341,6 +375,12 @@ interface RippleApi {
     limit?: number;
   }>;
   setOverlayVoiceActive: (active: boolean) => Promise<{ ok: boolean }>;
+  expandLanguageMenu: (itemCount: number) => Promise<{ ok: boolean }>;
+  collapseToIndicator: () => Promise<{ ok: boolean }>;
+  flowBar: {
+    openScratchpad: () => Promise<{ ok: boolean; message?: string }>;
+    startTransform: () => Promise<{ ok: boolean; message?: string }>;
+  };
   onIpcEvent: (
     channel: string,
     cb: (payload: unknown) => void,

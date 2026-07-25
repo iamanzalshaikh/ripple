@@ -103,16 +103,37 @@ describe("P8.5-P5.2 insert strategy ladder", () => {
     expect(mouseClickNative).toHaveBeenCalled();
   });
 
-  it("retries next strategy when verify fails", async () => {
+  it("retries are refused after a committed strategy to avoid double-type", async () => {
     runInputSequenceNative.mockResolvedValue({ ok: true });
-    verifyTypingObservation
-      .mockResolvedValueOnce({ ok: false, reason: "a11y_name_mismatch" })
-      .mockResolvedValueOnce({ ok: true, before: {}, after: {} });
+    verifyTypingObservation.mockResolvedValueOnce({
+      ok: false,
+      reason: "a11y_name_mismatch",
+      before: {},
+      after: {},
+    });
+    const { simulateTyping } = await import("../../automation/keyboard.js");
     const { strategy } = await runInsertWithFallback("verified text", {
       verify: true,
     });
-    expect(strategy).toBe("sendkeys");
-    expect(verifyTypingObservation).toHaveBeenCalledTimes(2);
+    expect(strategy).toBe("native_text");
+    expect(simulateTyping).not.toHaveBeenCalled();
+    expect(verifyTypingObservation).toHaveBeenCalledTimes(1);
+  });
+
+  it("accepts foreground_changed after committed insert without ladder retry", async () => {
+    runInputSequenceNative.mockResolvedValue({ ok: true });
+    verifyTypingObservation.mockResolvedValueOnce({
+      ok: false,
+      reason: "foreground_changed",
+      before: {},
+      after: {},
+    });
+    const { simulateTyping } = await import("../../automation/keyboard.js");
+    const { strategy } = await runInsertWithFallback("stolen focus text", {
+      verify: true,
+    });
+    expect(strategy).toBe("native_text");
+    expect(simulateTyping).not.toHaveBeenCalled();
   });
 
   it("accepts unverifiable editable insert without duplicating via retry", async () => {

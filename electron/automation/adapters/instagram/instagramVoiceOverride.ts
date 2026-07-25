@@ -33,7 +33,9 @@ function buildInstagramComposeWorkflow(
   text: string,
   send: boolean,
   commandId?: string,
+  options?: { replaceAll?: boolean },
 ): CommandResultPayload {
+  const replaceAll = options?.replaceAll === true;
   return {
     command_id: commandId ?? randomUUID(),
     intent: "workflow",
@@ -52,7 +54,8 @@ function buildInstagramComposeWorkflow(
                 instagramKind: "compose",
                 text,
                 send,
-                pasteOnly: true,
+                pasteOnly: !replaceAll,
+                replaceAll,
               },
             },
           ],
@@ -62,7 +65,7 @@ function buildInstagramComposeWorkflow(
   };
 }
 
-/** Rephrase / tone on open DM — AI text from backend → paste in composer. */
+/** Rephrase / tone on open DM — AI text from backend → replace in composer. */
 export function applyInstagramRephraseOverride(
   command: string,
   result: CommandResultPayload,
@@ -73,10 +76,12 @@ export function applyInstagramRephraseOverride(
   if (!text.trim()) return null;
 
   console.info(
-    `[ripple-desktop] DM rephrase — paste ${text.length} chars (backend intent=${result.intent})`,
+    `[ripple-desktop] DM rephrase — replace ${text.length} chars (backend intent=${result.intent})`,
   );
 
-  return buildInstagramComposeWorkflow(text, false, result.command_id);
+  return buildInstagramComposeWorkflow(text, false, result.command_id, {
+    replaceAll: true,
+  });
 }
 
 /** Backend missed Instagram DM — desktop runs via extension or keyboard paste. */

@@ -30,6 +30,8 @@ import { setLastVoiceCommand } from "../state/lastCommand.js";
 import {
   setVoiceSessionActive,
   setOverlayState,
+  expandOverlayForLanguageMenu,
+  collapseOverlayToIndicator,
 } from "../windows/overlay.js";
 
 loadDesktopEnv();
@@ -163,6 +165,9 @@ async function restoreAuth(): Promise<boolean> {
   };
   await bootstrapSession(access);
   await connectSocket(access);
+  // P9.1.C — restart-time restore counts as a login for sync purposes too;
+  // don't block startup on it.
+  void import("../sync/syncClient.js").then((m) => m.runLoginSync());
   return true;
 }
 
@@ -243,6 +248,9 @@ async function completeAuth(data: AuthPayload): Promise<{
   };
   await bootstrapSession(data.token);
   await connectSocket(data.token);
+  // P9.1.C — shared by interactive login and signup; don't block the
+  // caller's response on this.
+  void import("../sync/syncClient.js").then((m) => m.runLoginSync());
   return { ok: true, user: currentUser, sessionId };
 }
 
@@ -385,6 +393,73 @@ function registerIpc(): void {
       }
     },
   );
+
+  // P7.8 — mid-utterance Whisper flush → voice:partial_transcript.
+  ipcMain.handle(
+    "voice:flush",
+    async (
+      _e,
+      args: { streamId: string; sessionId?: string; language?: string },
+    ) => {
+      if (!rippleSocket.isConnected()) {
+        return { ok: false, message: "Not connected to server." };
+      }
+      try {
+        const data = await rippleSocket.flushVoice(
+          args.streamId,
+          args.sessionId ?? sessionId ?? undefined,
+          args.language,
+        );
+        return { ok: true, data };
+      } catch (e: unknown) {
+        return {
+          ok: false,
+          message: e instanceof Error ? e.message : "Voice flush failed",
+        };
+      }
+    },
+  );
+
+  // P7.8 — start progressive-insert session for this stream.
+  ipcMain.handle(
+    "streaming:begin",
+    async (_e, args: { streamId?: string }) => {
+      try {
+        const streamId =
+          typeof args?.streamId === "string" ? args.streamId : "";
+        if (!streamId) return { ok: false, message: "stream_id_required" };
+        const { getActiveNoteId } = await import("../state/activeNoteFocus.js");
+        const noteId = getActiveNoteId();
+        let noteBaseBody = "";
+        if (noteId) {
+          const { getNote } = await import("../storage/notes.js");
+          noteBaseBody = getNote(noteId)?.body ?? "";
+        }
+        const { beginStreamingInsert } = await import(
+          "../agent/dictation/streamingInsert.js"
+        );
+        beginStreamingInsert({ streamId, noteId, noteBaseBody });
+        return { ok: true };
+      } catch (e: unknown) {
+        return {
+          ok: false,
+          message: e instanceof Error ? e.message : "streaming_begin_failed",
+        };
+      }
+    },
+  );
+
+  ipcMain.handle("streaming:clear", async () => {
+    try {
+      const { clearStreamingInsert } = await import(
+        "../agent/dictation/streamingInsert.js"
+      );
+      clearStreamingInsert();
+      return { ok: true };
+    } catch {
+      return { ok: true };
+    }
+  });
 
   ipcMain.handle(
     "voice:end",
@@ -530,6 +605,8 @@ function registerIpc(): void {
     if (!language) return { ok: false, message: "missing_arg:language" };
     try {
       const prefs = updateUserPreference("language", language);
+      const { pushSyncItemAsync } = await import("../sync/syncClient.js");
+      pushSyncItemAsync("preference", "language", { value: prefs.language });
       return { ok: true, language: prefs.language || "auto" };
     } catch (e: unknown) {
       return {
@@ -557,6 +634,8 @@ function registerIpc(): void {
     const enabled = args?.enabled === true;
     try {
       const prefs = updateUserPreference("quiet_mode", enabled ? "1" : "0");
+      const { pushSyncItemAsync } = await import("../sync/syncClient.js");
+      pushSyncItemAsync("preference", "quiet_mode", { value: prefs.quietMode });
       return { ok: true, quietMode: prefs.quietMode === "1" };
     } catch (e: unknown) {
       return {
@@ -593,6 +672,11 @@ function registerIpc(): void {
     }
     try {
       const entry = learnCorrection({ spokenForm, canonicalForm, source: "dictionary_ui" });
+      const { pushSyncItemAsync } = await import("../sync/syncClient.js");
+      pushSyncItemAsync("dictionary", entry.spokenForm, {
+        canonicalForm: entry.canonicalForm,
+        source: entry.source,
+      });
       return { ok: true, entry };
     } catch (e: unknown) {
       return {
@@ -610,6 +694,13 @@ function registerIpc(): void {
     if (!spokenForm) return { ok: false, message: "missing_arg:spokenForm" };
     try {
       const removed = removeCorrection(spokenForm);
+      if (removed) {
+        const { pushSyncItemAsync } = await import("../sync/syncClient.js");
+        // Match voiceCorrections.ts's own key normalization so this tombstone
+        // lands on the same sync key the add-side push used.
+        const normalizedKey = spokenForm.trim().toLowerCase().replace(/\s+/g, " ");
+        pushSyncItemAsync("dictionary", normalizedKey, {}, true);
+      }
       return { ok: removed };
     } catch (e: unknown) {
       return {
@@ -642,6 +733,8 @@ function registerIpc(): void {
     }
     try {
       const entry = learnSnippet({ trigger, expansion });
+      const { pushSyncItemAsync } = await import("../sync/syncClient.js");
+      pushSyncItemAsync("snippet", entry.trigger, { expansion: entry.expansion });
       return { ok: true, entry };
     } catch (e: unknown) {
       return {
@@ -652,11 +745,16 @@ function registerIpc(): void {
   });
 
   ipcMain.handle("snippets:remove", async (_e, args) => {
-    const { removeSnippet } = await import("../storage/snippets.js");
+    const { removeSnippet, normalizeTrigger } = await import("../storage/snippets.js");
     const trigger = typeof args?.trigger === "string" ? args.trigger : "";
     if (!trigger) return { ok: false, message: "missing_arg:trigger" };
     try {
-      return { ok: removeSnippet(trigger) };
+      const removed = removeSnippet(trigger);
+      if (removed) {
+        const { pushSyncItemAsync } = await import("../sync/syncClient.js");
+        pushSyncItemAsync("snippet", normalizeTrigger(trigger), {}, true);
+      }
+      return { ok: removed };
     } catch (e: unknown) {
       return {
         ok: false,
@@ -691,6 +789,14 @@ function registerIpc(): void {
         processName,
         tone: tone as "professional" | "casual" | "neutral",
       });
+      const { pushSyncItemAsync } = await import("../sync/syncClient.js");
+      // setStyleProfile deletes the row for "neutral" (no override) — sync
+      // that as a tombstone, not a stored "neutral" style.
+      if (entry.tone === "neutral") {
+        pushSyncItemAsync("style", entry.processName, {}, true);
+      } else {
+        pushSyncItemAsync("style", entry.processName, { tone: entry.tone });
+      }
       return { ok: true, entry };
     } catch (e: unknown) {
       return {
@@ -705,13 +811,93 @@ function registerIpc(): void {
     const processName = typeof args?.processName === "string" ? args.processName : "";
     if (!processName) return { ok: false, message: "missing_arg:processName" };
     try {
-      return { ok: removeStyleProfile(processName) };
+      const removed = removeStyleProfile(processName);
+      if (removed) {
+        const { pushSyncItemAsync } = await import("../sync/syncClient.js");
+        pushSyncItemAsync("style", processName.trim().toLowerCase(), {}, true);
+      }
+      return { ok: removed };
     } catch (e: unknown) {
       return {
         ok: false,
         message: e instanceof Error ? e.message : "styles_remove_failed",
       };
     }
+  });
+
+  // Phase 10.1 — Flow Notes.
+  ipcMain.handle("notes:list", async () => {
+    const { listNotes } = await import("../storage/notes.js");
+    try {
+      return { ok: true, items: listNotes(200) };
+    } catch (e: unknown) {
+      return { ok: false, message: e instanceof Error ? e.message : "notes_list_failed" };
+    }
+  });
+
+  ipcMain.handle("notes:create", async (_e, args) => {
+    const { createNote } = await import("../storage/notes.js");
+    const title = typeof args?.title === "string" ? args.title : undefined;
+    const body = typeof args?.body === "string" ? args.body : undefined;
+    try {
+      const note = createNote({ title, body });
+      const { pushSyncItemAsync } = await import("../sync/syncClient.js");
+      pushSyncItemAsync("note", note.id, {
+        title: note.title,
+        body: note.body,
+        createdAt: note.createdAt,
+      });
+      return { ok: true, note };
+    } catch (e: unknown) {
+      return { ok: false, message: e instanceof Error ? e.message : "notes_create_failed" };
+    }
+  });
+
+  ipcMain.handle("notes:update", async (_e, args) => {
+    const { updateNote } = await import("../storage/notes.js");
+    const id = typeof args?.id === "string" ? args.id : "";
+    if (!id) return { ok: false, message: "missing_arg:id" };
+    const title = typeof args?.title === "string" ? args.title : undefined;
+    const body = typeof args?.body === "string" ? args.body : undefined;
+    try {
+      const note = updateNote(id, { title, body });
+      if (!note) return { ok: false, message: "note_not_found" };
+      const { pushSyncItemAsync } = await import("../sync/syncClient.js");
+      pushSyncItemAsync("note", note.id, {
+        title: note.title,
+        body: note.body,
+        createdAt: note.createdAt,
+      });
+      return { ok: true, note };
+    } catch (e: unknown) {
+      return { ok: false, message: e instanceof Error ? e.message : "notes_update_failed" };
+    }
+  });
+
+  ipcMain.handle("notes:delete", async (_e, args) => {
+    const { deleteNote } = await import("../storage/notes.js");
+    const id = typeof args?.id === "string" ? args.id : "";
+    if (!id) return { ok: false, message: "missing_arg:id" };
+    try {
+      const removed = deleteNote(id);
+      if (removed) {
+        const { pushSyncItemAsync } = await import("../sync/syncClient.js");
+        pushSyncItemAsync("note", id, {}, true);
+      }
+      return { ok: removed };
+    } catch (e: unknown) {
+      return { ok: false, message: e instanceof Error ? e.message : "notes_delete_failed" };
+    }
+  });
+
+  // P10.1 — renderer reports focus/blur of a note's body textarea so
+  // focusedFieldDictation.ts can allow Shift+Space dictation into it
+  // (Ripple's own windows are excluded from that path by default).
+  ipcMain.handle("notes:setActiveNote", async (_e, args) => {
+    const { setActiveNoteId } = await import("../state/activeNoteFocus.js");
+    const id = typeof args?.id === "string" ? args.id : null;
+    setActiveNoteId(id);
+    return { ok: true };
   });
 
   ipcMain.handle("command:execute", (_e, args) => {
@@ -934,6 +1120,46 @@ function registerIpc(): void {
     setVoiceSessionActive(active);
     if (!active) setOverlayState("idle");
     return { ok: true };
+  });
+
+  // P11.2 — Flow Bar language menu (renderer-initiated resize, unlike the
+  // other overlay expand* calls which are all pushed from backend events).
+  ipcMain.handle("overlay:expandLanguageMenu", (_e, itemCount: number) => {
+    expandOverlayForLanguageMenu(typeof itemCount === "number" ? itemCount : 8);
+    return { ok: true };
+  });
+
+  ipcMain.handle("overlay:collapseToIndicator", () => {
+    collapseOverlayToIndicator();
+    return { ok: true };
+  });
+
+  // P11.3 — Flow Bar Scratchpad / Notes button.
+  ipcMain.handle("flowBar:openScratchpad", async () => {
+    try {
+      const { handleScratchpadFromFlowBar } = await import("../windows/overlay.js");
+      await handleScratchpadFromFlowBar();
+      return { ok: true };
+    } catch (e: unknown) {
+      return {
+        ok: false,
+        message: e instanceof Error ? e.message : "scratchpad_failed",
+      };
+    }
+  });
+
+  // P11.4 — Flow Bar Transforms wand (same path as F9).
+  ipcMain.handle("flowBar:startTransform", async () => {
+    try {
+      const { handleTransformShortcutPress } = await import("../windows/overlay.js");
+      await handleTransformShortcutPress();
+      return { ok: true };
+    } catch (e: unknown) {
+      return {
+        ok: false,
+        message: e instanceof Error ? e.message : "transform_failed",
+      };
+    }
   });
 
   /** P8b — extension / bridge records email, Slack, etc. file references. */

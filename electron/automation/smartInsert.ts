@@ -39,6 +39,7 @@ import {
   isInstagramTypingBlocked,
 } from "./adapters/instagram/parseInstagramCommand.js";
 import { composeInstagramMessage } from "./adapters/instagram/composeMessage.js";
+import { insertInstagramComposeText } from "./adapters/instagram/instagramComposeInsert.js";
 import {
   isEditOrRephraseCommand,
   isNewEmailCommand,
@@ -206,7 +207,7 @@ export async function smartInsertText(
   const whatsappCompose =
     isWhatsAppTabActive() && isContextualWhatsAppComposeCommand(cmd);
 
-  if ((instagramCompose || isInstagramTypingBlocked(cmd)) && !isEditOrRephraseCommand(cmd)) {
+  if (isInstagramTypingBlocked(cmd) && !isEditOrRephraseCommand(cmd)) {
     throw new Error(
       "Instagram DMs use the open chat composer — on an Instagram DM thread say your message directly",
     );
@@ -224,14 +225,24 @@ export async function smartInsertText(
     return insertWhatsAppComposeText(body);
   }
 
+  if (instagramCompose && !isEditOrRephraseCommand(cmd)) {
+    console.info("[ripple-desktop] IG compose — type into open chat (OS-first)");
+    const body = formatMessageBody(parsed, text.trim() || cmd.trim());
+    return insertInstagramComposeText(body);
+  }
+
   if (
     (isEditOrRephraseCommand(cmd) || isEditIntent()) &&
     !instagramCompose
   ) {
     const formatted = formatMessageBody(parsed, text);
     if (isInstagramTabActive()) {
-      console.info("[ripple-desktop] DM rephrase — replace in composer via extension");
-      return composeInstagramMessage({ text: formatted, send: false });
+      console.info("[ripple-desktop] DM rephrase — replace in composer");
+      return composeInstagramMessage({
+        text: formatted,
+        send: false,
+        replaceAll: true,
+      });
     }
     if (isWhatsAppTabActive()) {
       console.info(
@@ -284,10 +295,17 @@ export async function smartInsertText(
     });
     return detail;
   } catch (e: unknown) {
-    console.warn(
-      "[ripple-desktop] insert ladder exhausted:",
-      e instanceof Error ? e.message : e,
-    );
+    const msg = e instanceof Error ? e.message : String(e);
+    console.warn("[ripple-desktop] insert ladder exhausted:", msg);
+    // Ladder strategies already SendKeys/pasted before failing verify. A second
+    // clipboard paste here was the production double-write (HelloHello / Search).
+    if (
+      /insert_aborted|foreground_changed|native_text_partial|refusing|duplicate/i.test(
+        msg,
+      )
+    ) {
+      throw e instanceof Error ? e : new Error(msg);
+    }
     clipboard.writeText(insertBody);
     await delay(120);
     try {

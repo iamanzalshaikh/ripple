@@ -1194,6 +1194,87 @@ export async function runDesktopCommand(
       };
     }
 
+    // P10.1 — dictate into an open Flow Note via the notes store (not OS
+    // insert). Sticky WhatsApp + Flow Bar blur previously stole this path.
+    {
+      const { getActiveNoteId } = await import("../state/activeNoteFocus.js");
+      const noteId = getActiveNoteId();
+      if (noteId) {
+        const { prepareComposeDictationText } = await import(
+          "../agent/dictation/prepareComposeText.js"
+        );
+        const prepared = await prepareComposeDictationText(input.command, {
+          surface: "note",
+        });
+        const text = prepared.text.trim();
+        if (text) {
+          const { getNote, updateNote } = await import("../storage/notes.js");
+          const existing = getNote(noteId);
+          if (existing) {
+            const sep =
+              existing.body && !/\s$/.test(existing.body) ? " " : "";
+            const body = `${existing.body}${sep}${text}`;
+            const updated = updateNote(noteId, { body });
+            if (updated) {
+              void import("../sync/syncClient.js").then((m) =>
+                m.pushSyncItemAsync("note", updated.id, {
+                  title: updated.title,
+                  body: updated.body,
+                  updatedAt: updated.updatedAt,
+                }),
+              );
+              try {
+                const { getMainWindow } = await import(
+                  "../windows/mainWindow.js"
+                );
+                getMainWindow()?.webContents.send("notes:bodyAppended", {
+                  noteId: updated.id,
+                  body: updated.body,
+                });
+              } catch {
+                /* renderer refresh is best-effort */
+              }
+              console.info(
+                `[ripple-desktop] note compose dictation — appended ${text.length} chars to note ${noteId.slice(0, 8)}`,
+              );
+              recordExecutionTelemetry(
+                input.command,
+                {
+                  intent: "typing",
+                  actions: [{ type: "INSERT_TEXT", data: { text } }],
+                } as never,
+                null,
+                "fast",
+                { detail: "note-compose-dictation" },
+              );
+              logConversationTurn(input.command, "success", {
+                intent: "typing",
+              });
+              broadcastCommandDebug({
+                at: new Date().toISOString(),
+                command: input.command,
+                transcript: input.command,
+                intent: "typing",
+                tools: ["INSERT_TEXT"],
+                tool: "INSERT_TEXT",
+                status: "SUCCESS",
+                result: `Appended into note: ${text.slice(0, 80)}`,
+                source: "note-compose",
+              });
+              return {
+                ok: true,
+                data: {
+                  intent: "typing",
+                  actions: [{ type: "INSERT_TEXT", data: { text } }],
+                  noteId,
+                },
+              };
+            }
+          }
+        }
+      }
+    }
+
     // Focused editable field: correct + type before planner can mis-route
     // chatty speech (e.g. Notepad/Cursor) the way WhatsApp/Gmail already do.
     const focusedCompose = await (async () => {

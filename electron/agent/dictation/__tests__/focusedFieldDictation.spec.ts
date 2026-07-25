@@ -9,6 +9,7 @@ const getFocusContext = vi.fn(() => ({
   windowTitle: "Untitled - Notepad",
 }));
 const isRippleApplicationWindow = vi.fn(() => false);
+const getActiveNoteId = vi.fn((..._args: unknown[]) => null as string | null);
 const prepareComposeDictationText = vi.fn(async (raw: string) => ({
   text: raw,
   kind: "literal",
@@ -25,6 +26,10 @@ vi.mock("../../../focus/focusContext.js", () => ({
   getFocusContext: (...args: unknown[]) => getFocusContext(...args),
   isRippleApplicationWindow: (...args: unknown[]) =>
     isRippleApplicationWindow(...args),
+}));
+
+vi.mock("../../../state/activeNoteFocus.js", () => ({
+  getActiveNoteId: (...args: unknown[]) => getActiveNoteId(...args),
 }));
 
 vi.mock("../prepareComposeText.js", () => ({
@@ -54,6 +59,7 @@ describe("resolveFocusedFieldDictationText", () => {
     isGmailComposeFocused.mockReturnValue(false);
     isInstagramTabActive.mockReturnValue(false);
     isRippleApplicationWindow.mockReturnValue(false);
+    getActiveNoteId.mockReturnValue(null);
     getFocusContext.mockReturnValue({
       processName: "notepad",
       windowTitle: "Untitled - Notepad",
@@ -104,6 +110,40 @@ describe("resolveFocusedFieldDictationText", () => {
       await resolveFocusedFieldDictationText("tell me what happened"),
     ).toBeNull();
     expect(prepareComposeDictationText).not.toHaveBeenCalled();
+  });
+
+  it("blocks dictation into Ripple's own windows by default (e.g. a settings page)", async () => {
+    const { resolveFocusedFieldDictationText } = await import(
+      "../focusedFieldDictation.js"
+    );
+    isRippleApplicationWindow.mockReturnValue(true);
+    expect(await resolveFocusedFieldDictationText("hello there")).toBeNull();
+    expect(prepareComposeDictationText).not.toHaveBeenCalled();
+  });
+
+  it("P10.1: allows dictation into Ripple's own window when a note is actively open", async () => {
+    const { resolveFocusedFieldDictationText } = await import(
+      "../focusedFieldDictation.js"
+    );
+    isRippleApplicationWindow.mockReturnValue(true);
+    getActiveNoteId.mockReturnValue("note-123");
+    const text = await resolveFocusedFieldDictationText("dictate this into my note");
+    expect(text).toContain("dictate this into my note");
+    expect(prepareComposeDictationText).toHaveBeenCalled();
+  });
+
+  it("P10.1: open note wins over sticky WhatsApp tab detection", async () => {
+    const { resolveFocusedFieldDictationText } = await import(
+      "../focusedFieldDictation.js"
+    );
+    isWhatsAppTabActive.mockReturnValue(true);
+    isRippleApplicationWindow.mockReturnValue(true);
+    getActiveNoteId.mockReturnValue("note-123");
+    isEditableFocused.mockResolvedValue(false);
+    const text = await resolveFocusedFieldDictationText(
+      "Meeting with client tomorrow at 3",
+    );
+    expect(text).toContain("Meeting with client");
   });
 
   it("returns null when no editable focus", async () => {

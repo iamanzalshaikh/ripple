@@ -8,6 +8,7 @@ import { DictionaryPage } from "./Dictionary";
 import { SnippetsPage } from "./Snippets";
 import { StylesPage } from "./Styles";
 import { LanguagePage } from "./Language";
+import { NotesPage } from "./Notes";
 
 interface Props {
   user: RippleUser;
@@ -90,7 +91,9 @@ export function HomePage({ user, sessionId }: Props) {
     | "snippets"
     | "styles"
     | "language"
+    | "notes"
   >("dashboard");
+  const [quickCaptureNoteId, setQuickCaptureNoteId] = useState<string | null>(null);
   const [textCommand, setTextCommand] = useState("");
   const [commandBusy, setCommandBusy] = useState(false);
   const [commandResult, setCommandResult] = useState<string | null>(null);
@@ -122,6 +125,21 @@ export function HomePage({ user, sessionId }: Props) {
       .catch(() => undefined);
     return bindEvents();
   }, [view, hydrate, bindEvents]);
+
+  // P10.3 lite — Quick capture hotkey brings this window forward and asks
+  // it to jump straight into a freshly created note.
+  useEffect(() => {
+    return getRippleApi().onIpcEvent?.("notes:quickCapture", (payload) => {
+      const noteId =
+        payload && typeof payload === "object" && "noteId" in payload
+          ? (payload as { noteId?: unknown }).noteId
+          : undefined;
+      if (typeof noteId === "string") {
+        setQuickCaptureNoteId(noteId);
+        setView("notes");
+      }
+    });
+  }, []);
 
   async function runTextCommand() {
     const cmd = textCommand.trim();
@@ -183,6 +201,16 @@ export function HomePage({ user, sessionId }: Props) {
     return <LanguagePage onBack={() => setView("dashboard")} />;
   }
 
+  if (view === "notes") {
+    return (
+      <NotesPage
+        onBack={() => setView("dashboard")}
+        initialNoteId={quickCaptureNoteId}
+        onInitialNoteConsumed={() => setQuickCaptureNoteId(null)}
+      />
+    );
+  }
+
   return (
     <div className="min-h-full bg-zinc-950 text-zinc-100">
       <header className="flex items-start justify-between border-b border-zinc-800 px-8 py-6">
@@ -191,6 +219,13 @@ export function HomePage({ user, sessionId }: Props) {
           <p className="mt-1 text-sm text-zinc-400">Signed in as {user.email}</p>
         </div>
         <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => setView("notes")}
+            className="rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-300 transition hover:border-violet-500 hover:text-white"
+          >
+            Notes
+          </button>
           <button
             type="button"
             onClick={() => setView("language")}

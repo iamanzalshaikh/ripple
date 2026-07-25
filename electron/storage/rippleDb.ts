@@ -254,6 +254,20 @@ function migrateRippleSchema(database: DatabaseSync): void {
     database.exec(`ALTER TABLE user_preferences ADD COLUMN quiet_mode TEXT`);
   }
 
+  // Phase 10.1 — Flow Notes.
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS notes (
+      id TEXT PRIMARY KEY NOT NULL,
+      title TEXT NOT NULL,
+      body TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `);
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS idx_notes_updated_at ON notes(updated_at DESC)
+  `);
+
   database.exec(`
     CREATE TABLE IF NOT EXISTS active_workspace (
       id INTEGER PRIMARY KEY CHECK (id = 1),

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useVoiceCapture } from "../hooks/useVoiceCapture";
 import { getRippleApi } from "../lib/rippleApi";
+import { LANGUAGES } from "../lib/languages";
+import { FlowBar, type FlowBarPhase } from "../components/FlowBar";
 
 type OverlayPhase =
   | "idle"
@@ -50,6 +52,8 @@ export function OverlayPage() {
   const streamIdRef = useRef<string>("");
   const recordingRef = useRef(false);
   const busyRef = useRef(false);
+  /** P7.8 — periodic voice:flush while dictation is listening. */
+  const flushTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const voiceModeRef = useRef<"command" | "dictation" | "transform">("command");
   const [voiceMode, setVoiceMode] = useState<"command" | "dictation" | "transform">(
     "command",
@@ -59,6 +63,12 @@ export function OverlayPage() {
     remainingMs: number;
   } | null>(null);
   const [detectedLanguage, setDetectedLanguage] = useState<string | null>(null);
+
+  // P11.2 — Flow Bar language picker.
+  const [currentLangCode, setCurrentLangCode] = useState("auto");
+  const [langMenuOpen, setLangMenuOpen] = useState(false);
+  const [langBusy, setLangBusy] = useState(false);
+  const [langCustomInput, setLangCustomInput] = useState("");
 
   const voice = useVoiceCapture();
 
@@ -79,6 +89,49 @@ export function OverlayPage() {
       })
       .catch(() => undefined);
   }, []);
+
+  useEffect(() => {
+    void getRippleApi()
+      .language.get()
+      .then((res) => {
+        if (res.ok && res.language) setCurrentLangCode(res.language);
+      })
+      .catch(() => undefined);
+  }, []);
+
+  const openLanguageMenu = useCallback(async () => {
+    // Re-fetch fresh in case it was changed from the full Language settings
+    // page since this bar last loaded.
+    const res = await getRippleApi().language.get().catch(() => ({
+      ok: false as const,
+      language: undefined,
+    }));
+    if (res.ok && res.language) setCurrentLangCode(res.language);
+    setLangCustomInput("");
+    setLangMenuOpen(true);
+    await getRippleApi().expandLanguageMenu(LANGUAGES.length + 1);
+  }, []);
+
+  const closeLanguageMenu = useCallback(async () => {
+    setLangMenuOpen(false);
+    await getRippleApi().collapseToIndicator();
+  }, []);
+
+  const selectLanguage = useCallback(
+    async (code: string) => {
+      const trimmed = code.trim().toLowerCase();
+      if (!trimmed || langBusy) return;
+      setLangBusy(true);
+      try {
+        const res = await getRippleApi().language.set(trimmed);
+        if (res.ok) setCurrentLangCode(res.language ?? trimmed);
+      } finally {
+        setLangBusy(false);
+        await closeLanguageMenu();
+      }
+    },
+    [closeLanguageMenu, langBusy],
+  );
 
   useEffect(() => {
     const api = getRippleApi();
@@ -191,6 +244,10 @@ export function OverlayPage() {
 
   const cancelRecording = useCallback(async () => {
     busyRef.current = false;
+    if (flushTimerRef.current) {
+      clearInterval(flushTimerRef.current);
+      flushTimerRef.current = null;
+    }
     if (recordingRef.current) {
       recordingRef.current = false;
       await voice.stop();
@@ -198,6 +255,7 @@ export function OverlayPage() {
         await getRippleApi().cancelVoice(streamIdRef.current).catch(() => undefined);
       }
     }
+    await getRippleApi().streaming.clear().catch(() => undefined);
     await getRippleApi().setOverlayVoiceActive(false);
     setPhase("idle");
     setError(null);
@@ -207,28 +265,47 @@ export function OverlayPage() {
     if (!recordingRef.current || busyRef.current) return;
     busyRef.current = true;
     recordingRef.current = false;
+    if (flushTimerRef.current) {
+      clearInterval(flushTimerRef.current);
+      flushTimerRef.current = null;
+    }
     setPhase("processing");
 
     try {
-      const { buffer, mimeType, filename } = await voice.stopAndGetBuffer();
+      const { buffer, mimeType, filename, alreadyStreamed } =
+        await voice.stopAndGetBuffer();
 
       // P9.5 — read the language picker fresh each time (cheap local read) so
       // a change takes effect on the very next utterance, no cross-window
       // sync needed. Runs alongside the chunk upload to avoid adding latency.
-      const [chunkRes, languageRes] = await Promise.all([
-        getRippleApi().sendVoiceChunk({
+      const languageRes = await getRippleApi()
+        .language.get()
+        .catch(() => ({ ok: false as const, language: undefined }));
+
+      // P7.8 — if chunks were streamed during recording, don't re-upload the
+      // full blob (would double the server buffer). Only upload when batch.
+      if (!alreadyStreamed) {
+        const chunkRes = await getRippleApi().sendVoiceChunk({
           streamId: streamIdRef.current,
           sessionId: sessionIdRef.current,
           chunk: new Uint8Array(buffer),
           mimeType,
           filename,
-        }),
-        getRippleApi().language.get().catch(() => ({ ok: false as const, language: undefined })),
-      ]);
-      if (!chunkRes.ok) {
-        setError(chunkRes.message ?? "Failed to upload audio");
-        setPhase("error");
-        return;
+        });
+        if (!chunkRes.ok) {
+          setError(chunkRes.message ?? "Failed to upload audio");
+          setPhase("error");
+          return;
+        }
+      } else {
+        // Final tiny flush so trailing audio is transcribed before voice:end.
+        await getRippleApi()
+          .flushVoice({
+            streamId: streamIdRef.current,
+            sessionId: sessionIdRef.current,
+            language: languageRes.ok ? languageRes.language : undefined,
+          })
+          .catch(() => undefined);
       }
 
       const endRes = await getRippleApi().endVoice({
@@ -287,6 +364,8 @@ export function OverlayPage() {
     await getRippleApi().setOverlayVoiceActive(true);
     setPhase("listening");
 
+    // P7.8 PAUSED — no live chunk upload / flush / progressive insert.
+    // Batch path: upload once on stop → voice:end → insert (pre-7.8 behavior).
     try {
       // P9.6 — read fresh each time, same reasoning as the language pref:
       // cheap local read, always reflects the latest toggle with no
@@ -297,11 +376,19 @@ export function OverlayPage() {
       }));
       const quietOn = quietRes.ok ? quietRes.quietMode === true : false;
       console.info(
-        `[ripple-overlay] mic capture quietMode=${quietOn ? "ON" : "OFF"}`,
+        `[ripple-overlay] mic capture quietMode=${quietOn ? "ON" : "OFF"} streaming=OFF`,
       );
-      await voice.start({ quiet: quietOn });
+
+      await voice.start({
+        quiet: quietOn,
+      });
     } catch (e: unknown) {
       recordingRef.current = false;
+      if (flushTimerRef.current) {
+        clearInterval(flushTimerRef.current);
+        flushTimerRef.current = null;
+      }
+      await getRippleApi().streaming.clear().catch(() => undefined);
       await getRippleApi().setOverlayVoiceActive(false);
       setError(
         e instanceof Error ? e.message : "Microphone permission denied",
@@ -345,8 +432,6 @@ export function OverlayPage() {
   }, [voice]);
 
   const label = error && phase === "error" ? error.slice(0, 40) : LABELS[phase];
-  const modeBanner =
-    voiceMode === "transform" ? "Transforms" : voiceMode === "dictation" ? "Dictation" : "Command";
   const sessionBadge =
     voiceMode === "dictation" && sessionInfo
       ? `${sessionInfo.utteranceCount} · ${Math.max(1, Math.ceil(sessionInfo.remainingMs / 60_000))}m left`
@@ -395,6 +480,67 @@ export function OverlayPage() {
     },
     [repairBusy],
   );
+
+  if (langMenuOpen) {
+    return (
+      <div className="flex h-full w-full flex-col gap-2 overflow-hidden p-2.5">
+        <div className="flex shrink-0 items-center justify-between">
+          <p className="text-[10px] font-medium uppercase tracking-wide text-violet-200/90">
+            Dictation language
+          </p>
+          <button
+            type="button"
+            className="no-drag text-[10px] text-zinc-500 hover:text-zinc-300"
+            onClick={() => void closeLanguageMenu()}
+          >
+            Close
+          </button>
+        </div>
+        <div className="min-h-0 flex-1 space-y-1 overflow-y-auto">
+          {LANGUAGES.map((lang) => {
+            const active = lang.code === currentLangCode;
+            return (
+              <button
+                key={lang.code}
+                type="button"
+                disabled={langBusy}
+                onClick={() => void selectLanguage(lang.code)}
+                className={`no-drag flex w-full items-center justify-between rounded-md px-2 py-1 text-left text-[11px] transition disabled:opacity-50 ${
+                  active
+                    ? "bg-violet-950/60 text-white"
+                    : "text-zinc-300 hover:bg-zinc-900"
+                }`}
+              >
+                {lang.label}
+                {active ? <span className="text-violet-400">✓</span> : null}
+              </button>
+            );
+          })}
+        </div>
+        <div className="flex shrink-0 gap-1.5">
+          <input
+            type="text"
+            value={langCustomInput}
+            onChange={(e) => setLangCustomInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void selectLanguage(langCustomInput);
+            }}
+            placeholder="Other (ISO code, e.g. it)"
+            maxLength={8}
+            className="no-drag min-w-0 flex-1 rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-[11px] text-zinc-100 placeholder:text-zinc-500 focus:border-violet-500 focus:outline-none"
+          />
+          <button
+            type="button"
+            disabled={langBusy || !langCustomInput.trim()}
+            onClick={() => void selectLanguage(langCustomInput)}
+            className="no-drag rounded-md bg-violet-600 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-violet-500 disabled:opacity-50"
+          >
+            Set
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (phase === "code-repair" && repairPanel) {
     return (
@@ -505,62 +651,24 @@ export function OverlayPage() {
   }
 
   return (
-    <div
-      className="drag-region flex h-full w-full items-center justify-center"
-      title={hotkeyHint}
-    >
-      <div className="voice-pill flex items-center gap-2.5 rounded-full border border-violet-500/40 bg-zinc-950/95 px-3.5 py-2 shadow-[0_8px_32px_rgba(0,0,0,0.55),0_0_24px_rgba(124,58,237,0.2)]">
-        <span
-          className={`rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide ${
-            voiceMode === "transform"
-              ? "bg-amber-500/20 text-amber-300"
-              : voiceMode === "dictation"
-                ? "bg-emerald-500/20 text-emerald-300"
-                : "bg-violet-500/20 text-violet-300"
-          }`}
-        >
-          {modeBanner}
-        </span>
-        {sessionBadge ? (
-          <span
-            className="whitespace-nowrap text-[9px] font-medium text-zinc-500"
-            title="Dictation session — utterances · time left before a new session starts"
-          >
-            {sessionBadge}
-          </span>
-        ) : null}
-        {languageBadge ? (
-          <span
-            className="whitespace-nowrap text-[9px] font-medium text-zinc-500"
-            title="Language Whisper detected for this utterance"
-          >
-            {languageBadge}
-          </span>
-        ) : null}
-        <div className="relative flex h-7 w-7 shrink-0 items-center justify-center">
-          {phase === "listening" ? (
-            <>
-              <span className="pulse-ring absolute inset-0 rounded-full bg-violet-500/40" />
-              <span className="relative z-10 h-2.5 w-2.5 rounded-full bg-violet-400 shadow-[0_0_12px_rgba(167,139,250,0.95)]" />
-            </>
-          ) : phase === "processing" ? (
-            <span className="indicator-spinner h-5 w-5 rounded-full border-2 border-violet-400/30 border-t-violet-400" />
-          ) : phase === "result" ? (
-            <span className="text-sm font-semibold text-emerald-400">✓</span>
-          ) : phase === "error" ? (
-            <span className="text-sm font-bold text-amber-400">!</span>
-          ) : (
-            <span className="h-2 w-2 rounded-full bg-zinc-500" />
-          )}
-        </div>
-        <span
-          className={`max-w-[150px] truncate text-xs font-medium ${
-            phase === "error" ? "text-amber-300" : "text-zinc-100"
-          }`}
-        >
-          {label}
-        </span>
-      </div>
-    </div>
+    <FlowBar
+      mode={voiceMode}
+      // Safe: "clarify" / "code-repair" phases return earlier above, so by
+      // this point `phase` can only be one of FlowBarPhase's five values.
+      phase={phase as FlowBarPhase}
+      statusText={label}
+      hotkeyHint={hotkeyHint}
+      languageCode={currentLangCode}
+      languageBusy={langBusy}
+      onOpenLanguageMenu={() => void openLanguageMenu()}
+      onOpenScratchpad={() => {
+        void getRippleApi().flowBar.openScratchpad();
+      }}
+      onStartTransform={() => {
+        void getRippleApi().flowBar.startTransform();
+      }}
+      sessionBadge={sessionBadge}
+      detectedLanguageBadge={languageBadge}
+    />
   );
 }

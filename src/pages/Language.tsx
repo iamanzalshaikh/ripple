@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { getRippleApi } from "../lib/rippleApi";
+import { LANGUAGES } from "../lib/languages";
 
 interface Props {
   onBack: () => void;
@@ -11,24 +12,6 @@ interface Props {
  * language sends it as a per-request override on every future utterance
  * without needing to restart the app.
  */
-const LANGUAGES: Array<{ code: string; label: string }> = [
-  { code: "auto", label: "Auto-detect" },
-  { code: "en", label: "English" },
-  { code: "hi", label: "Hindi" },
-  { code: "ur", label: "Urdu" },
-  { code: "ta", label: "Tamil" },
-  { code: "si", label: "Sinhala" },
-  { code: "bn", label: "Bengali" },
-  { code: "es", label: "Spanish" },
-  { code: "fr", label: "French" },
-  { code: "de", label: "German" },
-  { code: "pt", label: "Portuguese" },
-  { code: "ar", label: "Arabic" },
-  { code: "zh", label: "Chinese" },
-  { code: "ja", label: "Japanese" },
-  { code: "ko", label: "Korean" },
-  { code: "ru", label: "Russian" },
-];
 
 export function LanguagePage({ onBack }: Props) {
   const [current, setCurrent] = useState<string>("auto");

@@ -117,6 +117,8 @@ class RippleSocketManager {
 
     this.socket.on("voice:partial_transcript", (msg) => {
       this.broadcast("voice:partial_transcript", msg);
+      // P7.8 — progressive insert in main (don't wait for overlay UI).
+      void this.handlePartialTranscript(msg);
     });
 
     this.socket.on("command:result", (msg) => {
@@ -198,6 +200,40 @@ class RippleSocketManager {
     return res;
   }
 
+  private async handlePartialTranscript(msg: unknown): Promise<void> {
+    try {
+      const root = msg as {
+        success?: boolean;
+        data?: { text?: string; stream_id?: string; streamId?: string };
+        text?: string;
+        stream_id?: string;
+        streamId?: string;
+      };
+      const data = root?.data ?? root;
+      const text =
+        typeof data?.text === "string"
+          ? data.text
+          : typeof root?.text === "string"
+            ? root.text
+            : "";
+      const streamId =
+        (typeof data?.stream_id === "string" && data.stream_id) ||
+        (typeof data?.streamId === "string" && data.streamId) ||
+        (typeof root?.stream_id === "string" && root.stream_id) ||
+        "";
+      if (!text.trim() || !streamId) return;
+      const { applyStreamingPartial } = await import(
+        "../agent/dictation/streamingInsert.js"
+      );
+      await applyStreamingPartial({ streamId, text });
+    } catch (e: unknown) {
+      console.warn(
+        "[ripple-stream] partial handler error:",
+        e instanceof Error ? e.message : e,
+      );
+    }
+  }
+
   async sendVoiceChunk(input: VoiceChunkInput): Promise<{
     stream_id: string;
     received_bytes: number;
@@ -215,6 +251,43 @@ class RippleSocketManager {
       filename: input.filename ?? "voice.webm",
       is_final: input.isFinal ?? false,
     });
+    return res.data;
+  }
+
+  async flushVoice(
+    streamId: string,
+    sessionId?: string,
+    language?: string,
+  ): Promise<unknown> {
+    const res = await this.emitWithAck<{ success: true; data: unknown }>(
+      "voice:flush",
+      {
+        stream_id: streamId,
+        session_id: sessionId,
+        upload_audio: false,
+        language,
+      },
+    );
+    // Backend emitOrAck only acks when a callback is present — it does not
+    // also emit voice:partial_transcript. Apply progressive insert from the
+    // ack payload here so live typing works.
+    //
+    // Bug fix (7.8 finalization) — this used to be fire-and-forget
+    // ("void this.handlePartialTranscript(...)"). stopRecording's final
+    // flush-before-endVoice call awaits flushVoice(), but a fire-and-forget
+    // insert wasn't covered by that await: executeDictation.ts's
+    // takeStreamingProvisional()+reconcile could then run concurrently with
+    // a still-in-flight progressive keystroke insert from this same final
+    // flush, risking extra characters typed into the field after the
+    // reconciled final text landed. Awaiting here means the caller's await
+    // on flushVoice() genuinely waits for any resulting insert to finish.
+    const data = res.data as { text?: string; stream_id?: string } | undefined;
+    if (data?.text?.trim()) {
+      await this.handlePartialTranscript({
+        success: true,
+        data: { text: data.text, stream_id: data.stream_id ?? streamId },
+      });
+    }
     return res.data;
   }
 

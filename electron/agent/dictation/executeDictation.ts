@@ -135,6 +135,14 @@ export async function executeDictationUtterance(
   // Capture the target app now, before hideOverlay()/typing changes focus —
   // Styles (P7.3) needs to know which app the text is actually going into.
   const processName = resolveTypingFocusTarget()?.processName;
+
+  // P7.8 — take provisional typed-so-far before prepare/insert so we can
+  // reconcile instead of double-inserting.
+  const { takeStreamingProvisional, reconcileStreamingFinal } = await import(
+    "./streamingInsert.js"
+  );
+  const streamSnap = takeStreamingProvisional();
+
   const { prepareComposeDictationText } = await import("./prepareComposeText.js");
   // Snippet match must use the *current* utterance, not an accumulated revision
   // buffer — otherwise "sig" never expands once prior text is in the buffer.
@@ -168,7 +176,72 @@ export async function executeDictationUtterance(
   try {
     hideOverlay();
     await new Promise((r) => setTimeout(r, 120));
-    await runInsertText({ text: confirmed.text });
+
+    // P7.8 — if we already typed a provisional hypothesis, reconcile in place
+    // (notes + OS). Skip the normal full insert when reconcile handled it.
+    if (streamSnap && (streamSnap.provisional || streamSnap.surface === "note")) {
+      const outcome = await reconcileStreamingFinal({
+        finalText: confirmed.text,
+        snap: streamSnap,
+      });
+      if (outcome === "noop" || outcome === "replaced") {
+        logAndRecordLanguageTelemetry({
+          intent: "dictation",
+          ok: true,
+          inserted: true,
+          chars: confirmed.text.length,
+          requestedLanguage: options?.requestedLanguage,
+          detectedLanguage: options?.detectedLanguage,
+          latencyMs: Date.now() - startedAt,
+        });
+        return {
+          ok: true,
+          mode: "dictation",
+          finalText: confirmed.text,
+          inserted: true,
+          correctionKind: prepared.kind,
+          session: session ?? undefined,
+        };
+      }
+      // outcome === "inserted" → fall through to normal insert (e.g. WhatsApp skip)
+    }
+
+    // P10.1 — open Flow Note: append via notes store (never OS/WhatsApp insert).
+    const { getActiveNoteId } = await import("../../state/activeNoteFocus.js");
+    const noteId = getActiveNoteId();
+    if (noteId) {
+      const { getNote, updateNote } = await import("../../storage/notes.js");
+      const existing = getNote(noteId);
+      if (!existing) {
+        throw new Error("active_note_missing");
+      }
+      const sep = existing.body && !/\s$/.test(existing.body) ? " " : "";
+      const body = `${existing.body}${sep}${confirmed.text}`;
+      const updated = updateNote(noteId, { body });
+      if (!updated) throw new Error("note_update_failed");
+      void import("../../sync/syncClient.js").then((m) =>
+        m.pushSyncItemAsync("note", updated.id, {
+          title: updated.title,
+          body: updated.body,
+          updatedAt: updated.updatedAt,
+        }),
+      );
+      try {
+        const { getMainWindow } = await import("../../windows/mainWindow.js");
+        getMainWindow()?.webContents.send("notes:bodyAppended", {
+          noteId: updated.id,
+          body: updated.body,
+        });
+      } catch {
+        /* best-effort UI refresh */
+      }
+      console.info(
+        `[ripple-desktop] dictation → note ${noteId.slice(0, 8)} appended ${confirmed.text.length} chars`,
+      );
+    } else {
+      await runInsertText({ text: confirmed.text });
+    }
+
     logAndRecordLanguageTelemetry({
       intent: "dictation",
       ok: true,

@@ -39,6 +39,11 @@ function filenameForMime(mimeType: string): string {
 export interface VoiceCaptureStartOptions {
   /** P9.6 — boost + de-noise-suppress for soft/whispered speech. */
   quiet?: boolean;
+  /**
+   * P7.8 — called for each MediaRecorder timeslice while recording so the
+   * client can upload chunks for mid-utterance `voice:flush` partials.
+   */
+  onChunk?: (chunk: ArrayBuffer, mimeType: string) => void;
 }
 
 export function useVoiceCapture() {
@@ -48,6 +53,9 @@ export function useVoiceCapture() {
   const audioContextRef = useRef<AudioContext | null>(null);
   const partsRef = useRef<Blob[]>([]);
   const mimeTypeRef = useRef("audio/webm");
+  const onChunkRef = useRef<VoiceCaptureStartOptions["onChunk"]>(undefined);
+  /** True when chunks were already uploaded during recording (skip full re-upload on stop). */
+  const streamedChunksRef = useRef(false);
 
   const stopTracks = useCallback(() => {
     streamRef.current?.getTracks().forEach((t) => t.stop());
@@ -65,6 +73,8 @@ export function useVoiceCapture() {
   const start = useCallback(
     async (options?: VoiceCaptureStartOptions): Promise<void> => {
       const quiet = options?.quiet === true;
+      onChunkRef.current = options?.onChunk;
+      streamedChunksRef.current = false;
       const micStream = await navigator.mediaDevices.getUserMedia({
         audio: quiet
           ? {
@@ -108,7 +118,16 @@ export function useVoiceCapture() {
       recorderRef.current = recorder;
 
       recorder.ondataavailable = (ev) => {
-        if (ev.data.size > 0) partsRef.current.push(ev.data);
+        if (ev.data.size > 0) {
+          partsRef.current.push(ev.data);
+          const cb = onChunkRef.current;
+          if (cb) {
+            streamedChunksRef.current = true;
+            void ev.data.arrayBuffer().then((buf) => {
+              cb(buf, mimeTypeRef.current);
+            });
+          }
+        }
       };
 
       recorder.start(CHUNK_MS);
@@ -117,7 +136,9 @@ export function useVoiceCapture() {
     [],
   );
 
-  const stopAndGetBuffer = useCallback(async (): Promise<VoiceRecordingResult> => {
+  const stopAndGetBuffer = useCallback(async (): Promise<
+    VoiceRecordingResult & { alreadyStreamed: boolean }
+  > => {
     const recorder = recorderRef.current;
     if (!recorder || recorder.state === "inactive") {
       stopTracks();
@@ -143,10 +164,13 @@ export function useVoiceCapture() {
 
     recorderRef.current = null;
     stopTracks();
+    onChunkRef.current = undefined;
 
     const mimeType = mimeTypeRef.current || recorder.mimeType || "audio/webm";
     const blob = new Blob(partsRef.current, { type: mimeType });
+    const alreadyStreamed = streamedChunksRef.current;
     partsRef.current = [];
+    streamedChunksRef.current = false;
 
     if (!blob.size) {
       throw new Error("No audio captured");
@@ -156,6 +180,7 @@ export function useVoiceCapture() {
       buffer: await blob.arrayBuffer(),
       mimeType,
       filename: filenameForMime(mimeType),
+      alreadyStreamed,
     };
   }, [stopTracks]);
 
@@ -179,4 +204,4 @@ export function useVoiceCapture() {
     isRecording,
     getMimeType: () => mimeTypeRef.current || "audio/webm",
   };
-};
+}

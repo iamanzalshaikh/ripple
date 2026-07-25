@@ -275,6 +275,57 @@ export async function apiCommandHistory(
   }
 }
 
+// Phase 9.1 — cross-device sync.
+export type SyncPushItem = {
+  kind: string;
+  key: string;
+  payload: unknown;
+  updatedAt: string;
+  deleted?: boolean;
+};
+
+export type SyncPullItem = {
+  kind: string;
+  key: string;
+  payload: unknown;
+  deleted: boolean;
+  updatedAt: string;
+};
+
+export async function apiSyncPush(
+  accessToken: string,
+  items: SyncPushItem[],
+): Promise<ApiResponse<{ applied: number; skipped: number }>> {
+  try {
+    const res = await apiFetch(`${API_BASE}/sync/push`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ items }),
+    });
+    return parseJson(res);
+  } catch {
+    return connectionError();
+  }
+}
+
+export async function apiSyncPull(
+  accessToken: string,
+  since?: string,
+): Promise<ApiResponse<{ items: SyncPullItem[]; serverTime: string }>> {
+  try {
+    const params = since ? `?since=${encodeURIComponent(since)}` : "";
+    const res = await apiFetch(`${API_BASE}/sync/pull${params}`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    return parseJson(res);
+  } catch {
+    return connectionError();
+  }
+}
+
 export async function apiExecuteCommand(
   accessToken: string,
   args: {

@@ -227,10 +227,29 @@ Ship when Phase 1–5 + §6 matrix are all green.
 | 7 | Ctrl+Space → open chrome | Opens Chrome | [ ] |
 | 8 | Alt+Space → no workflow spam | No planner | [ ] |
 | 9 | Focus restore after overlay | Correct field | [ ] |
-      Www.microsoft.com.
+
+---
+
+## 7. Phase 7 — Personalization (Snippets / Styles / Dictionary)
+
+| # | Task | Effort | Depends on |
+|---|------|--------|------------|
+| 7.1 | Stronger filler/punct/list cleanup | M | MVP |
+| 7.2a | Snippet store | S | — |
+| 7.2b | Voice-trigger for snippets | M | 7.2a |
+| 7.2c | Snippet insert via ladder | S | 7.2b |
+| 7.3a | Per-app tone profiles | S | — |
+| 7.3b | Tone in rewrite layers | M | 7.3a |
+| 7.4a | Dictionary UI | M | backend |
+| 7.4b | Manual dictionary CRUD | S | 7.4a |
+| 7.5 | Longer sessions (~20 min) | M | — |
+| 7.6 | More apps: Notion, Word, Docs, Discord, Slack | L | Phase 1 |
+| 7.7 | Nearby on-screen text → bias name/term spelling | L | MVP insert + UIA |
+| 7.8 | Streaming / live type-as-you-speak | XL | STT partials + progressive insert |
 
 **Ship gate:** Snippets + Styles usable E2E; dictionary UI shipped; ≥3 new apps proven live.  
-**Note:** Wispr Styles = English + desktop first — match that before expanding.
+**Note:** Wispr Styles = English + desktop first — match that before expanding.  
+**Follow-ups:** 7.7 landed (`screenNameBias.ts`); **7.8 PAUSED** (default OFF — was damaging focused editors; set `RIPPLE_P85_STREAMING_INSERT=1` only after real streaming STT).
 
 ---
 
@@ -292,7 +311,8 @@ Ship when Phase 1–5 + §6 matrix are all green.
 | 11.3 | Scratchpad / Notes button | S | 10.1 |
 | 11.4 | Transforms wand on selection | S | Phase 8 |
 
-**Ship gate:** Flow Bar replaces overlay everywhere; re-run §6 matrix with zero MVP regression.
+**Ship gate:** Flow Bar replaces overlay everywhere; re-run §6 matrix with zero MVP regression.  
+**Windows order after 11.3/11.4:** 7.7 (screen name bias) → 7.8 (live type-as-you-speak) → 10.2 meeting → 12 → 13.
 
 ---
 
@@ -433,6 +453,9 @@ Then start Phase 7.
 | 2026-07-23 | Full parity Phases 7–13 added |
 | 2026-07-23 | Phase 12 + 13 ship gates added |
 | 2026-07-23 | **ONE final plan:** this file supersedes MVP + Full Parity split docs |
+| 2026-07-25 | Restored missing §7; added 7.7 (screen name bias) + 7.8 (live type); Phase 11.3/11.4 Flow Bar buttons |
+| 2026-07-25 | 7.7 + 7.8 implemented on Windows (screen bias; streaming insert default ON) |
+| 2026-07-25 | **7.8 paused** — streaming insert default OFF (was damaging open editors); batch dictation restored |
 
 ---
 

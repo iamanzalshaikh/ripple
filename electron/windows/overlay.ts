@@ -10,8 +10,12 @@ import { resolvePreloadPath } from "../utils/preloadPath.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-const INDICATOR_WIDTH = 220;
-const INDICATOR_HEIGHT = 56;
+// P11.1 rebuild — sized for the Flow Bar's icon ring + waveform + monospace
+// status text + divider + language/session badges (the old plain pill was
+// narrower and shorter; this redesign needs the extra room).
+// P11.3/11.4 — room for language badge + Scratchpad + Transforms wand.
+const INDICATOR_WIDTH = 328;
+const INDICATOR_HEIGHT = 60;
 const BOTTOM_MARGIN = 32;
 
 let overlayWindow: BrowserWindow | null = null;
@@ -141,6 +145,33 @@ export function expandOverlayForDisambiguation(itemCount: number): void {
   overlayWindow.setBounds({ x, y, width, height });
   overlayWindow.showInactive();
   overlayWindow.setAlwaysOnTop(true, "screen-saver");
+}
+
+/**
+ * P11.2 — Flow Bar language picker. Renderer-initiated (button click), unlike
+ * the other expand* functions here which are all pushed from backend events.
+ * Briefly focusable so the menu buttons reliably receive clicks, same as
+ * expandOverlayForCodeRepair.
+ */
+export function expandOverlayForLanguageMenu(itemCount: number): void {
+  if (!overlayWindow || overlayWindow.isDestroyed()) return;
+  const display = screen.getPrimaryDisplay();
+  const area = display.workArea;
+  const width = 260;
+  const height = Math.min(360, 108 + Math.max(1, itemCount) * 28);
+  const x = Math.round(area.x + (area.width - width) / 2);
+  const y = Math.round(area.y + area.height - height - BOTTOM_MARGIN);
+  overlayWindow.setBounds({ x, y, width, height });
+  overlayWindow.setFocusable(true);
+  overlayWindow.showInactive();
+  overlayWindow.setAlwaysOnTop(true, "screen-saver");
+}
+
+/** Collapse back to the normal small pill after a Flow Bar menu closes. */
+export function collapseOverlayToIndicator(): void {
+  if (!overlayWindow || overlayWindow.isDestroyed()) return;
+  overlayWindow.setFocusable(false);
+  positionIndicator(overlayWindow);
 }
 
 /** Larger overlay for the code-repair fix panel (error + actions). */
@@ -306,5 +337,86 @@ export async function handleTransformShortcutPress(): Promise<void> {
     setTimeout(() => hideOverlay(), 2500);
   } finally {
     transformHotkeyBusy = false;
+  }
+}
+
+let quickCaptureBusy = false;
+
+async function openNoteInMainWindow(note: {
+  id: string;
+  title: string;
+  body: string;
+  createdAt: string;
+}): Promise<void> {
+  const { setActiveNoteId } = await import("../state/activeNoteFocus.js");
+  setActiveNoteId(note.id);
+
+  void import("../sync/syncClient.js").then((m) =>
+    m.pushSyncItemAsync("note", note.id, {
+      title: note.title,
+      body: note.body,
+      createdAt: note.createdAt,
+    }),
+  );
+
+  const { showMainWindow, getMainWindow } = await import("../windows/mainWindow.js");
+  showMainWindow();
+  getMainWindow()?.webContents.send("notes:quickCapture", { noteId: note.id });
+}
+
+/**
+ * P10.3 lite — Quick capture hotkey: create a note, bring the main window
+ * to the Notes editor for it, and start dictating into it immediately.
+ * Windows-only equivalent of the iOS widget/Action Button version (out of
+ * scope here).
+ */
+export async function handleQuickCaptureShortcutPress(): Promise<void> {
+  if (voiceSessionActive || quickCaptureBusy) return;
+  quickCaptureBusy = true;
+  try {
+    const { createNote } = await import("../storage/notes.js");
+    const note = createNote({ title: "Quick capture", body: "" });
+    await openNoteInMainWindow(note);
+
+    // Give the renderer time to switch to the Notes editor and focus the
+    // body textarea (which self-reports via notes:setActiveNote) before
+    // starting dictation — otherwise focusedFieldDictation's editable-focus
+    // check can fire too early and reject the utterance.
+    setTimeout(() => {
+      void handleShortcutPress("dictation");
+    }, 550);
+  } catch (err) {
+    console.error("[ripple-desktop] Quick capture failed:", err);
+  } finally {
+    quickCaptureBusy = false;
+  }
+}
+
+/**
+ * P11.3 — Flow Bar Scratchpad / Notes button.
+ * Opens (or creates) a scratchpad note and routes dictation into it.
+ * If a voice session is already running, the next insert lands in the note
+ * without restarting the mic. If idle, starts dictation after the editor opens.
+ */
+export async function handleScratchpadFromFlowBar(): Promise<void> {
+  if (quickCaptureBusy) return;
+  quickCaptureBusy = true;
+  try {
+    const { createNote } = await import("../storage/notes.js");
+    const note = createNote({ title: "Scratchpad", body: "" });
+    await openNoteInMainWindow(note);
+    console.info(
+      `[ripple-desktop] Flow Bar scratchpad — note ${note.id.slice(0, 8)} (voice=${voiceSessionActive})`,
+    );
+
+    if (!voiceSessionActive) {
+      setTimeout(() => {
+        void handleShortcutPress("dictation");
+      }, 550);
+    }
+  } catch (err) {
+    console.error("[ripple-desktop] Flow Bar scratchpad failed:", err);
+  } finally {
+    quickCaptureBusy = false;
   }
 }
