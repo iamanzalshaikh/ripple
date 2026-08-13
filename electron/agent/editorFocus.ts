@@ -1,18 +1,22 @@
 import {
+  isDesktopShellForeground,
   isWeakFocusContext,
   restoreFocusContext,
   resolveTypingFocusTarget,
 } from "../focus/focusContext.js";
 import { isSaveDialogModalLocked, matchesMainDocumentA11y } from "../focus/saveDialogMode.js";
 import {
+  clickBrowserComposerNative,
   focusWindowByHwnd,
   getFocusedA11yElement,
   getForegroundWindow,
   getCursorPositionNative,
-  getWindowRectCenter,
   getWindowUnderCursorNative,
   mouseClickNative,
+  type ComposerClickResult,
 } from "../native/win32Bridge.js";
+
+const FOCUS_DRIFT_LOG = "[ripple-focus-drift]";
 
 function isEditLikeControl(controlType?: string): boolean {
   const c = (controlType ?? "").toLowerCase();
@@ -59,6 +63,134 @@ export function isClassicTextEditorProcess(processName: string): boolean {
   return p === "notepad" || p.includes("wordpad") || p.includes("mspaint");
 }
 
+export function isBrowserProcess(processName: string): boolean {
+  const p = (processName ?? "").toLowerCase();
+  return (
+    p === "chrome" ||
+    p === "msedge" ||
+    p.includes("firefox") ||
+    p === "brave" ||
+    p === "opera"
+  );
+}
+
+function isOmniboxA11y(a11y: {
+  name?: string;
+  className?: string;
+  automationId?: string;
+} | null): boolean {
+  if (!a11y) return false;
+  const name = (a11y.name ?? "").toLowerCase();
+  const cls = (a11y.className ?? "").toLowerCase();
+  const aid = (a11y.automationId ?? "").toLowerCase();
+  return (
+    name.includes("address and search") ||
+    cls.includes("omnibox") ||
+    /^view_\d+$/.test(aid)
+  );
+}
+
+function logComposerFocusDrift(
+  kind: string,
+  target: { processName: string; hwnd: number },
+  result: ComposerClickResult | null,
+  extra?: string,
+): void {
+  const parts = [
+    kind,
+    `target=${target.processName}`,
+    `hwnd=${target.hwnd}`,
+    result?.method ? `method=${result.method}` : null,
+    result?.reason ? `reason=${result.reason}` : null,
+    result?.x != null && result?.y != null
+      ? `click=(${result.x},${result.y})`
+      : null,
+    result?.insideWin != null ? `insideWin=${result.insideWin}` : null,
+    result?.pointOnTarget != null
+      ? `pointOnTarget=${result.pointOnTarget}`
+      : null,
+    result?.underProc ? `underProc=${result.underProc}` : null,
+    result?.underTitle
+      ? `underTitle="${result.underTitle.slice(0, 40)}"`
+      : null,
+    result?.fgProc ? `fgProc=${result.fgProc}` : null,
+    result?.fgTitle ? `fgTitle="${result.fgTitle.slice(0, 40)}"` : null,
+    result?.winLeft != null
+      ? `winRect=(${result.winLeft},${result.winTop})-(${result.winRight},${result.winBottom})`
+      : null,
+    extra ?? null,
+  ].filter(Boolean);
+  console.warn(`${FOCUS_DRIFT_LOG} ${parts.join(" ")}`);
+}
+
+/**
+ * Focus the web chat/message composer via UIA (Google Chat, WhatsApp Web, …).
+ * Prefer SetFocus; refuse physical clicks that would land outside the target HWND
+ * (multi-monitor UIA coords have hit the desktop ListView / Program Manager).
+ */
+export async function ensureBrowserComposerFocus(): Promise<boolean> {
+  const target = resolveTypingFocusTarget();
+  if (!target?.hwnd) return true;
+  const browser =
+    target.isBrowser === true || isBrowserProcess(target.processName);
+  if (!browser) return true;
+
+  const a11y = await getFocusedA11yElement();
+  if (isEditLikeControl(a11y?.controlType) && !isOmniboxA11y(a11y)) {
+    return true;
+  }
+
+  const result = await clickBrowserComposerNative({ hwnd: target.hwnd });
+  if (result?.ok) {
+    console.info(
+      `[ripple-desktop] composer focus → ${target.processName}` +
+        ` method=${result.method ?? "?"} (${result.x ?? "?"},${result.y ?? "?"})` +
+        ` name="${(result.name ?? "").slice(0, 40)}"`,
+    );
+    await new Promise((r) => setTimeout(r, 220));
+
+    const fg = await getForegroundWindow();
+    if (fg && isDesktopShellForeground(fg)) {
+      logComposerFocusDrift("composer_left_shell_after_focus", target, {
+        ...result,
+        fgProc: fg.processName,
+        fgTitle: fg.windowTitle,
+      });
+      await restoreFocusContext();
+      return false;
+    }
+
+    const after = await getFocusedA11yElement();
+    if (
+      after?.controlType?.toLowerCase().includes("listitem") &&
+      (fg?.processName ?? "").toLowerCase() === "explorer"
+    ) {
+      logComposerFocusDrift(
+        "composer_focus_desktop_listitem",
+        target,
+        result,
+        `a11y="${(after.name ?? "").slice(0, 40)}"`,
+      );
+      await restoreFocusContext();
+      return false;
+    }
+
+    return true;
+  }
+
+  if (
+    result?.reason === "point_outside_hwnd" ||
+    result?.reason === "clicked_shell"
+  ) {
+    logComposerFocusDrift("composer_click_refused_or_shell", target, result);
+  } else {
+    console.warn(
+      `[ripple-desktop] composer click missed — ${result?.reason ?? "unknown"} (hwnd=${target.hwnd})`,
+    );
+  }
+  return false;
+}
+
 function editorClickOffsetY(processName: string): number {
   if (isClassicTextEditorProcess(processName)) return 55;
   return 80;
@@ -74,6 +206,7 @@ function hwndMatches(
 async function clickEditorBody(
   target: NonNullable<ReturnType<typeof resolveTypingFocusTarget>>,
 ): Promise<void> {
+  const { getWindowRectCenter } = await import("../native/win32Bridge.js");
   const center = await getWindowRectCenter(target.hwnd);
   if (!center) return;
   const clickY = Math.round(center.y + editorClickOffsetY(target.processName));
@@ -124,6 +257,22 @@ export async function ensureEditorKeyboardFocus(opts?: {
     return;
   }
 
+  // Clipboard paste path: restore FG; only re-target composer if not already in edit.
+  // Avoids a second physical click after prepareDictationInsertFocus (shell-steal risk).
+  if (
+    opts?.clipboardOp &&
+    (target.isBrowser || isBrowserProcess(target.processName))
+  ) {
+    await restoreFocusContext();
+    await new Promise((r) => setTimeout(r, 180));
+    const a11y = await getFocusedA11yElement();
+    if (isEditLikeControl(a11y?.controlType) && !isOmniboxA11y(a11y)) {
+      return;
+    }
+    await ensureBrowserComposerFocus();
+    return;
+  }
+
   await restoreFocusContext();
 
   const isNav = isNavigationInput(opts);
@@ -166,7 +315,17 @@ export async function ensureEditorKeyboardFocus(opts?: {
     ? true
     : isElectronEditorProcess(target.processName)
       ? !inEditField
-      : !inEditField;
+      : isBrowserProcess(target.processName) || target.isBrowser
+        ? false
+        : !inEditField;
+
+  if (
+    (target.isBrowser || isBrowserProcess(target.processName)) &&
+    !inEditField
+  ) {
+    await ensureBrowserComposerFocus();
+    return;
+  }
 
   if (!needsCenterClick) return;
 

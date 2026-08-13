@@ -3,11 +3,39 @@ import {
   getForegroundWindow,
 } from "../native/win32Bridge.js";
 import type { ObservationSnapshot, TypingObservationResult } from "./types.js";
-import { isRippleApplicationWindow } from "../focus/focusContext.js";
+import {
+  isRippleApplicationWindow,
+  isWeakFocusContext,
+  matchesPinnedInsertTarget,
+  resolveTypingFocusTarget,
+} from "../focus/focusContext.js";
 
 function isClassicEditorProcess(processName?: string): boolean {
   const p = (processName ?? "").toLowerCase();
   return p === "notepad" || p.includes("wordpad");
+}
+
+function beforeWasWeakOrRipple(before: ObservationSnapshot): boolean {
+  const fg = before.foreground;
+  if (!fg?.hwnd) return true;
+  if (
+    isRippleApplicationWindow(fg.processName ?? "", fg.windowTitle ?? "")
+  ) {
+    return true;
+  }
+  return isWeakFocusContext({
+    hwnd: fg.hwnd,
+    processName: fg.processName ?? "",
+    windowTitle: fg.windowTitle ?? "",
+  });
+}
+
+function sameAppProcess(a: string, b: string): boolean {
+  const ap = a.toLowerCase();
+  const bp = b.toLowerCase();
+  if (!ap || !bp) return false;
+  if (ap === bp) return true;
+  return ap.includes(bp) || bp.includes(ap);
 }
 
 export async function captureObservation(): Promise<ObservationSnapshot> {
@@ -41,6 +69,7 @@ export async function verifyTypingObservation(args: {
   let fgAfter = after.foreground?.hwnd;
   const afterProc = after.foreground?.processName ?? "";
   const afterTitle = after.foreground?.windowTitle ?? "";
+  const pinned = resolveTypingFocusTarget();
 
   if (isRippleApplicationWindow(afterProc, afterTitle)) {
     return {
@@ -78,39 +107,64 @@ export async function verifyTypingObservation(args: {
         )
       : false;
 
-    if (!beforeRipple) {
+    const afterMatchesPin =
+      pinned &&
+      after.foreground &&
+      matchesPinnedInsertTarget(after.foreground, pinned);
+    const beforeMatchesPin =
+      pinned &&
+      args.before.foreground &&
+      matchesPinnedInsertTarget(args.before.foreground, pinned);
+
+    // Deliberate restore to pinned target (explorer/Cursor → chrome Chat).
+    if (
+      !beforeRipple &&
+      pinned &&
+      afterMatchesPin &&
+      (beforeWasWeakOrRipple(args.before) || !beforeMatchesPin)
+    ) {
+      // Continue — expected outcome of prepareDictationInsertFocus + paste.
+    } else if (
+      pinned &&
+      after.foreground &&
+      !afterMatchesPin
+    ) {
+      return {
+        ok: false,
+        reason: "wrong_insert_target",
+        before: args.before,
+        after,
+      };
+    } else if (!beforeRipple) {
       // Editor apps (Cursor/VS Code) can transiently swap the reported
       // foreground hwnd right after a keystroke lands (IntelliSense/format
-      // popups) even though the text already landed correctly and focus
-      // settles back a beat later — reproduced live: dictation into Cursor
-      // was reported as foreground_changed while the inserted text was
-      // already correctly in the editor. Recheck once before failing so a
-      // transient swap doesn't produce a false negative.
+      // popup) even though the text already landed correctly and focus
+      // settles back a beat later.
       await new Promise((r) => setTimeout(r, 200));
       const resettled = await captureObservation();
       if (resettled.foreground?.hwnd === fgBefore) {
         after = resettled;
         fgAfter = resettled.foreground?.hwnd;
       } else {
-        return {
-          ok: false,
-          reason: "foreground_changed",
-          before: args.before,
-          after: resettled,
-        };
+        const beforeProc = args.before.foreground?.processName ?? "";
+        const afterResettledProc = resettled.foreground?.processName ?? "";
+        const sameAppChurn =
+          sameAppProcess(beforeProc, afterResettledProc) &&
+          pinned &&
+          resettled.foreground &&
+          matchesPinnedInsertTarget(resettled.foreground, pinned);
+        if (!sameAppChurn) {
+          return {
+            ok: false,
+            reason: "foreground_changed",
+            before: args.before,
+            after: resettled,
+          };
+        }
+        after = resettled;
+        fgAfter = resettled.foreground?.hwnd;
       }
     }
-    // else: "before" was Ripple's own overlay — moving focus to the real
-    // target app IS the expected outcome of every dictation insert (the
-    // overlay hides and the target app receives the text), not a
-    // foreground steal. Reproduced live: the "before" snapshot gets
-    // captured while the overlay still transiently reports itself as OS
-    // foreground (hideOverlay() hasn't fully handed off focus yet), which
-    // made verification fail on the very FIRST, already-successful insert
-    // attempt every time — the ladder then kept retrying the remaining
-    // strategies, and since none of them undo a prior successful insert,
-    // each retry re-typed/re-pasted on top of the already-correct text
-    // (a real, reproduced 4-5x duplicated-typing bug in Notepad).
   }
 
   const control = after.focusedA11y?.controlType?.toLowerCase() ?? "";
@@ -144,8 +198,6 @@ export async function verifyTypingObservation(args: {
       /\bsubject\b/i.test(name);
 
     if (snippet.length >= 4 && !controlIsDocument) {
-      // WhatsApp / web contenteditables keep placeholder in `name` and typed
-      // text in `value`. Prefer value (and value growth) over name.
       const inValue = value.includes(snippet);
       const valueGrew =
         value.length > beforeValue.length ||
@@ -158,8 +210,6 @@ export async function verifyTypingObservation(args: {
             .filter((w) => w.length >= 4)
             .some((w) => value.includes(w)));
 
-      // Value match / growth wins — never fail solely because placeholder name
-      // still says "Type a message…".
       if (inValue || valueGrewWithText) {
         return { ok: true, before: args.before, after };
       }
@@ -177,9 +227,6 @@ export async function verifyTypingObservation(args: {
             after,
           };
         }
-        // Non-empty value that doesn't match can still be a contenteditable
-        // that reports stale/truncated value — accept if still in edit field
-        // and value changed after insert.
         if (value === beforeValue || !inEditField) {
           return {
             ok: false,

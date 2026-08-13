@@ -7,6 +7,7 @@ import {
   type VoiceUiMode,
 } from "../agent/dictation/dictationSession.js";
 import { onNativeEvent } from "./nativeClient.js";
+import { isVoiceInputReady } from "../services/bootReadiness.js";
 
 let unsubscribe: (() => void) | null = null;
 
@@ -16,6 +17,12 @@ function resolveMode(name: string): VoiceUiMode {
 }
 
 function handleSidecarHotkey(name: string): void {
+  if (!isVoiceInputReady()) {
+    console.info(
+      `[ripple-native] sidecar hotkey ${name} ignored — still starting up`,
+    );
+    return;
+  }
   if (name === "cancel_voice") {
     cancelVoiceSession();
     return;

@@ -33,6 +33,17 @@ vi.mock("../../windows/overlay.js", () => ({
   hideOverlay: vi.fn(),
 }));
 
+vi.mock("../../focus/focusContext.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../focus/focusContext.js")>();
+  return {
+    ...actual,
+    restoreFocusContext: vi.fn(async () => true),
+    prepareDictationInsertFocus: vi.fn(async () => true),
+    hasDictationInsertTarget: vi.fn(() => true),
+    extendCommandFocusGrace: vi.fn(),
+  };
+});
+
 describe("P8.5-P7 Whisper Flow", () => {
   beforeEach(() => {
     resetDictationSessionForTests();

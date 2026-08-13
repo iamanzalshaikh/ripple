@@ -1173,6 +1173,39 @@ export async function runDesktopCommand(
       return { ok: true, data: { ...undoPayload, execution } };
     }
 
+    // P10.2 — Meeting Notetaker voice commands.
+    {
+      const {
+        parseMeetingVoiceCommand,
+        isMeetingRecording,
+      } = await import("../agent/meeting/meetingRecorder.js");
+      const meetingCmd = parseMeetingVoiceCommand(input.command);
+      if (meetingCmd === "start") {
+        if (!isMeetingRecording()) {
+          const { handleMeetingShortcutPress } = await import(
+            "../windows/overlay.js"
+          );
+          await handleMeetingShortcutPress();
+        }
+        return {
+          ok: true,
+          message: "Meeting recording started — transcript goes to Flow Notes.",
+        };
+      }
+      if (meetingCmd === "stop") {
+        if (isMeetingRecording()) {
+          const { handleMeetingShortcutPress } = await import(
+            "../windows/overlay.js"
+          );
+          await handleMeetingShortcutPress();
+        }
+        return {
+          ok: true,
+          message: "Meeting stopped — summary saved to the meeting note.",
+        };
+      }
+    }
+
     const goalControl = parseGoalControlCommand(input.command);
     if (goalControl === "cancel") {
       completeGoal("cancelled");

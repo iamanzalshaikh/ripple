@@ -9,6 +9,11 @@ export type UserPreferences = {
   language: string | null;
   /** P9.6 — "1" when quiet/whisper dictation mode is enabled, else null/"0". */
   quietMode: string | null;
+  /**
+   * P10.2b — "1" when the user accepted the Meeting Notetaker disclosure
+   * (audio is recorded and sent to Ripple/OpenAI for transcription).
+   */
+  meetingConsent: string | null;
   updatedAt: string | null;
 };
 
@@ -20,6 +25,7 @@ const EMPTY: UserPreferences = {
   confirmStrictness: null,
   language: null,
   quietMode: null,
+  meetingConsent: null,
   updatedAt: null,
 };
 
@@ -30,7 +36,8 @@ export type PreferenceKey =
   | "default_projects_root"
   | "confirm_strictness"
   | "language"
-  | "quiet_mode";
+  | "quiet_mode"
+  | "meeting_consent";
 
 const KEY_TO_COLUMN: Record<PreferenceKey, keyof UserPreferences> = {
   preferred_ide: "preferredIde",
@@ -40,6 +47,7 @@ const KEY_TO_COLUMN: Record<PreferenceKey, keyof UserPreferences> = {
   confirm_strictness: "confirmStrictness",
   language: "language",
   quiet_mode: "quietMode",
+  meeting_consent: "meetingConsent",
 };
 
 export function getUserPreferences(): UserPreferences {
@@ -47,7 +55,8 @@ export function getUserPreferences(): UserPreferences {
   const row = db
     .prepare(
       `SELECT preferred_ide, preferred_terminal, preferred_browser,
-              default_projects_root, confirm_strictness, language, quiet_mode, updated_at
+              default_projects_root, confirm_strictness, language, quiet_mode,
+              meeting_consent, updated_at
        FROM user_preferences WHERE id = 1`,
     )
     .get() as
@@ -59,6 +68,7 @@ export function getUserPreferences(): UserPreferences {
         confirm_strictness: string | null;
         language: string | null;
         quiet_mode: string | null;
+        meeting_consent: string | null;
         updated_at: string;
       }
     | undefined;
@@ -73,6 +83,7 @@ export function getUserPreferences(): UserPreferences {
     confirmStrictness: row.confirm_strictness,
     language: row.language,
     quietMode: row.quiet_mode,
+    meetingConsent: row.meeting_consent,
     updatedAt: row.updated_at,
   };
 }
@@ -96,8 +107,9 @@ export function updateUserPreference(
   db.prepare(
     `INSERT INTO user_preferences (
        id, preferred_ide, preferred_terminal, preferred_browser,
-       default_projects_root, confirm_strictness, language, quiet_mode, updated_at
-     ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
+       default_projects_root, confirm_strictness, language, quiet_mode,
+       meeting_consent, updated_at
+     ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        preferred_ide = excluded.preferred_ide,
        preferred_terminal = excluded.preferred_terminal,
@@ -106,6 +118,7 @@ export function updateUserPreference(
        confirm_strictness = excluded.confirm_strictness,
        language = excluded.language,
        quiet_mode = excluded.quiet_mode,
+       meeting_consent = excluded.meeting_consent,
        updated_at = excluded.updated_at`,
   ).run(
     next.preferredIde,
@@ -115,6 +128,7 @@ export function updateUserPreference(
     next.confirmStrictness,
     next.language,
     next.quietMode,
+    next.meetingConsent,
     now,
   );
 
@@ -123,4 +137,13 @@ export function updateUserPreference(
 
 export function clearUserPreferences(): void {
   getRippleDb().prepare(`DELETE FROM user_preferences WHERE id = 1`).run();
+}
+
+/** P10.2b — true once the user accepted the meeting recording disclosure. */
+export function hasMeetingRecordingConsent(): boolean {
+  return getUserPreferences().meetingConsent === "1";
+}
+
+export function setMeetingRecordingConsent(accepted: boolean): void {
+  updateUserPreference("meeting_consent", accepted ? "1" : "0");
 }

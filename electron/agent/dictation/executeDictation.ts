@@ -1,7 +1,14 @@
 import { hideOverlay } from "../../windows/overlay.js";
 import { runInsertText } from "../../automation/actions/insertText.js";
 import { processTranscriptFromStt } from "../../automation/voice/transcriptPipeline.js";
-import { resolveTypingFocusTarget } from "../../focus/focusContext.js";
+import {
+  extendCommandFocusGrace,
+  hasDictationInsertTarget,
+  prepareDictationInsertFocus,
+  recoverDictationFocusTarget,
+  resolveTypingFocusTarget,
+  restoreFocusContext,
+} from "../../focus/focusContext.js";
 import {
   appendDictationUtterance,
   confirmDictationBuffer,
@@ -47,10 +54,17 @@ function logAndRecordLanguageTelemetry(args: {
   requestedLanguage?: string;
   detectedLanguage?: string;
   latencyMs: number;
+  /** Q8 — which insert-ladder stage actually delivered the text (from the
+   * ladder's own "Typed N characters (strategy)" / "Pasted N characters
+   * (strategy)" message), so non-Latin/RTL inserts are traceable to the
+   * exact stage instead of only "inserted=true" with no detail. */
+  insertDetail?: string;
 }): void {
+  const strategyMatch = args.insertDetail?.match(/\(([\w_]+)\)\s*$/);
   console.info(
     `[ripple-insert-lang] surface=${args.intent} requested=${args.requestedLanguage ?? "auto"} ` +
-      `detected=${args.detectedLanguage ?? "?"} chars=${args.chars} inserted=${args.inserted}`,
+      `detected=${args.detectedLanguage ?? "?"} chars=${args.chars} inserted=${args.inserted} ` +
+      `strategy=${strategyMatch?.[1] ?? "?"}`,
   );
   recordCommandEvent({
     command: `dictation:${args.intent}`,
@@ -174,8 +188,13 @@ export async function executeDictationUtterance(
   }
 
   try {
+    // Restore the pinned app BEFORE hiding the overlay. hideOverlay used to
+    // blur Ripple's main window, which handed FG to explorer and caused a
+    // visible desktop flicker (insert_fg_shell_before_restore).
+    await restoreFocusContext();
     hideOverlay();
     await new Promise((r) => setTimeout(r, 120));
+    extendCommandFocusGrace();
 
     // P7.8 — if we already typed a provisional hypothesis, reconcile in place
     // (notes + OS). Skip the normal full insert when reconcile handled it.
@@ -209,6 +228,63 @@ export async function executeDictationUtterance(
     // P10.1 — open Flow Note: append via notes store (never OS/WhatsApp insert).
     const { getActiveNoteId } = await import("../../state/activeNoteFocus.js");
     const noteId = getActiveNoteId();
+
+    if (!noteId) {
+      // Never re-resolve via mouse/memory when a hotkey pin already exists —
+      // that silently swapped Chrome windows (WhatsApp → EGC Chat) mid-dictation.
+      if (!hasDictationInsertTarget()) {
+        const recovered = await recoverDictationFocusTarget("pre_insert");
+        if (!recovered) {
+          console.warn(
+            "[ripple-desktop] dictation insert aborted — no focus target (click a field first)",
+          );
+          notifyDictationInsertFailure("no_focus_target");
+          logAndRecordLanguageTelemetry({
+            intent: "dictation",
+            ok: false,
+            inserted: false,
+            chars: confirmed.text.length,
+            requestedLanguage: options?.requestedLanguage,
+            detectedLanguage: options?.detectedLanguage,
+            latencyMs: Date.now() - startedAt,
+          });
+          return {
+            ok: false,
+            mode: "dictation",
+            finalText: confirmed.text,
+            inserted: false,
+            correctionKind: prepared.kind,
+            error: "no_focus_target",
+            session: session ?? undefined,
+          };
+        }
+      }
+      if (!(await prepareDictationInsertFocus())) {
+        console.warn(
+          "[ripple-desktop] dictation insert aborted — could not restore pinned target",
+        );
+        notifyDictationInsertFailure("insert_aborted:restore_failed");
+        logAndRecordLanguageTelemetry({
+          intent: "dictation",
+          ok: false,
+          inserted: false,
+          chars: confirmed.text.length,
+          requestedLanguage: options?.requestedLanguage,
+          detectedLanguage: options?.detectedLanguage,
+          latencyMs: Date.now() - startedAt,
+        });
+        return {
+          ok: false,
+          mode: "dictation",
+          finalText: confirmed.text,
+          inserted: false,
+          correctionKind: prepared.kind,
+          error: "insert_aborted:restore_failed",
+          session: session ?? undefined,
+        };
+      }
+    }
+
     if (noteId) {
       const { getNote, updateNote } = await import("../../storage/notes.js");
       const existing = getNote(noteId);
@@ -238,9 +314,11 @@ export async function executeDictationUtterance(
       console.info(
         `[ripple-desktop] dictation → note ${noteId.slice(0, 8)} appended ${confirmed.text.length} chars`,
       );
-    } else {
-      await runInsertText({ text: confirmed.text });
     }
+
+    const insertDetail = noteId
+      ? undefined
+      : await runInsertText({ text: confirmed.text });
 
     logAndRecordLanguageTelemetry({
       intent: "dictation",
@@ -250,6 +328,7 @@ export async function executeDictationUtterance(
       requestedLanguage: options?.requestedLanguage,
       detectedLanguage: options?.detectedLanguage,
       latencyMs: Date.now() - startedAt,
+      insertDetail,
     });
     return {
       ok: true,
@@ -260,6 +339,8 @@ export async function executeDictationUtterance(
       session: session ?? undefined,
     };
   } catch (e: unknown) {
+    const errMsg = e instanceof Error ? e.message : "dictation_insert_failed";
+    notifyDictationInsertFailure(errMsg);
     logAndRecordLanguageTelemetry({
       intent: "dictation",
       ok: false,
@@ -275,8 +356,31 @@ export async function executeDictationUtterance(
       finalText: confirmed.text,
       inserted: false,
       correctionKind: prepared.kind,
-      error: e instanceof Error ? e.message : "dictation_insert_failed",
+      error: errMsg,
       session: session ?? undefined,
     };
   }
+}
+
+function notifyDictationInsertFailure(message: string): void {
+  if (
+    !/no_focus_target|wrong_insert_target|insert_aborted|insert_unverified|ripple_foreground|focus_not_editable|restore_failed/i.test(
+      message,
+    )
+  ) {
+    return;
+  }
+  let hint = "Click the target field, then dictate again";
+  if (/restore_failed|could not restore/i.test(message)) {
+    hint = "Couldn't reach the target window — click the field and try again";
+  } else if (/wrong_insert_target/i.test(message)) {
+    hint = "Focus Google Chat / WhatsApp first — text went to the wrong app";
+  } else if (/ripple_foreground|keys_landed_in_ripple/i.test(message)) {
+    hint = "Click your chat field — Ripple had focus";
+  } else if (/focus_not_editable/i.test(message)) {
+    hint = "Click inside the message box, then try again";
+  }
+  void import("../../windows/overlay.js").then(({ showDictationInsertFailure }) => {
+    showDictationInsertFailure(hint);
+  });
 }

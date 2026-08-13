@@ -171,6 +171,19 @@ fn handle_rpc(
             }
             Err(e) => RpcResponse::err(id, e),
         },
+        "allow_set_foreground" => {
+            crate::send_input::grant_foreground_permission();
+            RpcResponse::ok(id, serde_json::json!({ "ok": true }))
+        }
+        "lock_set_foreground" => {
+            let lock = req
+                .params
+                .get("lock")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true);
+            crate::send_input::lock_set_foreground(lock);
+            RpcResponse::ok(id, serde_json::json!({ "ok": true, "lock": lock }))
+        }
         "focus_window" => match serde_json::from_value::<crate::window_ops::FocusWindowParams>(req.params.clone()) {
             Ok(params) => match crate::window_ops::focus_window(&params) {
                 Ok(result) => {

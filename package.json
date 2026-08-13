@@ -64,6 +64,7 @@
     "pack:win": "npm run native:build && npm run build && electron-builder --win"
   },
   "dependencies": {
+    "electron-audio-loopback": "^1.0.6",
     "electron-store": "^10.0.1",
     "keytar": "^7.9.0",
     "puppeteer-core": "^24.2.0",

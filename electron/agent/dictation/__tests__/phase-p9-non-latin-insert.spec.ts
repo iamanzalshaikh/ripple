@@ -33,6 +33,16 @@ vi.mock("../../../windows/overlay.js", () => ({
   hideOverlay: vi.fn(),
 }));
 
+vi.mock("../../../focus/focusContext.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../focus/focusContext.js")>();
+  return {
+    ...actual,
+    restoreFocusContext: vi.fn(async () => true),
+    prepareDictationInsertFocus: vi.fn(async () => true),
+    hasDictationInsertTarget: vi.fn(() => true),
+  };
+});
+
 describe("P9.5 non-Latin / RTL script survives the dictation pipeline to insert", () => {
   beforeEach(() => {
     resetDictationSessionForTests();

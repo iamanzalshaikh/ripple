@@ -152,6 +152,16 @@ const UI_STOPWORDS = new Set(
     "obviously",
     "software",
     "maya",
+    // Chat bubbles / greetings — never fuzzy-replace real English into these
+    "morning",
+    "afternoon",
+    "evening",
+    "working",
+    "main",
+    "issue",
+    "facing",
+    "chick",
+    "wake",
   ].map((s) => s.toLowerCase()),
 );
 
@@ -307,6 +317,9 @@ export function applyScreenNameBias(
       }
       const dist = editDistance(tokNorm, targetNorm);
       if (dist > 0 && dist <= maxDist) {
+        // STT name misspellings almost always keep the first letter
+        // ("Tatheer"→"Tathir"). "working"→"Morning" must never win.
+        if (tokNorm[0] !== targetNorm[0]) return token;
         replacements.push({ from: token, to: target });
         return target;
       }

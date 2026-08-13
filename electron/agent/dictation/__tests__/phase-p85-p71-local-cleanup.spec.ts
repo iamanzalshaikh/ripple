@@ -48,6 +48,12 @@ describe("Wispr-Flow Phase 7.1 — local filler/punct/list cleanup", () => {
     expect(detectSpokenList("let's meet next week")).toBeNull();
   });
 
+  it("does not format conversational first/second/next mid-phrase as a list", () => {
+    const mush =
+      "that's the main issue I'm facing, sorry, that's the first main issue I'm facing, the second issue I'm facing right now is for the multi-language, okay, so right now I'm trying to fix that, like what's the next thing you want to do, update me when you get free, thank you";
+    expect(detectSpokenList(mush)).toBeNull();
+  });
+
   it("detects and formats an explicit spoken list", () => {
     const text =
       "I need to do three things. First call the bank. Second buy groceries. Third finish the report.";

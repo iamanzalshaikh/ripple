@@ -28,6 +28,11 @@ vi.mock("../../focus/focusContext.js", () => ({
     windowTitle: "Untitled - Notepad",
     hwnd: 1,
   })),
+  hasDictationInsertTarget: vi.fn(() => true),
+  prepareDictationInsertFocus: vi.fn(async () => true),
+  recoverDictationFocusTarget: vi.fn(async () => null),
+  extendCommandFocusGrace: vi.fn(),
+  maintainPinnedTargetDuringRewrite: vi.fn(async () => undefined),
 }));
 
 vi.mock("../../native/win32Bridge.js", () => ({
@@ -38,6 +43,10 @@ vi.mock("../../native/win32Bridge.js", () => ({
     className: "RichEditD2DPT",
     value: "check this pls",
   })),
+}));
+
+vi.mock("../../automation/delay.js", () => ({
+  delay: vi.fn(async () => undefined),
 }));
 
 vi.mock("../../automation/keyboard.js", () => ({
@@ -192,6 +201,60 @@ describe("P8 executeTransform", () => {
     expect(result.ok).toBe(false);
     expect(result.inserted).toBe(false);
     expect(result.error).toBe("insert ladder exhausted");
+  });
+
+  it("does not Ctrl+A when keyboard focus is not an edit field (WhatsApp field=0 trap)", async () => {
+    const { getFocusedA11yElement } = await import("../../native/win32Bridge.js");
+    vi.mocked(getFocusedA11yElement).mockResolvedValueOnce({
+      name: "Voice-boardcast",
+      controlType: "ControlType.ListItem",
+      automationId: "",
+      className: "",
+      value: "",
+    });
+    const { generateDictationCorrection } = await import(
+      "../dictation/aiRewriteDictation.js"
+    );
+    vi.mocked(generateDictationCorrection).mockResolvedValue({
+      generation: { generatedText: "Rewritten emotional text.", droppedContent: [] },
+    } as never);
+
+    const { executeTransform } = await import("../transform/executeTransform.js");
+    const result = await executeTransform(
+      "Hello, I'm missing you so much.",
+      "make it emotional",
+    );
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe("composer_not_focused");
+    expect(selectAll).not.toHaveBeenCalled();
+    expect(pasteFromClipboard).not.toHaveBeenCalled();
+  });
+
+  it("still replaces when WhatsApp Edit has no UIA value (field=0) but composer is focused", async () => {
+    const { getFocusedA11yElement } = await import("../../native/win32Bridge.js");
+    vi.mocked(getFocusedA11yElement).mockResolvedValueOnce({
+      name: "Type a message to meri pyari bhen",
+      controlType: "ControlType.Edit",
+      automationId: "",
+      className: "x1hx0egp",
+      value: "",
+    });
+    const { generateDictationCorrection } = await import(
+      "../dictation/aiRewriteDictation.js"
+    );
+    vi.mocked(generateDictationCorrection).mockResolvedValue({
+      generation: { generatedText: "I miss you deeply. Please come back.", droppedContent: [] },
+    } as never);
+
+    const { executeTransform } = await import("../transform/executeTransform.js");
+    const result = await executeTransform(
+      "Hello, I'm missing you so much.",
+      "make it emotional",
+    );
+    expect(result.ok).toBe(true);
+    expect(writeText).toHaveBeenCalledWith("I miss you deeply. Please come back.");
+    expect(selectAll).toHaveBeenCalled();
+    expect(pasteFromClipboard).toHaveBeenCalled();
   });
 });
 

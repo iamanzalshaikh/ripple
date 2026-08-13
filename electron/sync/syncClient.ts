@@ -99,7 +99,11 @@ export function applyPulledItem(item: SyncPullItem): void {
     case "preference": {
       const payload = item.payload as { value?: string } | null;
       if (!payload?.value) return;
-      if (item.key === "language" || item.key === "quiet_mode") {
+      if (
+        item.key === "language" ||
+        item.key === "quiet_mode" ||
+        item.key === "meeting_consent"
+      ) {
         updateUserPreference(item.key, payload.value);
       }
       return;
@@ -211,6 +215,14 @@ async function pushAllLocalState(accessToken: string): Promise<void> {
       kind: "preference",
       key: "quiet_mode",
       payload: { value: prefs.quietMode },
+      updatedAt: prefsUpdatedAt,
+    });
+  }
+  if (prefs.meetingConsent) {
+    items.push({
+      kind: "preference",
+      key: "meeting_consent",
+      payload: { value: prefs.meetingConsent },
       updatedAt: prefsUpdatedAt,
     });
   }

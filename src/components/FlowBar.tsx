@@ -8,9 +8,10 @@
  *
  * P11.3 — Scratchpad / Notes button.
  * P11.4 — Transforms wand (same entry as F9).
+ * P10.2 — Meeting Notetaker mode (red pulse + elapsed + stop).
  */
 
-export type FlowBarMode = "command" | "dictation" | "transform";
+export type FlowBarMode = "command" | "dictation" | "transform" | "meeting";
 export type FlowBarPhase = "idle" | "listening" | "processing" | "result" | "error";
 
 type Props = {
@@ -23,8 +24,12 @@ type Props = {
   onOpenLanguageMenu: () => void;
   onOpenScratchpad: () => void;
   onStartTransform: () => void;
+  /** P10.2 — stop meeting recording from the bar. */
+  onStopMeeting?: () => void;
   sessionBadge: string | null;
   detectedLanguageBadge: string | null;
+  /** P10.2 — live transcript snippet while meeting. */
+  meetingSnippet?: string | null;
 };
 
 const MODE_ACCENT: Record<FlowBarMode, { ring: string; glow: string; fg: string }> = {
@@ -42,6 +47,11 @@ const MODE_ACCENT: Record<FlowBarMode, { ring: string; glow: string; fg: string 
     ring: "border-amber-500/50",
     glow: "shadow-[0_10px_36px_rgba(0,0,0,0.55),0_0_28px_rgba(245,158,11,0.22)]",
     fg: "text-amber-300",
+  },
+  meeting: {
+    ring: "border-rose-500/55",
+    glow: "shadow-[0_10px_36px_rgba(0,0,0,0.55),0_0_28px_rgba(244,63,94,0.28)]",
+    fg: "text-rose-300",
   },
 };
 
@@ -128,15 +138,40 @@ function CheckIcon({ className }: { className?: string }) {
   );
 }
 
+function StopIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 14 14" fill="none" className={className}>
+      <rect x="3.5" y="3.5" width="7" height="7" rx="1.2" fill="currentColor" />
+    </svg>
+  );
+}
+
 function ModeIcon({ mode, className }: { mode: FlowBarMode; className?: string }) {
   if (mode === "dictation") return <MicIcon className={className} />;
   if (mode === "transform") return <WandIcon className={className} />;
+  if (mode === "meeting") {
+    return (
+      <span className={`relative flex h-3 w-3 items-center justify-center ${className ?? ""}`}>
+        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-rose-400 opacity-50" />
+        <span className="relative inline-flex h-2 w-2 rounded-full bg-rose-400" />
+      </span>
+    );
+  }
   return <ChevronIcon className={className} />;
 }
 
 /** The core indicator: mode glyph at rest, waveform/spinner/check/alert while active. */
 function IndicatorCore({ mode, phase }: { mode: FlowBarMode; phase: FlowBarPhase }) {
   const accent = MODE_ACCENT[mode];
+
+  if (mode === "meeting" && (phase === "listening" || phase === "processing")) {
+    return (
+      <span className="relative flex h-4 w-4 items-center justify-center">
+        <span className="absolute inline-flex h-3.5 w-3.5 animate-ping rounded-full bg-rose-500/60" />
+        <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-rose-400" />
+      </span>
+    );
+  }
 
   if (phase === "listening") {
     return (
@@ -193,12 +228,15 @@ export function FlowBar({
   onOpenLanguageMenu,
   onOpenScratchpad,
   onStartTransform,
+  onStopMeeting,
   sessionBadge,
   detectedLanguageBadge,
+  meetingSnippet,
 }: Props) {
   const accent = MODE_ACCENT[mode];
   const badgeCode = languageCode === "auto" ? "AUTO" : languageCode.toUpperCase();
   const actionsDisabled = phase === "processing";
+  const isMeeting = mode === "meeting";
 
   return (
     <div
@@ -215,45 +253,67 @@ export function FlowBar({
           <IndicatorCore mode={mode} phase={phase} />
         </span>
 
-        <span
-          className={`max-w-[104px] truncate text-[10.5px] font-medium tracking-[0.08em] uppercase ${
-            phase === "error" ? "text-amber-300" : "text-zinc-200"
-          }`}
-        >
-          {statusText}
-        </span>
+        <div className="flex min-w-0 flex-col">
+          <span
+            className={`max-w-[140px] truncate text-[10.5px] font-medium tracking-[0.08em] uppercase ${
+              phase === "error" ? "text-amber-300" : isMeeting ? "text-rose-200" : "text-zinc-200"
+            }`}
+          >
+            {statusText}
+          </span>
+          {isMeeting && meetingSnippet ? (
+            <span className="max-w-[160px] truncate text-[9px] normal-case tracking-normal text-zinc-500">
+              {meetingSnippet}
+            </span>
+          ) : null}
+        </div>
 
         <span className="mx-0.5 h-4 w-px shrink-0 bg-zinc-800" />
 
-        <button
-          type="button"
-          disabled={languageBusy}
-          onClick={onOpenLanguageMenu}
-          title="Dictation language — click to change"
-          className="no-drag shrink-0 rounded-md px-1 text-[10px] font-semibold tracking-wide text-zinc-500 transition hover:text-violet-300 disabled:opacity-50"
-        >
-          {badgeCode}
-        </button>
+        {isMeeting ? (
+          <button
+            type="button"
+            disabled={actionsDisabled}
+            onClick={onStopMeeting}
+            title="Stop meeting recording (Ctrl+Shift+M)"
+            className="no-drag flex h-6 items-center gap-1 rounded-md bg-rose-500/15 px-1.5 text-[10px] font-semibold uppercase tracking-wide text-rose-300 transition hover:bg-rose-500/25 disabled:opacity-40"
+          >
+            <StopIcon className="h-3 w-3" />
+            Stop
+          </button>
+        ) : (
+          <>
+            <button
+              type="button"
+              disabled={languageBusy}
+              onClick={onOpenLanguageMenu}
+              title="Dictation language — click to change"
+              className="no-drag shrink-0 rounded-md px-1 text-[10px] font-semibold tracking-wide text-zinc-500 transition hover:text-violet-300 disabled:opacity-50"
+            >
+              {badgeCode}
+            </button>
 
-        <button
-          type="button"
-          disabled={actionsDisabled}
-          onClick={onOpenScratchpad}
-          title="Scratchpad — open a note and dictate into it"
-          className="no-drag flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-zinc-500 transition hover:bg-zinc-800 hover:text-emerald-300 disabled:opacity-40"
-        >
-          <NoteIcon className="h-3.5 w-3.5" />
-        </button>
+            <button
+              type="button"
+              disabled={actionsDisabled}
+              onClick={onOpenScratchpad}
+              title="Scratchpad — open a note and dictate into it"
+              className="no-drag flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-zinc-500 transition hover:bg-zinc-800 hover:text-emerald-300 disabled:opacity-40"
+            >
+              <NoteIcon className="h-3.5 w-3.5" />
+            </button>
 
-        <button
-          type="button"
-          disabled={actionsDisabled}
-          onClick={onStartTransform}
-          title="Transforms — select text first, then rewrite by voice (F9)"
-          className="no-drag flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-zinc-500 transition hover:bg-zinc-800 hover:text-amber-300 disabled:opacity-40"
-        >
-          <WandIcon className="h-3.5 w-3.5" />
-        </button>
+            <button
+              type="button"
+              disabled={actionsDisabled}
+              onClick={onStartTransform}
+              title="Transforms — select text first, then rewrite by voice (F9)"
+              className="no-drag flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-zinc-500 transition hover:bg-zinc-800 hover:text-amber-300 disabled:opacity-40"
+            >
+              <WandIcon className="h-3.5 w-3.5" />
+            </button>
+          </>
+        )}
 
         {sessionBadge ? (
           <span

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useVoiceCapture } from "../hooks/useVoiceCapture";
 import { getRippleApi } from "../lib/rippleApi";
 import { LANGUAGES } from "../lib/languages";
-import { FlowBar, type FlowBarPhase } from "../components/FlowBar";
+import { FlowBar, type FlowBarMode, type FlowBarPhase } from "../components/FlowBar";
 
 type OverlayPhase =
   | "idle"
@@ -11,7 +11,17 @@ type OverlayPhase =
   | "result"
   | "error"
   | "clarify"
-  | "code-repair";
+  | "code-repair"
+  | "meeting-consent";
+
+type MeetingUiState = {
+  state: "idle" | "recording" | "stopping";
+  elapsedMs: number;
+  lastTranscriptSnippet: string | null;
+  error: string | null;
+};
+
+const MEETING_FLUSH_MS = 10_000;
 
 type CodeRepairPanel = {
   file: string;
@@ -35,7 +45,15 @@ const LABELS: Record<OverlayPhase, string> = {
   error: "Error",
   clarify: "Pick one",
   "code-repair": "Error found",
+  "meeting-consent": "Meeting privacy",
 };
+
+function formatElapsed(ms: number): string {
+  const totalSec = Math.max(0, Math.floor(ms / 1000));
+  const m = Math.floor(totalSec / 60);
+  const s = (totalSec % 60).toString().padStart(2, "0");
+  return `${m}:${s}`;
+}
 
 export function OverlayPage() {
   const [phase, setPhase] = useState<OverlayPhase>("idle");
@@ -54,15 +72,29 @@ export function OverlayPage() {
   const busyRef = useRef(false);
   /** P7.8 — periodic voice:flush while dictation is listening. */
   const flushTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const voiceModeRef = useRef<"command" | "dictation" | "transform">("command");
-  const [voiceMode, setVoiceMode] = useState<"command" | "dictation" | "transform">(
+  const voiceModeRef = useRef<"command" | "dictation" | "transform" | "meeting">(
     "command",
   );
+  const [voiceMode, setVoiceMode] = useState<
+    "command" | "dictation" | "transform" | "meeting"
+  >("command");
   const [sessionInfo, setSessionInfo] = useState<{
     utteranceCount: number;
     remainingMs: number;
   } | null>(null);
   const [detectedLanguage, setDetectedLanguage] = useState<string | null>(null);
+  const [bootMessage, setBootMessage] = useState<string | null>(null);
+
+  // P10.2 — Meeting Notetaker.
+  const meetingActiveRef = useRef(false);
+  const meetingStoppingRef = useRef(false);
+  const [meetingUi, setMeetingUi] = useState<MeetingUiState | null>(null);
+  const meetingTickRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [meetingConsentOpen, setMeetingConsentOpen] = useState(false);
+  const [consentBusy, setConsentBusy] = useState(false);
+  const [meetingCaptureMode, setMeetingCaptureMode] = useState<
+    "mic+system" | "mic-only" | null
+  >(null);
 
   // P11.2 — Flow Bar language picker.
   const [currentLangCode, setCurrentLangCode] = useState("auto");
@@ -71,6 +103,11 @@ export function OverlayPage() {
   const [langCustomInput, setLangCustomInput] = useState("");
 
   const voice = useVoiceCapture();
+  // Stable ref — useVoiceCapture returns a new object every render; putting
+  // `voice` in effect deps was killing the meeting MediaRecorder + timer on
+  // every setState (live: RECORDING 0:00 stuck, finalBytes=0).
+  const voiceRef = useRef(voice);
+  voiceRef.current = voice;
 
   useEffect(() => {
     document.documentElement.classList.add("overlay-html");
@@ -180,6 +217,27 @@ export function OverlayPage() {
         setPhase("error");
       },
     );
+    const unsubBoot = api.onIpcEvent?.("overlay:boot", (payload) => {
+      const ready =
+        payload &&
+        typeof payload === "object" &&
+        "ready" in payload &&
+        (payload as { ready: unknown }).ready === true;
+      if (ready) {
+        setBootMessage(null);
+        setPhase("idle");
+        return;
+      }
+      const message =
+        payload &&
+        typeof payload === "object" &&
+        "message" in payload &&
+        typeof (payload as { message: unknown }).message === "string"
+          ? (payload as { message: string }).message
+          : "Starting up…";
+      setBootMessage(message);
+      setPhase("processing");
+    });
     return () => {
       unsubShow?.();
       unsubHide?.();
@@ -187,6 +245,7 @@ export function OverlayPage() {
       unsubRepairShow?.();
       unsubRepairHide?.();
       unsubTransformHint?.();
+      unsubBoot?.();
     };
   }, []);
 
@@ -222,7 +281,14 @@ export function OverlayPage() {
         });
       }
       if (!res.ok) {
-        throw new Error(res.error ?? (res.transform ? "Transform failed" : "Dictation failed"));
+        const raw = res.error ?? (res.transform ? "Transform failed" : "Dictation failed");
+        const friendly =
+          /restore_failed|no_focus_target|insert_aborted/i.test(raw)
+            ? "Couldn't reach the target window — click the field and try again"
+            : raw;
+        setError(friendly);
+        setPhase("error");
+        return;
       }
       if (res.transform) {
         console.info(
@@ -356,6 +422,7 @@ export function OverlayPage() {
 
   const startRecording = useCallback(async () => {
     if (recordingRef.current || busyRef.current) return;
+    if (meetingActiveRef.current) return;
 
     setError(null);
     streamIdRef.current = crypto.randomUUID();
@@ -397,9 +464,166 @@ export function OverlayPage() {
     }
   }, [voice]);
 
+  const clearMeetingTick = useCallback(() => {
+    if (meetingTickRef.current) {
+      clearInterval(meetingTickRef.current);
+      meetingTickRef.current = null;
+    }
+  }, []);
+
+  const startMeetingCapture = useCallback(async () => {
+    if (meetingActiveRef.current || recordingRef.current || busyRef.current) {
+      return;
+    }
+    meetingActiveRef.current = true;
+    meetingStoppingRef.current = false;
+    voiceModeRef.current = "meeting";
+    setVoiceMode("meeting");
+    setError(null);
+    setPhase("listening");
+    setMeetingCaptureMode(null);
+    setMeetingUi({
+      state: "recording",
+      elapsedMs: 0,
+      lastTranscriptSnippet: null,
+      error: null,
+    });
+
+    clearMeetingTick();
+    const startedAt = Date.now();
+    meetingTickRef.current = setInterval(() => {
+      setMeetingUi((prev) =>
+        prev
+          ? { ...prev, elapsedMs: Date.now() - startedAt }
+          : {
+              state: "recording",
+              elapsedMs: Date.now() - startedAt,
+              lastTranscriptSnippet: null,
+              error: null,
+            },
+      );
+    }, 1000);
+
+    try {
+      const quietRes = await getRippleApi().quietMode.get().catch(() => ({
+        ok: false as const,
+        quietMode: undefined,
+      }));
+      const quietOn = quietRes.ok ? quietRes.quietMode === true : false;
+      console.info(
+        `[ripple-overlay] meeting capture quietMode=${quietOn ? "ON" : "OFF"} flush=${MEETING_FLUSH_MS}ms systemAudio=OFF (DXGI unreliable)`,
+      );
+
+      // Mic-only: getDisplayMedia/loopback hits DXGI Duplicationfailed on this
+      // machine and previously blocked the recorder entirely (0 transcript).
+      await voiceRef.current.start({
+        quiet: quietOn,
+        continuous: true,
+        flushInterval: MEETING_FLUSH_MS,
+        includeSystemAudio: false,
+        onCaptureMode: (mode) => {
+          setMeetingCaptureMode(mode);
+          console.info(`[ripple-overlay] meeting capture ready mode=${mode}`);
+        },
+        onFlush: (result) => {
+          console.info(
+            `[ripple-overlay] meeting flush bytes=${result.buffer.byteLength}`,
+          );
+          void getRippleApi()
+            .meeting.sendChunk({
+              chunk: new Uint8Array(result.buffer),
+              mimeType: result.mimeType,
+              filename: result.filename,
+            })
+            .then((res) => {
+              if (res.ok && res.text) {
+                setMeetingUi((prev) =>
+                  prev
+                    ? {
+                        ...prev,
+                        lastTranscriptSnippet: res.text!.slice(0, 120),
+                      }
+                    : prev,
+                );
+              } else if (!res.ok) {
+                console.warn(
+                  `[ripple-overlay] meeting chunk failed: ${res.message ?? "unknown"}`,
+                );
+              }
+            })
+            .catch(() => undefined);
+        },
+      });
+      console.info("[ripple-overlay] meeting MediaRecorder started");
+    } catch (e: unknown) {
+      meetingActiveRef.current = false;
+      clearMeetingTick();
+      setMeetingUi(null);
+      setMeetingCaptureMode(null);
+      setVoiceMode("command");
+      voiceModeRef.current = "command";
+      setError(
+        e instanceof Error ? e.message : "Microphone permission denied",
+      );
+      setPhase("error");
+    }
+  }, [clearMeetingTick]);
+
+  const stopMeetingCapture = useCallback(async () => {
+    if (!meetingActiveRef.current || meetingStoppingRef.current) return;
+    meetingStoppingRef.current = true;
+    setPhase("processing");
+    setMeetingUi((prev) =>
+      prev ? { ...prev, state: "stopping" } : prev,
+    );
+    clearMeetingTick();
+
+    try {
+      let finalArgs:
+        | { chunk: Uint8Array; mimeType?: string; filename?: string }
+        | undefined;
+      try {
+        const result = await voiceRef.current.stopAndGetBuffer();
+        finalArgs = {
+          chunk: new Uint8Array(result.buffer),
+          mimeType: result.mimeType,
+          filename: result.filename,
+        };
+        console.info(
+          `[ripple-overlay] meeting stop buffer bytes=${result.buffer.byteLength}`,
+        );
+      } catch (e) {
+        console.warn(
+          `[ripple-overlay] meeting stop buffer failed:`,
+          e instanceof Error ? e.message : e,
+        );
+      }
+
+      const endRes = await getRippleApi().meeting.end(finalArgs);
+      if (!endRes.ok) {
+        setError(endRes.message ?? "Failed to save meeting");
+        setPhase("error");
+      } else {
+        setPhase("result");
+        setTimeout(() => setPhase("idle"), 2000);
+      }
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Meeting stop failed");
+      setPhase("error");
+    } finally {
+      meetingActiveRef.current = false;
+      meetingStoppingRef.current = false;
+      setMeetingUi(null);
+      setMeetingCaptureMode(null);
+      voiceModeRef.current = "command";
+      setVoiceMode("command");
+    }
+  }, [clearMeetingTick]);
+
   useEffect(() => {
     const api = getRippleApi();
     const unsubToggle = api.onVoiceToggle(({ action, mode }) => {
+      if (meetingActiveRef.current) return;
       if (mode === "command" || mode === "dictation" || mode === "transform") {
         voiceModeRef.current = mode;
         setVoiceMode(mode);
@@ -423,15 +647,103 @@ export function OverlayPage() {
   }, [cancelRecording, startRecording, stopRecording]);
 
   useEffect(() => {
+    const api = getRippleApi();
+    const unsubMeeting = api.onMeetingToggle?.(({ action }) => {
+      if (action === "start") {
+        void startMeetingCapture();
+        return;
+      }
+      if (action === "stop") {
+        void stopMeetingCapture();
+      }
+    });
+    const unsubConsent = api.onMeetingConsent?.(({ show }) => {
+      setMeetingConsentOpen(show);
+      if (show) setPhase("meeting-consent");
+      else if (!meetingActiveRef.current) setPhase("idle");
+    });
+    const unsubState = api.onMeetingState?.((snap) => {
+      if (snap.state === "idle") {
+        setMeetingUi(null);
+        return;
+      }
+      setMeetingUi({
+        state: snap.state,
+        elapsedMs: snap.elapsedMs,
+        lastTranscriptSnippet: snap.lastTranscriptSnippet,
+        error: snap.error,
+      });
+    });
     return () => {
+      unsubMeeting?.();
+      unsubConsent?.();
+      unsubState?.();
+    };
+  }, [startMeetingCapture, stopMeetingCapture]);
+
+  const acceptMeetingConsent = useCallback(async () => {
+    if (consentBusy) return;
+    setConsentBusy(true);
+    try {
+      const res = await getRippleApi().meeting.acceptConsent();
+      if (!res.ok) {
+        setError(res.message ?? "Could not start meeting");
+        setPhase("error");
+      }
+      setMeetingConsentOpen(false);
+    } finally {
+      setConsentBusy(false);
+    }
+  }, [consentBusy]);
+
+  const declineMeetingConsent = useCallback(async () => {
+    if (consentBusy) return;
+    setConsentBusy(true);
+    try {
+      await getRippleApi().meeting.declineConsent();
+      setMeetingConsentOpen(false);
+      setPhase("idle");
+    } finally {
+      setConsentBusy(false);
+    }
+  }, [consentBusy]);
+
+  useEffect(() => {
+    return () => {
+      // Unmount only — do NOT depend on `voice` (new object every render).
       if (recordingRef.current) {
-        void voice.stop();
+        void voiceRef.current.stop();
         void getRippleApi().setOverlayVoiceActive(false);
       }
+      if (meetingActiveRef.current) {
+        void voiceRef.current.stop();
+      }
+      clearMeetingTick();
     };
-  }, [voice]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- unmount-only cleanup
+  }, []);
 
-  const label = error && phase === "error" ? error.slice(0, 40) : LABELS[phase];
+  const isMeetingMode = voiceMode === "meeting" || Boolean(meetingUi);
+  const meetingLabel =
+    meetingUi?.state === "stopping"
+      ? "Saving meeting…"
+      : meetingUi
+        ? `Recording ${formatElapsed(meetingUi.elapsedMs)}${
+            meetingCaptureMode === "mic+system"
+              ? " · mic+sys"
+              : meetingCaptureMode === "mic-only"
+                ? " · mic"
+                : ""
+          }`
+        : "Meeting…";
+  const label =
+    bootMessage
+      ? bootMessage
+      : isMeetingMode && meetingUi
+        ? meetingLabel
+        : error && phase === "error"
+          ? error.slice(0, 40)
+          : LABELS[phase];
   const sessionBadge =
     voiceMode === "dictation" && sessionInfo
       ? `${sessionInfo.utteranceCount} · ${Math.max(1, Math.ceil(sessionInfo.remainingMs / 60_000))}m left`
@@ -440,13 +752,14 @@ export function OverlayPage() {
   // is visible instead of just producing silently-bad text.
   const languageBadge =
     phase === "result" && detectedLanguage ? `detected: ${detectedLanguage}` : null;
-  const hotkeyHint =
-    voiceMode === "transform"
+  const hotkeyHint = isMeetingMode
+    ? "Ctrl+Shift+M — stop · Esc cancels voice only"
+    : voiceMode === "transform"
       ? "F9 — stop · Esc — cancel"
       : voiceMode === "dictation"
         ? "Shift+Space — stop · Esc — cancel"
         : "Ctrl+Space — stop · Esc — cancel";
-
+  const flowBarMode: FlowBarMode = isMeetingMode ? "meeting" : voiceMode;
   const pickClarify = useCallback(async (path: string) => {
     await getRippleApi().pickDisambiguation?.(path);
     setClarifyItems([]);
@@ -480,6 +793,50 @@ export function OverlayPage() {
     },
     [repairBusy],
   );
+
+  if (meetingConsentOpen || phase === "meeting-consent") {
+    return (
+      <div className="flex h-full w-full flex-col gap-2 overflow-hidden p-3">
+        <p className="text-[11px] font-semibold tracking-wide text-rose-300">
+          Meeting recording
+        </p>
+        <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto text-[11px] leading-snug text-zinc-200">
+          <p>
+            Ripple will record your <span className="text-zinc-100">microphone</span> and
+            send audio to Ripple servers (OpenAI) for transcription and summary.
+          </p>
+          <p className="text-zinc-400">
+            A red recording indicator stays on the Flow Bar. Stop anytime with
+            Ctrl+Shift+M or Stop. Speak for at least ~10 seconds so a transcript
+            chunk can land.
+          </p>
+          <p className="text-zinc-500">
+            By continuing you consent to this processing. System-audio capture
+            (other participants) is temporarily off on Windows GPUs that fail
+            DXGI loopback — mic-only is used for reliability.
+          </p>
+        </div>
+        <div className="flex shrink-0 gap-1.5">
+          <button
+            type="button"
+            disabled={consentBusy}
+            className="no-drag flex-1 rounded-md border border-rose-500/40 bg-rose-950/80 px-2 py-1.5 text-[11px] text-rose-100 hover:border-rose-400/70 disabled:opacity-50"
+            onClick={() => void acceptMeetingConsent()}
+          >
+            Start recording
+          </button>
+          <button
+            type="button"
+            disabled={consentBusy}
+            className="no-drag rounded-md px-2 py-1.5 text-[11px] text-zinc-500 hover:text-zinc-300 disabled:opacity-50"
+            onClick={() => void declineMeetingConsent()}
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (langMenuOpen) {
     return (
@@ -652,7 +1009,7 @@ export function OverlayPage() {
 
   return (
     <FlowBar
-      mode={voiceMode}
+      mode={flowBarMode}
       // Safe: "clarify" / "code-repair" phases return earlier above, so by
       // this point `phase` can only be one of FlowBarPhase's five values.
       phase={phase as FlowBarPhase}
@@ -667,8 +1024,12 @@ export function OverlayPage() {
       onStartTransform={() => {
         void getRippleApi().flowBar.startTransform();
       }}
+      onStopMeeting={() => {
+        void stopMeetingCapture();
+      }}
       sessionBadge={sessionBadge}
       detectedLanguageBadge={languageBadge}
+      meetingSnippet={meetingUi?.lastTranscriptSnippet ?? null}
     />
   );
 }

@@ -3,6 +3,10 @@ import { loadDesktopEnv, getSocketUrl } from "../config/env.js";
 import { logPhaseBBootLine } from "../agent/planner/phaseBConfig.js";
 import { logPlannerV2BootLine } from "../agent/planner/v2/plannerV2Config.js";
 import { API_BASE } from "../services/api.js";
+import {
+  setVoiceInputReady,
+  waitUntilVoiceInputReady,
+} from "../services/bootReadiness.js";
 import { rippleSocket } from "../socket/rippleSocket.js";
 import { runDesktopCommand } from "../services/commandOrchestrator.js";
 import {
@@ -32,11 +36,27 @@ import {
   setOverlayState,
   expandOverlayForLanguageMenu,
   collapseOverlayToIndicator,
+  createOverlayWindow,
+  showBootStartingOverlay,
+  hideBootStartingOverlay,
+  isInsertFailureHintActive,
 } from "../windows/overlay.js";
+import { initMain as initAudioLoopback } from "electron-audio-loopback";
 
 loadDesktopEnv();
 logPhaseBBootLine();
 logPlannerV2BootLine();
+
+// P10.2 — system audio loopback for Meeting Notetaker (must init before ready).
+try {
+  initAudioLoopback();
+  console.info("[ripple-meeting] electron-audio-loopback initialized");
+} catch (e: unknown) {
+  console.warn(
+    "[ripple-meeting] electron-audio-loopback init failed (mic-only fallback):",
+    e instanceof Error ? e.message : e,
+  );
+}
 import {
   clearTokens,
   getAccessToken,
@@ -59,7 +79,6 @@ import {
 import { registerGlobalShortcuts, unregisterGlobalShortcuts } from "../shortcuts/globalShortcut.js";
 import { createTray, destroyTray } from "../tray/index.js";
 import { createMainWindow, showMainWindow } from "../windows/mainWindow.js";
-import { createOverlayWindow } from "../windows/overlay.js";
 import { registerDisambiguationPickIpc } from "../windows/disambiguationPick.js";
 import {
   registerCodeRepairPanelIpc,
@@ -1118,7 +1137,7 @@ function registerIpc(): void {
 
   ipcMain.handle("overlay:voice-active", (_e, active: boolean) => {
     setVoiceSessionActive(active);
-    if (!active) setOverlayState("idle");
+    if (!active && !isInsertFailureHintActive()) setOverlayState("idle");
     return { ok: true };
   });
 
@@ -1161,6 +1180,185 @@ function registerIpc(): void {
       };
     }
   });
+
+  // P10.2 — Meeting Notetaker IPC.
+  ipcMain.handle("meeting:getState", async () => {
+    try {
+      const { getMeetingState } = await import(
+        "../agent/meeting/meetingRecorder.js"
+      );
+      return { ok: true, state: getMeetingState() };
+    } catch (e: unknown) {
+      return {
+        ok: false,
+        message: e instanceof Error ? e.message : "meeting_state_failed",
+      };
+    }
+  });
+
+  ipcMain.handle("meeting:toggle", async () => {
+    try {
+      const { handleMeetingShortcutPress } = await import("../windows/overlay.js");
+      await handleMeetingShortcutPress();
+      const { getMeetingState } = await import(
+        "../agent/meeting/meetingRecorder.js"
+      );
+      return { ok: true, state: getMeetingState() };
+    } catch (e: unknown) {
+      return {
+        ok: false,
+        message: e instanceof Error ? e.message : "meeting_toggle_failed",
+      };
+    }
+  });
+
+  ipcMain.handle("meeting:acceptConsent", async () => {
+    try {
+      const { acceptMeetingConsentAndStart } = await import(
+        "../windows/overlay.js"
+      );
+      await acceptMeetingConsentAndStart();
+      return { ok: true };
+    } catch (e: unknown) {
+      return {
+        ok: false,
+        message: e instanceof Error ? e.message : "meeting_consent_failed",
+      };
+    }
+  });
+
+  ipcMain.handle("meeting:declineConsent", async () => {
+    try {
+      const { declineMeetingConsentAndClose } = await import(
+        "../windows/overlay.js"
+      );
+      await declineMeetingConsentAndClose();
+      return { ok: true };
+    } catch (e: unknown) {
+      return {
+        ok: false,
+        message: e instanceof Error ? e.message : "meeting_decline_failed",
+      };
+    }
+  });
+
+  ipcMain.handle("meeting:stop", async () => {
+    try {
+      const { stopMeetingRecording, isMeetingRecording } = await import(
+        "../agent/meeting/meetingRecorder.js"
+      );
+      if (isMeetingRecording()) {
+        await stopMeetingRecording();
+      }
+      const { getMeetingState } = await import(
+        "../agent/meeting/meetingRecorder.js"
+      );
+      return { ok: true, state: getMeetingState() };
+    } catch (e: unknown) {
+      return {
+        ok: false,
+        message: e instanceof Error ? e.message : "meeting_stop_failed",
+      };
+    }
+  });
+
+  ipcMain.handle(
+    "meeting:chunk",
+    async (
+      _e,
+      args: {
+        chunk?: Uint8Array | ArrayBuffer | number[];
+        mimeType?: string;
+        filename?: string;
+      },
+    ) => {
+      try {
+        const { appendMeetingChunk } = await import(
+          "../agent/meeting/meetingRecorder.js"
+        );
+        let buffer: Uint8Array;
+        if (args.chunk instanceof Uint8Array) {
+          buffer = args.chunk;
+        } else if (args.chunk instanceof ArrayBuffer) {
+          buffer = new Uint8Array(args.chunk);
+        } else if (Array.isArray(args.chunk)) {
+          buffer = Uint8Array.from(args.chunk);
+        } else {
+          console.warn("[ripple-meeting] chunk IPC missing buffer");
+          return { ok: false, message: "chunk_required" };
+        }
+        console.info(
+          `[ripple-meeting] chunk IPC bytes=${buffer.byteLength} mime=${args.mimeType ?? "?"}`,
+        );
+        return await appendMeetingChunk({
+          buffer,
+          mimeType: args.mimeType,
+          filename: args.filename,
+        });
+      } catch (e: unknown) {
+        return {
+          ok: false,
+          message: e instanceof Error ? e.message : "meeting_chunk_failed",
+        };
+      }
+    },
+  );
+
+  ipcMain.handle(
+    "meeting:end",
+    async (
+      _e,
+      args?: {
+        chunk?: Uint8Array | ArrayBuffer | number[];
+        mimeType?: string;
+        filename?: string;
+      },
+    ) => {
+      try {
+        const { stopMeetingRecording } = await import(
+          "../agent/meeting/meetingRecorder.js"
+        );
+        let finalChunk:
+          | {
+              buffer: Uint8Array;
+              mimeType?: string;
+              filename?: string;
+            }
+          | undefined;
+        if (args?.chunk) {
+          let buffer: Uint8Array;
+          if (args.chunk instanceof Uint8Array) {
+            buffer = args.chunk;
+          } else if (args.chunk instanceof ArrayBuffer) {
+            buffer = new Uint8Array(args.chunk);
+          } else if (Array.isArray(args.chunk)) {
+            buffer = Uint8Array.from(args.chunk);
+          } else {
+            buffer = new Uint8Array();
+          }
+          if (buffer.byteLength > 0) {
+            finalChunk = {
+              buffer,
+              mimeType: args.mimeType,
+              filename: args.filename,
+            };
+          }
+        }
+        const state = await stopMeetingRecording(
+          finalChunk ? { finalChunk } : undefined,
+        );
+        console.info(
+          `[ripple-meeting] end IPC finalBytes=${finalChunk?.buffer.byteLength ?? 0}`,
+        );
+        return { ok: true, state };
+      } catch (e: unknown) {
+        return {
+          ok: false,
+          message: e instanceof Error ? e.message : "meeting_end_failed",
+        };
+      }
+    },
+  );
 
   /** P8b — extension / bridge records email, Slack, etc. file references. */
   ipcMain.handle(
@@ -1424,6 +1622,18 @@ app.whenReady().then(async () => {
     }
   });
   createOverlayWindow();
+  showBootStartingOverlay();
+  const boot = await waitUntilVoiceInputReady();
+  registerGlobalShortcuts();
+  setVoiceInputReady(true);
+  hideBootStartingOverlay();
+  if (boot.ready) {
+    console.info("[ripple-desktop] voice input armed — Shift+Space dictation");
+  } else {
+    console.warn(
+      `[ripple-desktop] voice input armed with gaps — sidecar=${boot.sidecarOk} backend=${boot.backendOk}`,
+    );
+  }
 
   const loggedIn = await restoreAuth();
   const mainWin = createMainWindow();
@@ -1439,8 +1649,6 @@ app.whenReady().then(async () => {
     isQuitting = true;
     handleLogout().finally(() => app.quit());
   });
-
-  registerGlobalShortcuts();
 
   if (!loggedIn) {
     showMainWindow();

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const restoreFocusContext = vi.fn((..._args: unknown[]) =>
   Promise.resolve(undefined),
@@ -85,14 +85,26 @@ describe("Phase 7.8 — streaming provisional edits", () => {
 });
 
 describe("Phase 7.8 finalization — shouldSkipOsProgressive covers Gmail/Instagram", () => {
+  // P7.8 is PAUSED by default (opt-in via RIPPLE_P85_STREAMING_INSERT=1) —
+  // see streamingInsert.ts. These tests cover the skip-surface logic itself
+  // (still correct/live code, just gated off), so force it on for this
+  // block and restore the ambient value after.
+  const prevEnv = process.env.RIPPLE_P85_STREAMING_INSERT;
+
   beforeEach(() => {
     vi.clearAllMocks();
+    process.env.RIPPLE_P85_STREAMING_INSERT = "1";
     isWhatsAppTabActive.mockReturnValue(false);
     isGmailComposeFocused.mockReturnValue(false);
     isInstagramTabActive.mockReturnValue(false);
     hasPendingSelection.mockReturnValue(false);
     runInsertWithFallback.mockResolvedValue({ strategy: "native_text" });
     clearStreamingInsert();
+  });
+
+  afterEach(() => {
+    if (prevEnv === undefined) delete process.env.RIPPLE_P85_STREAMING_INSERT;
+    else process.env.RIPPLE_P85_STREAMING_INSERT = prevEnv;
   });
 
   it("types progressively on a plain OS field (baseline: not skipped)", async () => {

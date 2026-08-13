@@ -33,6 +33,14 @@ describe("P7 native layer", () => {
     expect(listRegisteredHotkeys()).toHaveLength(0);
   });
 
+  it("uses Shift+Space as primary dictation and never registers Alt+Space", async () => {
+    const { getDefaultHotkeyBindings } = await import("../hotkeyRegistry.js");
+    const bindings = getDefaultHotkeyBindings();
+    const dictation = bindings.filter((b) => b.action === "dictation");
+    expect(dictation[0]?.accelerator).toBe("Shift+Space");
+    expect(bindings.some((b) => b.accelerator === "Alt+Space")).toBe(false);
+  });
+
   it("native host marks ready after init", async () => {
     const { initNativeHost } = await import("../nativeHost.js");
     const caps = await initNativeHost();

@@ -6,6 +6,7 @@ import {
   setVoiceSessionFrozen,
   snapshotPreVoiceTarget,
 } from "../focus/focusContext.js";
+import { isVoiceInputReady } from "../services/bootReadiness.js";
 import { resolvePreloadPath } from "../utils/preloadPath.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -128,7 +129,15 @@ export function showOverlay(): void {
 }
 
 export function hideOverlay(): void {
-  overlayWindow?.hide();
+  if (overlayWindow && !overlayWindow.isDestroyed()) {
+    // Language/code-repair paths briefly set focusable=true; force off before
+    // hide so Windows does not activate Ripple chrome as the next FG window.
+    overlayWindow.setFocusable(false);
+    overlayWindow.hide();
+  }
+  // Do not blur the main window here. hide + blur leaves a FG vacuum that
+  // Windows fills with explorer (blank title / Program Manager) — the
+  // insert flicker. Callers restore the pinned target before/after hide.
 }
 
 export function expandOverlayForDisambiguation(itemCount: number): void {
@@ -196,8 +205,56 @@ export function resetOverlaySize(): void {
   positionIndicator(overlayWindow);
 }
 
+/** Larger overlay for Meeting Notetaker privacy consent. */
+export function expandOverlayForMeetingConsent(): void {
+  if (!overlayWindow || overlayWindow.isDestroyed()) return;
+  const display = screen.getPrimaryDisplay();
+  const area = display.workArea;
+  const width = 400;
+  const height = 320;
+  const x = Math.round(area.x + (area.width - width) / 2);
+  const y = Math.round(area.y + area.height - height - BOTTOM_MARGIN);
+  overlayWindow.setBounds({ x, y, width, height });
+  overlayWindow.setFocusable(true);
+  overlayWindow.showInactive();
+  overlayWindow.setAlwaysOnTop(true, "screen-saver");
+}
+
 export function setOverlayState(state: string): void {
   sendToOverlay("overlay:state", state);
+}
+
+export function showBootStartingOverlay(): void {
+  showOverlay();
+  sendToOverlay("overlay:boot", { ready: false, message: "Starting up…" });
+  sendToOverlay("overlay:state", "processing");
+}
+
+export function hideBootStartingOverlay(): void {
+  sendToOverlay("overlay:boot", { ready: true });
+  sendToOverlay("overlay:state", "idle");
+  hideOverlay();
+}
+
+let insertFailureHintUntil = 0;
+
+export function isInsertFailureHintActive(): boolean {
+  return Date.now() < insertFailureHintUntil;
+}
+
+/** Brief Flow Bar hint when OS insert fails (wrong app / no focus). */
+export function showDictationInsertFailure(message: string): void {
+  const text = message.trim().slice(0, 120);
+  if (!text) return;
+  insertFailureHintUntil = Date.now() + 3400;
+  showOverlay();
+  sendToOverlay("overlay:state", "error");
+  sendToOverlay("overlay:transform-hint", { message: text });
+  setTimeout(() => {
+    insertFailureHintUntil = 0;
+    hideOverlay();
+    setOverlayState("idle");
+  }, 3200);
 }
 
 export function showClarifyQuestionOnOverlay(question: string): void {
@@ -218,17 +275,25 @@ export function dismissOverlay(delayMs = 1500): void {
 }
 
 export function cancelVoiceSession(): void {
-  sendToOverlay("overlay:voice-toggle", { action: "cancel" });
-  setOverlayState("idle");
-  setVoiceSessionActive(false);
-  dismissOverlay(300);
-  void import("../agent/dictation/dictationSession.js").then((m) => {
-    m.cancelDictationSession();
-  });
-  // A cancelled recording must not leak a stashed selection into the next,
-  // unrelated dictation utterance.
-  void import("../agent/transform/transformSession.js").then((m) => {
-    m.takePendingSelection();
+  // P10.2 — Esc during a meeting stops it (with summary flush via Overlay).
+  void import("../agent/meeting/meetingRecorder.js").then(({ isMeetingRecording }) => {
+    if (isMeetingRecording()) {
+      sendToOverlay("overlay:meeting-toggle", { action: "stop" });
+      setOverlayState("processing");
+      return;
+    }
+    sendToOverlay("overlay:voice-toggle", { action: "cancel" });
+    setOverlayState("idle");
+    setVoiceSessionActive(false);
+    dismissOverlay(300);
+    void import("../agent/dictation/dictationSession.js").then((m) => {
+      m.cancelDictationSession();
+    });
+    // A cancelled recording must not leak a stashed selection into the next,
+    // unrelated dictation utterance.
+    void import("../agent/transform/transformSession.js").then((m) => {
+      m.takePendingSelection();
+    });
   });
 }
 
@@ -240,6 +305,25 @@ export async function handleShortcutPress(
   // reuses the "dictation" session/IPC plumbing internally.
   uiMode: "command" | "dictation" | "transform" = mode,
 ): Promise<void> {
+  if (!isVoiceInputReady()) {
+    showBootStartingOverlay();
+    console.info("[ripple-desktop] hotkey ignored — still starting up");
+    return;
+  }
+
+  // P10.2 — meeting owns the mic; route voice hotkeys to meeting stop instead.
+  try {
+    const { isMeetingRecording } = await import(
+      "../agent/meeting/meetingRecorder.js"
+    );
+    if (isMeetingRecording()) {
+      await handleMeetingShortcutPress();
+      return;
+    }
+  } catch {
+    /* ignore */
+  }
+
   if (!overlayWindow || overlayWindow.isDestroyed()) {
     overlayWindow = createOverlayWindow();
   }
@@ -298,6 +382,10 @@ let transformHotkeyBusy = false;
  * selection to run the rewrite instead of a plain insert.
  */
 export async function handleTransformShortcutPress(): Promise<void> {
+  if (!isVoiceInputReady()) {
+    showBootStartingOverlay();
+    return;
+  }
   try {
     if (voiceSessionActive) {
       await handleShortcutPress("dictation", "transform");
@@ -311,7 +399,7 @@ export async function handleTransformShortcutPress(): Promise<void> {
     const selection = await readSelectedText();
     if (!selection) {
       console.warn(
-        "[ripple-desktop] Transforms (F9): NO TEXT SELECTED — blue-highlight text in Notepad first, then press F9",
+        "[ripple-desktop] Transforms (F9): NO TEXT SELECTED — highlight text in the target app, then press F9",
       );
       showOverlay();
       sendToOverlay("overlay:state", "error");
@@ -371,6 +459,10 @@ async function openNoteInMainWindow(note: {
  * scope here).
  */
 export async function handleQuickCaptureShortcutPress(): Promise<void> {
+  if (!isVoiceInputReady()) {
+    showBootStartingOverlay();
+    return;
+  }
   if (voiceSessionActive || quickCaptureBusy) return;
   quickCaptureBusy = true;
   try {
@@ -419,4 +511,143 @@ export async function handleScratchpadFromFlowBar(): Promise<void> {
   } finally {
     quickCaptureBusy = false;
   }
+}
+
+/**
+ * P10.2 — Meeting Notetaker toggle (Ctrl+Shift+M, Flow Bar stop, or voice
+ * "start/stop meeting"). Mic capture runs in the Overlay after state starts.
+ * First start requires explicit privacy consent (Wispr-style disclosure).
+ */
+export async function handleMeetingShortcutPress(): Promise<void> {
+  if (!isVoiceInputReady()) {
+    showBootStartingOverlay();
+    return;
+  }
+  try {
+    const {
+      startMeetingRecording,
+      isMeetingRecording,
+      getMeetingState,
+      isMeetingConsentGranted,
+    } = await import("../agent/meeting/meetingRecorder.js");
+
+    if (!overlayWindow || overlayWindow.isDestroyed()) {
+      overlayWindow = createOverlayWindow();
+    }
+    showOverlay();
+
+    if (isMeetingRecording()) {
+      // Overlay owns the final flush → meeting:end.
+      setOverlayState("processing");
+      sendToOverlay("overlay:meeting-toggle", { action: "stop" });
+      return;
+    }
+
+    // Don't steal the mic from an active dictation/command session.
+    if (voiceSessionActive) {
+      sendToOverlay("overlay:transform-hint", {
+        message: "Finish voice first, then start meeting",
+      });
+      setOverlayState("error");
+      setTimeout(() => setOverlayState("idle"), 2200);
+      return;
+    }
+
+    // P10.2b — explicit consent before any recording / cloud upload.
+    if (!isMeetingConsentGranted()) {
+      expandOverlayForMeetingConsent();
+      sendToOverlay("overlay:meeting-consent", { show: true });
+      return;
+    }
+
+    await startMeetingRecording();
+    const snap = getMeetingState();
+    if (snap.state === "recording") {
+      collapseOverlayToIndicator();
+      setOverlayState("listening");
+    }
+  } catch (err) {
+    console.error("[ripple-desktop] Meeting toggle failed:", err);
+    showOverlay();
+    setOverlayState("error");
+    sendToOverlay("overlay:transform-hint", {
+      message: "Meeting failed — try again",
+    });
+    setTimeout(() => setOverlayState("idle"), 2500);
+  }
+}
+
+/** Accept meeting disclosure → persist consent → start recording. */
+export async function acceptMeetingConsentAndStart(): Promise<void> {
+  const { acceptMeetingConsent, startMeetingRecording, getMeetingState } =
+    await import("../agent/meeting/meetingRecorder.js");
+  acceptMeetingConsent();
+  sendToOverlay("overlay:meeting-consent", { show: false });
+  collapseOverlayToIndicator();
+  showOverlay();
+  await startMeetingRecording();
+  const snap = getMeetingState();
+  if (snap.state === "recording") {
+    setOverlayState("listening");
+  }
+}
+
+/** Decline meeting disclosure — do not record. */
+export async function declineMeetingConsentAndClose(): Promise<void> {
+  const { declineMeetingConsent } = await import(
+    "../agent/meeting/meetingRecorder.js"
+  );
+  declineMeetingConsent();
+  sendToOverlay("overlay:meeting-consent", { show: false });
+  collapseOverlayToIndicator();
+  hideOverlay();
+  setOverlayState("idle");
+}
+
+/** Triple-tap detection on dictation hotkey → meeting toggle (when idle). */
+const meetingTapTimes: number[] = [];
+let meetingTapTimer: ReturnType<typeof setTimeout> | null = null;
+
+export function handleDictationHotkeyWithMeetingTripleTap(): void {
+  if (!isVoiceInputReady()) {
+    showBootStartingOverlay();
+    console.info("[ripple-desktop] dictation hotkey ignored — still starting up");
+    return;
+  }
+  // Mid-utterance: always stop immediately — never wait for triple-tap.
+  if (voiceSessionActive) {
+    void handleShortcutPress("dictation");
+    return;
+  }
+
+  void import("../agent/meeting/meetingRecorder.js").then(({ isMeetingRecording }) => {
+    if (isMeetingRecording()) {
+      // Dictation hotkey during meeting stops the meeting (same as meeting hotkey).
+      void handleMeetingShortcutPress();
+      return;
+    }
+
+    const now = Date.now();
+    while (meetingTapTimes.length && now - meetingTapTimes[0]! > 850) {
+      meetingTapTimes.shift();
+    }
+    meetingTapTimes.push(now);
+
+    if (meetingTapTimes.length >= 3) {
+      if (meetingTapTimer) {
+        clearTimeout(meetingTapTimer);
+        meetingTapTimer = null;
+      }
+      meetingTapTimes.length = 0;
+      void handleMeetingShortcutPress();
+      return;
+    }
+
+    if (meetingTapTimer) clearTimeout(meetingTapTimer);
+    meetingTapTimer = setTimeout(() => {
+      meetingTapTimer = null;
+      meetingTapTimes.length = 0;
+      void handleShortcutPress("dictation");
+    }, 380);
+  });
 }

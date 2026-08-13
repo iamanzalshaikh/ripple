@@ -58,6 +58,22 @@ function logDiagnosticsBlock(
 
   if (diag.focused) {
     console.info(`${LOG_PREFIX} focused_element ${formatNode(diag.focused)}`);
+    const role = (diag.focused.controlType ?? "").toLowerCase();
+    const proc = process.toLowerCase();
+    const titleLc = title.toLowerCase();
+    if (
+      proc === "explorer" &&
+      (titleLc === "program manager" ||
+        titleLc === "?" ||
+        !titleLc ||
+        role.includes("listitem"))
+    ) {
+      console.warn(
+        `${LOG_PREFIX} focus_drift_shell_detected` +
+          ` — foreground is desktop shell (not the insert target);` +
+          ` see [ripple-focus-drift] for composer click root cause`,
+      );
+    }
   } else {
     console.warn(`${LOG_PREFIX} focused_element none`);
   }

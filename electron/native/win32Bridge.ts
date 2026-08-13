@@ -38,6 +38,7 @@ public class RippleNative {
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
   [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
   [DllImport("user32.dll")] public static extern bool AllowSetForegroundWindow(int dwProcessId);
+  [DllImport("user32.dll")] public static extern bool LockSetForegroundWindow(uint uLockCode);
   [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
   [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
   [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
@@ -48,10 +49,13 @@ public class RippleNative {
   [DllImport("user32.dll")] public static extern int GetSystemMetrics(int nIndex);
   [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(POINT Point);
   [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr hwnd, uint gaFlags);
+  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
   [DllImport("user32.dll")] public static extern IntPtr MonitorFromPoint(POINT pt, uint dwFlags);
   [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
   [StructLayout(LayoutKind.Sequential)]
   public struct POINT { public int X; public int Y; }
+  [StructLayout(LayoutKind.Sequential)]
+  public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
   public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 }
 "@
@@ -72,20 +76,25 @@ function Get-Title([IntPtr]$h) {
 
 function Focus-Hwnd([IntPtr]$h, [string]$titleHint) {
   [void][RippleNative]::AllowSetForegroundWindow(-1)
-  $ws = New-Object -ComObject WScript.Shell
-  if ($titleHint) { $null = $ws.AppActivate($titleHint) }
-  if ([RippleNative]::IsIconic($h)) { [void][RippleNative]::ShowWindow($h, 9) }
-  [void][RippleNative]::BringWindowToTop($h)
-  $fg = [RippleNative]::GetForegroundWindow()
-  $fgPid = [uint32]0; $targetPid = [uint32]0
-  $fgThread = [RippleNative]::GetWindowThreadProcessId($fg, [ref]$fgPid)
-  $targetThread = [RippleNative]::GetWindowThreadProcessId($h, [ref]$targetPid)
-  if ($fgThread -ne 0 -and $targetThread -ne 0) {
-    [void][RippleNative]::AttachThreadInput($fgThread, $targetThread, $true)
-  }
-  [void][RippleNative]::SetForegroundWindow($h)
-  if ($fgThread -ne 0 -and $targetThread -ne 0) {
-    [void][RippleNative]::AttachThreadInput($fgThread, $targetThread, $false)
+  [void][RippleNative]::LockSetForegroundWindow(1)
+  try {
+    $ws = New-Object -ComObject WScript.Shell
+    if ($titleHint) { $null = $ws.AppActivate($titleHint) }
+    if ([RippleNative]::IsIconic($h)) { [void][RippleNative]::ShowWindow($h, 9) }
+    [void][RippleNative]::BringWindowToTop($h)
+    $fg = [RippleNative]::GetForegroundWindow()
+    $fgPid = [uint32]0; $targetPid = [uint32]0
+    $fgThread = [RippleNative]::GetWindowThreadProcessId($fg, [ref]$fgPid)
+    $targetThread = [RippleNative]::GetWindowThreadProcessId($h, [ref]$targetPid)
+    if ($fgThread -ne 0 -and $targetThread -ne 0) {
+      [void][RippleNative]::AttachThreadInput($fgThread, $targetThread, $true)
+    }
+    [void][RippleNative]::SetForegroundWindow($h)
+    if ($fgThread -ne 0 -and $targetThread -ne 0) {
+      [void][RippleNative]::AttachThreadInput($fgThread, $targetThread, $false)
+    }
+  } finally {
+    [void][RippleNative]::LockSetForegroundWindow(2)
   }
 }
 
@@ -294,6 +303,115 @@ switch ($Action) {
     [RippleNative]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
     @{ ok = $true; x = $x; y = $y; name = $matched } | ConvertTo-Json -Compress
   }
+  'clickUiaComposerEdit' {
+    # Prefer UIA SetFocus; only click when the point is verified on the target
+    # HWND. Blind SetCursorPos+mouse_event on multi-monitor (often negative X)
+    # can hit the desktop ListView (Program Manager / explorer) and steal FG.
+    Add-Type -AssemblyName UIAutomationClient
+    Add-Type -AssemblyName UIAutomationTypes
+    $hwnd = [IntPtr][int64]$args.hwnd
+    $root = [System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
+    if (-not $root) { @{ ok = $false; reason = 'no_root' } | ConvertTo-Json -Compress; break }
+    $editType = [System.Windows.Automation.ControlType]::Edit
+    $cond = New-Object System.Windows.Automation.PropertyCondition(
+      [System.Windows.Automation.AutomationElement]::ControlTypeProperty, $editType)
+    $edits = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $cond)
+    $best = $null
+    $bestScore = -1
+    $bestName = ''
+    foreach ($el in $edits) {
+      $cur = $el.Current
+      $nm = [string]$cur.Name
+      $cls = [string]$cur.ClassName
+      $aid = [string]$cur.AutomationId
+      if ($nm -match 'Address and search|Omnibox') { continue }
+      if ($cls -match 'OmniboxView') { continue }
+      if ($aid -match '^view_\d+$' -and $nm -match 'Address') { continue }
+      $rect = $cur.BoundingRectangle
+      if ($rect.Width -lt 8 -or $rect.Height -lt 8) { continue }
+      $score = [double]$rect.Y + [double]$rect.Height
+      if ($cls -match 'editable|contenteditable|Lexical|KRoqRc|puppeteer') { $score += 10000 }
+      if ($cur.HasKeyboardFocus) { $score += 5000 }
+      if ($nm -match 'Type a message|Message|History is on|compose') { $score += 2000 }
+      if ($score -gt $bestScore) { $bestScore = $score; $best = $el; $bestName = $nm }
+    }
+    if (-not $best) { @{ ok = $false; reason = 'no_composer' } | ConvertTo-Json -Compress; break }
+
+    $setFocusOk = $false
+    try {
+      $best.SetFocus()
+      Start-Sleep -Milliseconds 90
+      if ($best.Current.HasKeyboardFocus) { $setFocusOk = $true }
+    } catch {}
+
+    $r = $best.Current.BoundingRectangle
+    $x = [int]($r.X + $r.Width / 2)
+    $y = [int]($r.Y + $r.Height / 2)
+
+    $wr = New-Object RippleNative+RECT
+    $hasWinRect = [RippleNative]::GetWindowRect($hwnd, [ref]$wr)
+    $inset = 4
+    $insideWin = $false
+    if ($hasWinRect) {
+      $insideWin = ($x -ge ($wr.Left + $inset)) -and ($x -le ($wr.Right - $inset)) -and
+                   ($y -ge ($wr.Top + $inset)) -and ($y -le ($wr.Bottom - $inset))
+    }
+
+    $pt = New-Object RippleNative+POINT
+    $pt.X = $x; $pt.Y = $y
+    $under = [RippleNative]::WindowFromPoint($pt)
+    $rootUnder = [RippleNative]::GetAncestor($under, 2)
+    if ($rootUnder -eq [IntPtr]::Zero) { $rootUnder = $under }
+    $pointOnTarget = ($under -eq $hwnd) -or ($rootUnder -eq $hwnd)
+    $underProc = if ($under -ne [IntPtr]::Zero) { Get-ProcName $under } else { '' }
+    $underTitle = if ($rootUnder -ne [IntPtr]::Zero) { Get-Title $rootUnder } else { '' }
+
+    if ($setFocusOk) {
+      @{
+        ok = $true; method = 'setfocus'; x = $x; y = $y; name = $bestName
+        pointOnTarget = $pointOnTarget; insideWin = $insideWin
+        underProc = $underProc; underTitle = $underTitle
+      } | ConvertTo-Json -Compress
+      break
+    }
+
+    if (-not $insideWin -or -not $pointOnTarget) {
+      @{
+        ok = $false; reason = 'point_outside_hwnd'; method = 'refused_click'
+        x = $x; y = $y; name = $bestName
+        insideWin = $insideWin; pointOnTarget = $pointOnTarget
+        underProc = $underProc; underTitle = $underTitle
+        winLeft = $wr.Left; winTop = $wr.Top; winRight = $wr.Right; winBottom = $wr.Bottom
+      } | ConvertTo-Json -Compress
+      break
+    }
+
+    [void][RippleNative]::SetCursorPos($x, $y)
+    [RippleNative]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
+    Start-Sleep -Milliseconds 50
+    [RippleNative]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
+    Start-Sleep -Milliseconds 60
+
+    $fg = [RippleNative]::GetForegroundWindow()
+    $fgProc = Get-ProcName $fg
+    $fgTitle = Get-Title $fg
+    $shellHit = ($fgProc -eq 'explorer') -and (
+      -not $fgTitle -or $fgTitle -eq 'Program Manager')
+    if ($shellHit) {
+      @{
+        ok = $false; reason = 'clicked_shell'; method = 'click'
+        x = $x; y = $y; name = $bestName
+        underProc = $underProc; underTitle = $underTitle
+        fgProc = $fgProc; fgTitle = $fgTitle
+      } | ConvertTo-Json -Compress
+      break
+    }
+
+    @{
+      ok = $true; method = 'click'; x = $x; y = $y; name = $bestName
+      underProc = $underProc; underTitle = $underTitle
+    } | ConvertTo-Json -Compress
+  }
   default { throw "Unknown action: $Action" }
 }
 }
@@ -381,6 +499,26 @@ export async function focusWindowByHwnd(
     }
   }
   await invokeWin32("focusHwnd", { hwnd, titleHint });
+}
+
+/** Call at hotkey time — sidecar asks Windows to allow later SetForegroundWindow. */
+export async function allowSetForegroundNative(): Promise<void> {
+  if (!isNativeClientAuthenticated()) return;
+  try {
+    await callNativeRpc("allow_set_foreground", {});
+  } catch {
+    /* best-effort — insert restore still retries */
+  }
+}
+
+/** Prevent explorer from stealing FG during restore (LockSetForegroundWindow). */
+export async function lockSetForegroundNative(lock: boolean): Promise<void> {
+  if (!isNativeClientAuthenticated()) return;
+  try {
+    await callNativeRpc("lock_set_foreground", { lock });
+  } catch {
+    /* older sidecar — restore still proceeds */
+  }
 }
 
 export async function closeWindowByHwnd(hwnd: number): Promise<void> {
@@ -870,6 +1008,43 @@ export async function mouseMoveNative(args: {
     );
   }
   return null;
+}
+
+export type ComposerClickResult = {
+  ok: boolean;
+  x?: number;
+  y?: number;
+  name?: string;
+  reason?: string;
+  method?: "setfocus" | "click" | "refused_click" | string;
+  insideWin?: boolean;
+  pointOnTarget?: boolean;
+  underProc?: string;
+  underTitle?: string;
+  fgProc?: string;
+  fgTitle?: string;
+  winLeft?: number;
+  winTop?: number;
+  winRight?: number;
+  winBottom?: number;
+};
+
+/** Click the best web chat composer Edit (bottom editable, not omnibox). */
+export async function clickBrowserComposerNative(args: {
+  hwnd: number;
+}): Promise<ComposerClickResult | null> {
+  if (!isWin32NativeAvailable() || !args.hwnd) return null;
+  try {
+    return await invokeWin32<ComposerClickResult>("clickUiaComposerEdit", {
+      hwnd: args.hwnd,
+    });
+  } catch (e: unknown) {
+    console.warn(
+      "[ripple-win32] clickUiaComposerEdit failed:",
+      e instanceof Error ? e.message : e,
+    );
+    return null;
+  }
 }
 
 export async function clickUiaInWindowNative(args: {

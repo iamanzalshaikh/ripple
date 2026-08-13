@@ -41,7 +41,43 @@ export function LoginPage() {
   }
 
   useEffect(() => {
-    void runHealthCheck();
+    let cancelled = false;
+    const delays = [250, 500, 1000, 2000, 2000, 2000, 2000, 2000];
+
+    async function runHealthCheckWithBackoff() {
+      setHealth({ status: "checking" });
+      for (let i = 0; i < delays.length; i++) {
+        try {
+          const res = await getRippleApi().checkApiHealth();
+          if (cancelled) return;
+          if (res.ok) {
+            setHealth({
+              status: "ok",
+              message: res.message,
+              url: res.url,
+              latencyMs: res.latencyMs,
+            });
+            return;
+          }
+          setHealth({ status: "error", message: res.message, url: res.url });
+        } catch (e: unknown) {
+          if (cancelled) return;
+          setHealth({
+            status: "error",
+            message: e instanceof Error ? e.message : "Health check failed",
+            url: "—",
+          });
+        }
+        if (i < delays.length - 1) {
+          await new Promise((r) => setTimeout(r, delays[i]));
+        }
+      }
+    }
+
+    void runHealthCheckWithBackoff();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   function switchMode(next: AuthMode) {

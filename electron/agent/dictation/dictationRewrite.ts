@@ -9,6 +9,11 @@ import {
 import { toCasualTone, toProfessionalTone } from "./correctionEngine.js";
 import { detectCorrectionSignal } from "./correctionSignalDetector.js";
 import {
+  altCollapseIsPlausible,
+  detectIntentAlternatives,
+} from "./intentAlternatives.js";
+import { detectSoftSelfCorrection } from "./softSelfCorrection.js";
+import {
   detectSpokenList,
   formatSpokenList,
   localCleanup,
@@ -76,12 +81,33 @@ function greetingAddressee(text: string): string | null {
   return m?.[1] ?? null;
 }
 
+export type CleanupBoundsOptions = {
+  /**
+   * When true (competing alternatives detected — greetings/times/offers),
+   * allow AI cleanup to collapse to final intent. Existing correction-marker
+   * path is unchanged; name + greeting lead still protected.
+   */
+  allowAlternativeCollapse?: boolean;
+  /**
+   * When true (soft mid-utterance revision class — sorry / I mean / wait…),
+   * allow AI cleanup to drop the superseded clause. Not Layer-1 auto-apply.
+   */
+  allowSoftRevision?: boolean;
+};
+
 /**
  * Conservative fail-open guard for the always-on cleanup pass.
  * Rejects aggressive rewrites that delete greetings, names, or whole clauses
  * when the user did not signal a self-correction.
+ *
+ * Optional flags relax ratio/clause guards only — Layer-1 / name / greeting
+ * lead protections stay. Default behavior unchanged.
  */
-export function cleanupWithinBounds(before: string, after: string): boolean {
+export function cleanupWithinBounds(
+  before: string,
+  after: string,
+  opts?: CleanupBoundsOptions,
+): boolean {
   const cleaned = after.trim();
   if (!cleaned) return false;
   const src = before.trim();
@@ -90,19 +116,25 @@ export function cleanupWithinBounds(before: string, after: string): boolean {
   if (b === 0) return false;
 
   const hasCorrectionMarker = CORRECTION_MARKERS.test(src);
+  const allowAlt = opts?.allowAlternativeCollapse === true;
+  const allowSoft = opts?.allowSoftRevision === true;
+  const allowDrop = hasCorrectionMarker || allowAlt || allowSoft;
   // Without an explicit correction, keep ~75% of words (was 40% — too loose).
-  // With a marker, allow surgical drops down to ~40%.
-  const minRatio = hasCorrectionMarker ? 0.4 : 0.75;
+  // With a marker / soft revision, allow surgical drops down to ~40%.
+  // With competing alternatives only, allow ~55%.
+  const minRatio = hasCorrectionMarker || allowSoft ? 0.4 : allowAlt ? 0.55 : 0.75;
   if (a < Math.max(1, Math.floor(b * minRatio))) return false;
   if (a > b * 2 + 5) return false;
 
   const charRatio = cleaned.length / Math.max(1, src.length);
-  if (!hasCorrectionMarker && charRatio < 0.7) return false;
+  const minChar =
+    hasCorrectionMarker || allowSoft ? 0.35 : allowAlt ? 0.5 : 0.7;
+  if (!hasCorrectionMarker && !allowSoft && charRatio < minChar) return false;
 
   const beforeClauses = clauseCount(src);
   const afterClauses = clauseCount(cleaned);
   if (
-    !hasCorrectionMarker &&
+    !allowDrop &&
     beforeClauses >= 2 &&
     afterClauses < beforeClauses
   ) {
@@ -111,6 +143,7 @@ export function cleanupWithinBounds(before: string, after: string): boolean {
 
   if (
     !hasCorrectionMarker &&
+    !allowSoft &&
     GREETING_LEAD.test(src) &&
     !GREETING_LEAD.test(cleaned)
   ) {
@@ -260,15 +293,39 @@ export async function rewriteDictationBuffer(
         surface: "dictation",
         previousText: committedBuffer || undefined,
       });
-      if (
-        cleaned &&
+      const alt = detectIntentAlternatives(currentUtterance);
+      const soft = detectSoftSelfCorrection(currentUtterance);
+      const boundsOk =
+        !!cleaned &&
         cleaned.trim() !== currentUtterance.trim() &&
-        cleanupWithinBounds(currentUtterance, cleaned)
-      ) {
+        cleanupWithinBounds(currentUtterance, cleaned, {
+          allowAlternativeCollapse: alt.detected,
+          allowSoftRevision: soft.detected,
+        });
+      // Soft production guard: when competitors were detected, reject only
+      // clearly still-jammed AI output (both greetings/times left). Not strict —
+      // does not force "last wins"; name/greeting lead already in bounds.
+      const altOk =
+        !alt.detected ||
+        altCollapseIsPlausible(currentUtterance, cleaned ?? "", alt.kind);
+      if (boundsOk && altOk && cleaned) {
         finalText = cleaned.trim();
         cleanupApplied = true;
-        cleanupReason = "ai_cleanup";
+        cleanupReason = soft.detected
+          ? `ai_cleanup+soft_revision`
+          : alt.detected
+            ? `ai_cleanup+alt_${alt.kind}`
+            : "ai_cleanup";
         modelUsed = "dictation_clean";
+        if (soft.detected) {
+          console.info(
+            `[ripple-dictation] soft-revision cue=${soft.cue} reason=${soft.reason}`,
+          );
+        } else if (alt.detected) {
+          console.info(
+            `[ripple-dictation] alt-collapse kind=${alt.kind} reason=${alt.reason}`,
+          );
+        }
       } else {
         // aiRewriteDictation fails open to null on ANY network/auth/timeout
         // failure — previously that meant zero cleanup at all (raw transcript,

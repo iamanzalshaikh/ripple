@@ -72,4 +72,5 @@ export type Win32Action =
   | "mouseMove"
   | "mouseClick"
   | "mouseScroll"
-  | "clickUiaInWindow";
+  | "clickUiaInWindow"
+  | "clickUiaComposerEdit";

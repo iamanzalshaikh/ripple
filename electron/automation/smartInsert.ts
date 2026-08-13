@@ -1,5 +1,8 @@
 import { clipboard } from "electron";
-import { getFocusContext, restoreFocusContext } from "../focus/focusContext.js";
+import {
+  ensureInsertForeground,
+  getFocusContext,
+} from "../focus/focusContext.js";
 import {
   ensureEditorKeyboardFocus,
   isClassicTextEditorProcess,
@@ -32,8 +35,9 @@ import {
   isLinkedInCommand,
   isLinkedInTypingBlocked,
 } from "./adapters/linkedin/parseLinkedInCommand.js";
-import { isInstagramTabActive, isLinkedInTabActive, isWhatsAppTabActive } from "../focus/focusContext.js";
+import { isGoogleChatTabActive, isInstagramTabActive, isLinkedInTabActive, isWhatsAppTabActive } from "../focus/focusContext.js";
 import { insertWhatsAppComposeText } from "./adapters/whatsapp/whatsappComposeInsert.js";
+import { insertBrowserChatComposeText } from "./adapters/browser/browserChatComposeInsert.js";
 import {
   isContextualInstagramComposeCommand,
   isInstagramTypingBlocked,
@@ -113,8 +117,17 @@ function resolveGmailComposeFields(
 /** Replace all text in the focused field (for edits). */
 async function replaceTextInPlace(content: string): Promise<string> {
   const focus = getFocusContext();
-  await restoreFocusContext();
+  if (!(await ensureInsertForeground())) {
+    throw new Error(
+      "insert_aborted:ripple_foreground — click the target field and try again",
+    );
+  }
   await delay(450);
+  if (!(await ensureInsertForeground())) {
+    throw new Error(
+      "insert_aborted:ripple_foreground — click the target field and try again",
+    );
+  }
 
   try {
     const diag = await getInsertTextA11yDiagnostics();
@@ -207,6 +220,9 @@ export async function smartInsertText(
   const whatsappCompose =
     isWhatsAppTabActive() && isContextualWhatsAppComposeCommand(cmd);
 
+  const googleChatCompose =
+    isGoogleChatTabActive() && !isEditOrRephraseCommand(cmd);
+
   if (isInstagramTypingBlocked(cmd) && !isEditOrRephraseCommand(cmd)) {
     throw new Error(
       "Instagram DMs use the open chat composer — on an Instagram DM thread say your message directly",
@@ -223,6 +239,14 @@ export async function smartInsertText(
     console.info("[ripple-desktop] WA compose — type into open chat (OS-first)");
     const body = formatMessageBody(parsed, text.trim() || cmd.trim());
     return insertWhatsAppComposeText(body);
+  }
+
+  if (googleChatCompose) {
+    console.info(
+      "[ripple-desktop] Google Chat compose — type into open chat (OS-first)",
+    );
+    const body = formatMessageBody(parsed, text.trim() || cmd.trim());
+    return insertBrowserChatComposeText(body);
   }
 
   if (instagramCompose && !isEditOrRephraseCommand(cmd)) {
@@ -275,7 +299,11 @@ export async function smartInsertText(
     }
   }
 
-  await restoreFocusContext();
+  if (!(await ensureInsertForeground())) {
+    throw new Error(
+      "insert_aborted:ripple_foreground — click the target field and try again",
+    );
+  }
   await delay(isWhatsAppContext() ? 550 : 400);
 
   if (focus && isClassicTextEditorProcess(focus.processName)) {
@@ -289,9 +317,17 @@ export async function smartInsertText(
 
   try {
     const beforeObserve = await captureObservation();
+    // Browser composers (esp. WhatsApp Web) often report native_text ok=false
+    // after the text already landed. Falling through to sendkeys retypes the
+    // full string (live double message). Prefer clipboard + abort on native fail.
+    const browserComposer = Boolean(focus?.isBrowser) || isWhatsAppContext();
     const { detail } = await runInsertWithFallback(insertBody, {
       verify: process.env.RIPPLE_P85_INSERT_VERIFY !== "0",
       beforeObserve,
+      preferFirst: browserComposer ? "clipboard_paste" : undefined,
+      abortLadderOnPartialNativeFail: browserComposer,
+      acceptUnverifiableEdit: browserComposer,
+      includeVision: !browserComposer,
     });
     return detail;
   } catch (e: unknown) {

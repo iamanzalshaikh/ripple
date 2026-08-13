@@ -253,6 +253,10 @@ function migrateRippleSchema(database: DatabaseSync): void {
   if (userPrefNames.size > 0 && !userPrefNames.has("quiet_mode")) {
     database.exec(`ALTER TABLE user_preferences ADD COLUMN quiet_mode TEXT`);
   }
+  // P10.2b — meeting recording privacy consent ("1" = accepted disclosure).
+  if (userPrefNames.size > 0 && !userPrefNames.has("meeting_consent")) {
+    database.exec(`ALTER TABLE user_preferences ADD COLUMN meeting_consent TEXT`);
+  }
 
   // Phase 10.1 — Flow Notes.
   database.exec(`

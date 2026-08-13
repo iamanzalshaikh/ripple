@@ -140,6 +140,10 @@ interface RippleApi {
     get: () => Promise<{ ok: boolean; language?: string; message?: string }>;
     set: (language: string) => Promise<{ ok: boolean; language?: string; message?: string }>;
   };
+  loopback?: {
+    enable: () => Promise<void>;
+    disable: () => Promise<void>;
+  };
   quietMode: {
     get: () => Promise<{ ok: boolean; quietMode?: boolean; message?: string }>;
     set: (enabled: boolean) => Promise<{ ok: boolean; quietMode?: boolean; message?: string }>;
@@ -381,6 +385,37 @@ interface RippleApi {
     openScratchpad: () => Promise<{ ok: boolean; message?: string }>;
     startTransform: () => Promise<{ ok: boolean; message?: string }>;
   };
+  meeting: {
+    getState: () => Promise<{
+      ok: boolean;
+      message?: string;
+      state?: {
+        state: "idle" | "recording" | "stopping";
+        meetingId: string | null;
+        noteId: string | null;
+        startedAt: number | null;
+        elapsedMs: number;
+        lastTranscriptSnippet: string | null;
+        transcriptLength: number;
+        error: string | null;
+        failedChunks?: number;
+      };
+    }>;
+    toggle: () => Promise<{ ok: boolean; message?: string }>;
+    stop: () => Promise<{ ok: boolean; message?: string }>;
+    acceptConsent: () => Promise<{ ok: boolean; message?: string }>;
+    declineConsent: () => Promise<{ ok: boolean; message?: string }>;
+    sendChunk: (args: {
+      chunk: Uint8Array;
+      mimeType?: string;
+      filename?: string;
+    }) => Promise<{ ok: boolean; text?: string; message?: string }>;
+    end: (args?: {
+      chunk?: Uint8Array;
+      mimeType?: string;
+      filename?: string;
+    }) => Promise<{ ok: boolean; message?: string }>;
+  };
   onIpcEvent: (
     channel: string,
     cb: (payload: unknown) => void,
@@ -390,6 +425,25 @@ interface RippleApi {
     cb: (payload: {
       action: "start" | "stop" | "cancel";
       mode?: "command" | "dictation" | "transform";
+    }) => void,
+  ) => () => void;
+  onMeetingToggle?: (
+    cb: (payload: { action: "start" | "stop" }) => void,
+  ) => () => void;
+  onMeetingConsent?: (
+    cb: (payload: { show: boolean }) => void,
+  ) => () => void;
+  onMeetingState?: (
+    cb: (payload: {
+      state: "idle" | "recording" | "stopping";
+      meetingId: string | null;
+      noteId: string | null;
+      startedAt: number | null;
+      elapsedMs: number;
+      lastTranscriptSnippet: string | null;
+      transcriptLength: number;
+      error: string | null;
+      failedChunks?: number;
     }) => void,
   ) => () => void;
   pickDisambiguation?: (path: string | null) => Promise<{ ok: boolean }>;

@@ -4,6 +4,8 @@ import {
   handleShortcutPress,
   handleQuickCaptureShortcutPress,
   handleTransformShortcutPress,
+  handleMeetingShortcutPress,
+  handleDictationHotkeyWithMeetingTripleTap,
 } from "../windows/overlay.js";
 import {
   isDictationModeEnabled,
@@ -20,7 +22,8 @@ export type HotkeyBinding = {
     | "transform"
     | "voice"
     | "cancel_voice"
-    | "quick_capture";
+    | "quick_capture"
+    | "meeting";
 };
 
 const DEFAULT_BINDINGS: HotkeyBinding[] = [
@@ -29,10 +32,12 @@ const DEFAULT_BINDINGS: HotkeyBinding[] = [
     label: "Command mode",
     action: "command",
   },
-  // Primary dictation — Shift+Space (simple; avoids Alt chords stolen by ChatGPT).
+  // Primary dictation — Shift+Space. Never Alt+Space: that chord is Windows'
+  // reserved "open window system menu" shortcut and RegisterHotKey always fails.
+  // Triple-tap Shift+Space (when idle) toggles Meeting Notetaker.
   {
     accelerator: "Shift+Space",
-    label: "Dictation mode",
+    label: "Dictation mode (triple-tap = meeting)",
     action: "dictation",
   },
   {
@@ -42,7 +47,7 @@ const DEFAULT_BINDINGS: HotkeyBinding[] = [
   },
   {
     accelerator: "Alt+Shift+Space",
-    label: "Dictation (legacy)",
+    label: "Dictation (legacy backup)",
     action: "dictation",
   },
   // P8 — Transforms: one key (F9). Ctrl+Alt+Space kept as backup only.
@@ -61,6 +66,12 @@ const DEFAULT_BINDINGS: HotkeyBinding[] = [
     accelerator: "Control+Alt+N",
     label: "Quick capture (new note + dictate)",
     action: "quick_capture",
+  },
+  // P10.2 — Meeting Notetaker toggle.
+  {
+    accelerator: "Control+Shift+M",
+    label: "Meeting Notetaker (start/stop)",
+    action: "meeting",
   },
   { accelerator: "Escape", label: "Cancel voice", action: "cancel_voice" },
 ];
@@ -85,6 +96,14 @@ function runHotkeyAction(action: HotkeyBinding["action"]): void {
     void handleQuickCaptureShortcutPress();
     return;
   }
+  if (action === "meeting") {
+    void handleMeetingShortcutPress();
+    return;
+  }
+  if (action === "dictation") {
+    handleDictationHotkeyWithMeetingTripleTap();
+    return;
+  }
   void handleShortcutPress(modeForAction(action));
 }
 
@@ -104,8 +123,8 @@ export function registerNativeHotkeys(
 
   // Always register Electron bindings too when sidecar is partial / missing a
   // chord. Duplicate RegisterHotKey is fine — Electron globalShortcut fails
-  // soft if already taken. This fixes "press 2–3 times" when Alt+Space dies
-  // and sidecar aborted the whole set.
+  // soft if already taken. Shift+Space is primary dictation; Alt+Space is
+  // never registered (Windows reserved system-menu chord).
   const sidecar = sidecarOwnsHotkeys();
   if (sidecar) {
     console.info(
@@ -149,4 +168,8 @@ export function listRegisteredHotkeys(): string[] {
     return DEFAULT_BINDINGS.map((b) => b.accelerator);
   }
   return [...registered];
+}
+
+export function getDefaultHotkeyBindings(): HotkeyBinding[] {
+  return [...DEFAULT_BINDINGS];
 }

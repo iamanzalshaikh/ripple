@@ -2,7 +2,7 @@
 
 **Status:** FINAL / ONLY PLAN — use this single file for all development until full parity  
 **File:** `docs/WISPR-FLOW-FINAL-PLAN.md`  
-**Last updated:** 2026-07-23  
+**Last updated:** 2026-07-29  
 
 **How to use:** Follow phases in order. Do **Phase 0–6 first** (Windows MVP). Then 7→13. Do not open other Wispr plans for day-to-day work.
 
@@ -35,15 +35,13 @@ Ctrl+Space = agent only. Never merge into dictation.
 ---
 
 ## 1. Closeness scores (re-measure after each phase)
-Learn that Noor is Noor.
+
 | Measuring | % today | Notes |
 |-----------|---------|-------|
-| Full Wispr Flow product | ~18–22% | Recalculate after each phase |
-| Core Windows Wispr feel | ~55–65% | Unproven until Phase 1 matrix green |Learn that nor means Noor.
+| Full Wispr Flow product | **~42%** | Windows nearly Wispr-class; Mac/iOS/Android + enterprise + billing still 0 |
+| Core Windows Wispr feel | **~85%** | System-wide dictation into most focused fields (Claude, Google Chat, WA, Gmail, Notepad, Cursor, etc.) + snippets/styles/dictionary + notes + meeting + transforms + Flow Bar |
 
-**Do not claim full Wispr parity at MVP.**
-
----Learn that nor means Noor.
+**Do not claim full Wispr parity** (other OSes / enterprise / billing remain). Re-measured 2026-07-29 with live field coverage confirmed.
 
 ## 2. Current state — Ripple P7 (baseline)
 
@@ -120,7 +118,7 @@ Learn Tathir means Tathir.Learn Tathir means Tathir.
 | Feature | Lane |
 |---------|------|
 | Windows insert in 4 apps + corrections + personal names | **MVP (0–6)** |
-| Snippets, Styles, dictionary UI, longer sessions, more apps | **Phase 7** |
+| Snippets, Styles, dictionary UI, longer sessions, more apps, auto name harvesting | **Phase 7** |
 | Highlight + voice rewrite (Transforms) | **Phase 8** |
 | Sync + Mac + iOS + Android + languages | **Phase 9** |
 | Flow Notes + Meeting Notetaker | **Phase 10** |
@@ -234,7 +232,7 @@ Ship when Phase 1–5 + §6 matrix are all green.
 
 | # | Task | Effort | Depends on |
 |---|------|--------|------------|
-| 7.1 | Stronger filler/punct/list cleanup | M | MVP |
+| 7.1 | Stronger filler/punct/list cleanup (+ alt-intent collapse) | M | MVP |
 | 7.2a | Snippet store | S | — |
 | 7.2b | Voice-trigger for snippets | M | 7.2a |
 | 7.2c | Snippet insert via ladder | S | 7.2b |
@@ -246,10 +244,38 @@ Ship when Phase 1–5 + §6 matrix are all green.
 | 7.6 | More apps: Notion, Word, Docs, Discord, Slack | L | Phase 1 |
 | 7.7 | Nearby on-screen text → bias name/term spelling | L | MVP insert + UIA |
 | 7.8 | Streaming / live type-as-you-speak | XL | STT partials + progressive insert |
+| 7.9a | Contact import → auto-seed bias list | M | Google/Outlook OAuth or local address book |
+| 7.9b | Conversation history mining → auto-harvest proper nouns | M | WhatsApp/email DB read access |
+| 7.9c | Auto-correction prompt ("Did you mean X?") | M | 7.7, overlay UX |
 
 **Ship gate:** Snippets + Styles usable E2E; dictionary UI shipped; ≥3 new apps proven live.  
 **Note:** Wispr Styles = English + desktop first — match that before expanding.  
-**Follow-ups:** 7.7 landed (`screenNameBias.ts`); **7.8 PAUSED** (default OFF — was damaging focused editors; set `RIPPLE_P85_STREAMING_INSERT=1` only after real streaming STT).
+**Follow-ups:** 7.7 landed (`screenNameBias.ts`); **7.8 PAUSED** (default OFF — was damaging focused editors; set `RIPPLE_P85_STREAMING_INSERT=1` only after real streaming STT).  
+**7.1 alt-intent (shipped, production soft-guard):** Competing alternatives in one breath (TOD greetings, clock times, repeated “can we…”) relax `cleanupWithinBounds` so existing `dictation_clean` AI can keep final intent. Soft `altCollapseIsPlausible` rejects only still-jammed output (does not force last-only). Layer-1 `double_no` / directives unchanged. Eval: `phase-p85-alt-intent-eval.spec.ts`.
+
+### Phase 7.9 — Automatic Name Harvesting (production-grade name accuracy)
+
+**Why:** On-screen bias (7.7) + manual corrections (7.4) cover a fraction of name encounters. Production-grade systems minimize how often you hit truly unknown names by automatically harvesting from sources the user already has — zero manual entry for the vast majority.
+
+**7.9a — Contact Import (zero manual entry) — M**
+- Request permission once → pull user's contact list (Google Contacts API, Outlook People API, or local Windows address book)
+- Bulk-insert every contact name into `voice_corrections` with `source="contacts"`
+- Re-sync periodically (daily or on-demand) to catch new contacts
+- Feed contact names into Whisper `initial_prompt` bias for improved STT accuracy at recognition time
+- **Gate:** Dictate a message to a contact whose name was never spoken/typed before — correct spelling on first attempt
+
+**7.9b — Conversation History Mining (zero manual entry) — M**
+- One-time background scan of accessible message history (WhatsApp local DB, Gmail threads via API, or on-screen scrape of recent chats)
+- Extract frequently-repeated proper nouns (names that appear 3+ times, not in common dictionary)
+- Auto-add to `voice_corrections` with `source="history_mining"`
+- Run once at setup + incrementally as new conversations are detected
+- **Gate:** Name that user has manually typed 5+ times in past chats is auto-recognized on first voice attempt
+
+**7.9c — Auto-Correction Prompt (one-tap, not manual curation) — M**
+- After STT produces a likely-wrong proper noun (not in contacts, not in corrections, not on screen, low confidence or no close match), surface a small overlay prompt: "Did you mean [X]?" with the best guess from edit-distance or phonetic match
+- User taps to confirm → `learnCorrection` permanently; dismiss → keep STT output
+- Only fires for genuinely unprecedented names — sources 7.7 + 7.9a + 7.9b handle the rest automatically
+- **Gate:** First-ever dictation of a brand-new name (not in any source) → system prompts once → correct forever after
 
 ---
 
@@ -271,7 +297,7 @@ Ship when Phase 1–5 + §6 matrix are all green.
 
 | # | Task | Effort | Depends on |
 |---|------|--------|------------|
-| 9.1 | Account + sync backend | XL | own scoping session |
+| 9.1 | Account + sync backend | XL | **DONE (Windows)** — P9.1.C `ripple-sync` live; platforms still open |
 | 9.2a | Mac shell + Accessibility insert | XL | 9.1 |
 | 9.2b | Port correction/rewrite to Mac | M | 9.2a |
 | 9.2c | Mac insert matrix | L | 9.2b |
@@ -285,7 +311,8 @@ Ship when Phase 1–5 + §6 matrix are all green.
 | 9.8 | Android Flow Bubble (after reconfirm) | M | 9.4b |
 
 **Ship gate:** One account; dictionary/snippets/styles sync across platforms; each platform passes its insert matrix.  
-**Treat Phase 9 as its own project kickoff.**
+**Treat Phase 9 as its own project kickoff.**  
+**2026-07-29:** Windows sync backend + desktop client for 5 kinds (incl. notes) is shipped — see decision log. Remaining Phase 9 work is platforms + incremental pull polish, not inventing sync from scratch.
 
 ---
 
@@ -293,9 +320,9 @@ Ship when Phase 1–5 + §6 matrix are all green.
 
 | # | Task | Effort | Depends on |
 |---|------|--------|------------|
-| 10.1 | Flow Notes (synced) | L | 9.1 |
+| 10.1 | Flow Notes (synced) | L | 9.1 ✅ (note kind live) |
 | 10.2a | Mac system-audio capture | L | 9.2a |
-| 10.2b | Meeting transcript/summary cloud pipeline + privacy disclosure | M | 10.2a |
+| 10.2b | Meeting transcript/summary cloud pipeline + privacy disclosure | M | **Done 2026-07-29** — analysis pack (sentiment/decisions/topics/owned actions) + diarize+talk-time; system audio still → 10.2a |
 | 10.3 | Quick capture (widget / Action Button → note) | M | 9.7 |
 
 **Ship gate:** Dictate a note from any platform → syncs; record a test meeting → usable transcript/summary.
@@ -348,20 +375,22 @@ Ship when Phase 1–5 + §6 matrix are all green.
 
 ```text
 Microphone
-  → Whisper STT
-  → Dictation gate (Alt+Space only)
+  → Whisper STT (+ initial_prompt bias from contacts/history [7.9a/b])
+  → Dictation gate (Shift+Space only)
   → Revision buffer (dictationSession)
+  → P7.7 screen name bias (UIA/OCR nearby text)
   → Layer 1 signal detector (local)
   → Layer 2A analyze (ambiguous) / 2B generate (tone only)
   → Layer 3 safe rewrite (fail-open literal)
-  → P6 voice corrections (spoken → canonical)
+  → P6 voice corrections (spoken → canonical; seeded by contacts [7.9a] + history [7.9b])
+  → P7.9c auto-correction prompt (novel proper noun → one-tap confirm → learnCorrection)
   → Confirm final text
   → Focus capture + restore
   → Insert ladder (OS-first)
        1. native SendInput
        2. sendkeys
-       3. clipboard select-all + paste
-       4. WhatsApp extension fallback only
+       3. clipboard paste (append for IG/WA; select-all only for replace)
+       4. WhatsApp/Instagram compose fallback
        5. vision (optional last)
   → Verify (value / growth, not placeholder name)
   → Done
@@ -392,6 +421,7 @@ Env: `RIPPLE_P85_DICTATION_MODE=0` forces dictation → command (dev only).
 | `electron/agent/dictation/dictationSession.ts` | Mode + buffer |
 | `electron/agent/dictation/correctionSignalDetector.ts` / `correctionEngine.ts` | Layer 1 |
 | `electron/agent/dictation/dictationRewrite.ts` | Orchestrator |
+| `electron/agent/dictation/intentAlternatives.ts` | Soft alt-intent detector (relax cleanup bounds) |
 | `electron/agent/dictation/safeRewriteEngine.ts` | Layer 3 |
 | `electron/agent/dictation/executeDictation.ts` | STT → rewrite → insert |
 | `electron/agent/dictation/prepareComposeText.ts` | Compose prep |
@@ -407,6 +437,9 @@ Tests: `phase-p85-p7-whisper-flow.spec.ts`, `phase-p85-p72-production-eval.spec.
 |--------------|--------|
 | 7.2a | Snippet store |
 | 7.3a | Style profile engine |
+| 7.9a | Contact import service (Google/Outlook/local) |
+| 7.9b | History mining scanner (WhatsApp/Gmail proper nouns) |
+| 7.9c | Auto-correction prompt overlay UX |
 | 8.1–8.3 | Selection capture + rewrite-in-place |
 | 9.1 | Account / sync service |
 | 9.2–9.4 | Mac / iOS / Android natives |
@@ -456,6 +489,21 @@ Then start Phase 7.
 | 2026-07-25 | Restored missing §7; added 7.7 (screen name bias) + 7.8 (live type); Phase 11.3/11.4 Flow Bar buttons |
 | 2026-07-25 | 7.7 + 7.8 implemented on Windows (screen bias; streaming insert default ON) |
 | 2026-07-25 | **7.8 paused** — streaming insert default OFF (was damaging open editors); batch dictation restored |
+| 2026-07-29 | Added **7.9a–c** (automatic name harvesting): contact import, history mining, auto-correction prompt — production-grade name accuracy with zero manual entry |
+| 2026-07-29 | **Reconciled 9.1:** existing `ripple-sync` (P9.1.C) is the real Windows sync — not a stub; notes already sync. Full Phase 9 still needs other platforms. |
+| 2026-07-29 | **10.2 Windows MVP:** mic Meeting Notetaker + Flow Note + summary; **privacy consent** required before first record; note writes mutex+verify (not insert ladder). `gpt-4o-transcribe-diarize` confirmed real OpenAI model — deferred until system audio. |
+| 2026-07-29 | **10.2 FINAL (client demo):** mic+system audio via `electron-audio-loopback`, 15s flush, tray recording indicator, consent updated for system audio. |
+| 2026-07-29 | **10.2 analysis pack:** sentiment, decisions, open questions, topics, owned action items (confidence/evidence), diarized transcript (`gpt-4o-transcribe-diarize` + Whisper fallback), talk-time %. System audio still DXGI-blocked → mic-only. |
+| 2026-07-29 | **Closeness re-measure (FINAL):** Core Windows Wispr feel **~85%** — system-wide insert into most focused fields (Claude, Google Chat, WA, Gmail, editors, etc.) confirmed live. Full Wispr product **~42%** (platforms + enterprise + billing still open). |
+| 2026-07-29 | **10.2 fidelity:** summarize prompt forbids soft paraphrases; adds `keyFacts`; Notes UI live-refresh on meeting writes; docs mark diarization as shipped (not deferred). |
+| 2026-08-08 | **7.1 alt-intent collapse FINAL:** `detectIntentAlternatives` + optional `allowAlternativeCollapse` on `cleanupWithinBounds` so AI `dictation_clean` can keep final greeting/time/offer when competing alternatives appear without “no no”. Existing Layer-1 correction + greeting/name guards unchanged. Prompt examples + tests 19e–19g. |
+| 2026-08-08 | **7.1 production soft-guard + eval:** `altCollapseIsPlausible` rejects only still-jammed AI (not last-only strict). Offline multi-lang messy corpus `phase-p85-alt-intent-eval.spec.ts` (en / hi-en / es / mixed). |
+| 2026-08-10 | **Soft self-correction class:** `detectSoftSelfCorrection` unlocks AI final-intent cleanup for mid-utterance revisions (sorry / oops / I mean…) without Layer-1 auto-delete. Standalone apologies stay strict. Notes→wallet live case. |
+| 2026-08-10 | **Cold-start focus hardening:** `snapshotPreVoiceTarget` recovers via mouse/last-good when Ripple/shell is FG; pins `voiceCommandTarget`; insert fails closed with `no_focus_target` instead of typing into Ripple. Every-field path unchanged once a target exists. |
+| 2026-08-10 | **Mid-insert Ripple FG steal:** `hideOverlay` blurs main + forces overlay non-focusable; `restoreFocusContext` retries when Ripple holds FG; `ensureInsertForeground` refuses paste/keys while Ripple is FG (`insert_aborted:ripple_foreground`). Cursor/Chrome hwnd churn still allowed. |
+| 2026-08-12 | **Post-AI focus + composer click:** `prepareDictationInsertFocus` after rewrite; `clickUiaComposerEdit` targets web chat Edit (not window center); verify accepts `foreground_changed` only when `after` matches pinned target; rejects `wrong_insert_target` (Cursor paste while Chat pinned). |
+| 2026-08-12 | **Real-user hardening:** `maintainPinnedTargetDuringRewrite` during AI cleanup; P8 watcher skips repinning during `voiceSessionFrozen`; Flow Bar shows hint on insert failure (`showDictationInsertFailure`). |
+| 2026-08-13 | **Chrome multi-window pin lock:** stop unconditional `recoverDictationFocusTarget("pre_insert")` (was re-pinning to mouse Chrome); keep hotkey hwnd; `matchesPinnedInsertTarget` rejects WhatsApp≠Google Chat≠Docs (badge churn still OK). |
 
 ---
 

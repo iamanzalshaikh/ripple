@@ -4,6 +4,7 @@ import {
   rewriteDictationBuffer,
 } from "../dictation/dictationRewrite.js";
 import type { CorrectionDecision } from "../dictation/dictationCorrectionTypes.js";
+import { detectIntentAlternatives } from "../dictation/intentAlternatives.js";
 import { applyCorrectionDecision } from "../dictation/safeRewriteEngine.js";
 
 const {
@@ -78,7 +79,7 @@ describe("P7.2 production correction eval corpus", () => {
     const result = await rewriteDictationBuffer({
       bufferText: "I have money, no debt at all",
     });
-    expect(result.finalText).toBe("I have money, no debt at all");
+    expect(result.finalText).toBe("I have money, no debt at all.");
   });
 
   it("3 — single-no weekday correction uses classifier", async () => {
@@ -168,7 +169,7 @@ describe("P7.2 production correction eval corpus", () => {
     const result = await rewriteDictationBuffer({
       bufferText: "No problem, I can wait",
     });
-    expect(result.finalText).toBe("No problem, I can wait");
+    expect(result.finalText).toBe("No problem, I can wait.");
     expect(analyzeDictationCorrection).not.toHaveBeenCalled();
   });
 
@@ -176,7 +177,7 @@ describe("P7.2 production correction eval corpus", () => {
     const result = await rewriteDictationBuffer({
       bufferText: "it's actually pretty good so far",
     });
-    expect(result.finalText).toBe("it's actually pretty good so far");
+    expect(result.finalText).toBe("It's actually pretty good so far.");
     expect(analyzeDictationCorrection).not.toHaveBeenCalled();
   });
 
@@ -185,8 +186,9 @@ describe("P7.2 production correction eval corpus", () => {
     const result = await rewriteDictationBuffer({
       bufferText: "Meeting is Monday no Tuesday",
     });
-    expect(result.finalText).toBe("Meeting is Monday no Tuesday");
-    expect(result.decisionLog.modelUsed).toBe("none_fallback");
+    // Classifier fail-open → local punct cleanup only (no surgical swap).
+    expect(result.finalText).toBe("Meeting is Monday no Tuesday.");
+    expect(result.decisionLog.modelUsed).toBe("local-cleanup-v1");
   });
 
   it("10 — unexplained generative truncation is rejected", async () => {
@@ -281,8 +283,10 @@ describe("P7.2 production correction eval corpus", () => {
     );
     const input = "I don't know no no one told me";
     const result = await rewriteDictationBuffer({ bufferText: input });
-    expect(result.finalText).toBe(input);
+    // Layer-1 must not surgically rewrite; localCleanup may tidy fillers/stutters.
     expect(result.decisionLog.layer1AutoApplied).toBe(false);
+    expect(result.finalText.toLowerCase()).toContain("don't know");
+    expect(result.finalText.toLowerCase()).toContain("one told me");
   });
 
   it("15 — time correction keeps the because-clause after restatement", async () => {
@@ -328,7 +332,7 @@ describe("P7.2 production correction eval corpus", () => {
       "Listen, can we meet the day after tomorrow? Let's meet and talk about this later.",
     );
     expect(result.decisionLog.applied).toBe(true);
-    expect(result.decisionLog.reason).toBe("ai_cleanup");
+    expect(result.decisionLog.reason).toMatch(/^ai_cleanup/);
     expect(result.decisionLog.modelUsed).toBe("dictation_clean");
   });
 
@@ -348,17 +352,19 @@ describe("P7.2 production correction eval corpus", () => {
       "so basically what I wanted to say is that we should probably meet sometime next week to go over the numbers together";
     aiRewriteDictation.mockResolvedValueOnce("Let's meet.");
     const result = await rewriteDictationBuffer({ bufferText: input });
-    expect(result.finalText).toBe(input);
-    expect(result.decisionLog.applied).toBe(false);
+    // Aggressive AI rewrite rejected; localCleanup may still lightly tidy.
+    expect(result.finalText).not.toBe("Let's meet.");
+    expect(result.decisionLog.reason).not.toMatch(/^ai_cleanup/);
+    expect(result.finalText.toLowerCase()).toContain("next week");
   });
 
   it("19b — cleanup that deletes a greeting+name clause is rejected (live WhatsApp bug)", async () => {
     const input = "Hello Tathir, How are you? Can we meet at 10 o'clock";
     aiRewriteDictation.mockResolvedValueOnce("Can we meet at 10 o'clock?");
     const result = await rewriteDictationBuffer({ bufferText: input });
-    expect(result.finalText).toBe(input);
-    expect(result.decisionLog.applied).toBe(false);
-    expect(result.decisionLog.reason).not.toBe("ai_cleanup");
+    expect(result.finalText).toMatch(/Hello Tathir/i);
+    expect(result.finalText).toMatch(/How are you/i);
+    expect(result.decisionLog.reason).not.toMatch(/^ai_cleanup/);
   });
 
   it("19c — light punctuation cleanup that keeps greeting+name is accepted", async () => {
@@ -392,6 +398,51 @@ describe("P7.2 production correction eval corpus", () => {
         "Hello Tathir, how are you? Can we meet at 10 o'clock?",
       ),
     ).toBe(true);
+  });
+
+  it("19e — detectIntentAlternatives finds competing greetings/times/offers", () => {
+    expect(
+      detectIntentAlternatives(
+        "Hello Sir, Good Morning, Good Afternoon, How are you?",
+      ).kind,
+    ).toBe("greeting_tod");
+    expect(
+      detectIntentAlternatives(
+        "Can we meet for a coffee, can we for a tea this evening at 9, 10 pm",
+      ).detected,
+    ).toBe(true);
+    expect(
+      detectIntentAlternatives(
+        "Hello Tathir, how are you? Can we meet at 10 o'clock?",
+      ).detected,
+    ).toBe(false);
+  });
+
+  it("19f — allowAlternativeCollapse accepts TOD greeting collapse; still blocks name drop", () => {
+    // Multiple sentence clauses so default bounds reject clause drop;
+    // allowAlternativeCollapse is what unlocks the Wispr-style collapse.
+    const src = "Hello Sir, Good Morning. Good Afternoon. How are you?";
+    const collapsed = "Hello Sir, good afternoon. How are you?";
+    expect(cleanupWithinBounds(src, collapsed)).toBe(false);
+    expect(
+      cleanupWithinBounds(src, collapsed, { allowAlternativeCollapse: true }),
+    ).toBe(true);
+    expect(
+      cleanupWithinBounds(src, "Good afternoon. How are you?", {
+        allowAlternativeCollapse: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("19g — alt-collapse path accepts AI cleanup for competing greetings", async () => {
+    aiRewriteDictation.mockResolvedValueOnce(
+      "Hello Sir, good afternoon. How are you?",
+    );
+    const result = await rewriteDictationBuffer({
+      bufferText: "Hello Sir, Good Morning. Good Afternoon. How are you?",
+    });
+    expect(result.finalText).toBe("Hello Sir, good afternoon. How are you?");
+    expect(result.decisionLog.reason).toBe("ai_cleanup+alt_greeting_tod");
   });
 
   it("20 — cleanup is skipped after a successful surgical correction", async () => {

@@ -59,11 +59,30 @@ describe("Phase 7.7 — screen name bias", () => {
     );
   });
 
+  it("never biases working→Morning from a chat bubble greeting", () => {
+    const terms = extractCandidateTerms(
+      "Morning!!!!\nMain chick\nGood morning, where are you?",
+    );
+    const res = applyScreenNameBias(
+      "I hired you and you're not working, bro",
+      terms.length ? terms : ["Morning", "Main"],
+    );
+    expect(res.text.toLowerCase()).toContain("working");
+    expect(res.text).not.toMatch(/\bMorning\b/);
+    expect(
+      res.replacements.every((r) => r.to.toLowerCase() !== "morning"),
+    ).toBe(true);
+  });
+
+  it("fuzzy bias requires same first letter (Tatheer→Tathir still works)", () => {
+    const res = applyScreenNameBias("Hey Tatheer, how are you?", ["Tathir"]);
+    expect(res.text).toBe("Hey Tathir, how are you?");
+  });
+
   it("applyScreenNameBias prefers multi-word screen names", () => {
     const res = applyScreenNameBias("Message Amal Ahmed please", [
       "Amaal Ahamed",
     ]);
-    // Individual parts may match; at least one correction toward screen form
     expect(res.replacements.length).toBeGreaterThan(0);
     expect(res.text.toLowerCase()).toContain("amaal");
   });

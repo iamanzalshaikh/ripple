@@ -6,9 +6,11 @@ import {
 } from "../adapters/whatsapp/parseContact.js";
 import { isContextualWhatsAppComposeCommand } from "../adapters/whatsapp/parseWhatsAppCommand.js";
 import { insertWhatsAppComposeText } from "../adapters/whatsapp/whatsappComposeInsert.js";
+import { insertBrowserChatComposeText } from "../adapters/browser/browserChatComposeInsert.js";
 import { insertInstagramComposeText } from "../adapters/instagram/instagramComposeInsert.js";
 import type { FocusContext } from "../../focus/focusContext.js";
 import {
+  isGoogleChatTabActive,
   isInstagramTabActive,
   isWeakFocusContext,
   restoreFocusContext,
@@ -68,7 +70,10 @@ export async function runInsertText(data?: Record<string, unknown>): Promise<str
     hideOverlay();
   }
 
-  const beforeObserve = await captureObservation();
+  let beforeObserve: Awaited<ReturnType<typeof captureObservation>> | undefined;
+  if (hasKeyInput || mouseAction) {
+    beforeObserve = await captureObservation();
+  }
   if (!hasKeyInput && !mouseAction) {
     hideOverlay();
   }
@@ -274,6 +279,21 @@ export async function runInsertText(data?: Record<string, unknown>): Promise<str
     }
   }
 
+  // Cold-start: refuse OS insert with no non-Ripple target (avoids keys_landed_in_ripple).
+  // Dedicated WA/IG compose paths still run below once sticky/live focus exists.
+  {
+    const { hasDictationInsertTarget, recoverDictationFocusTarget } =
+      await import("../../focus/focusContext.js");
+    if (!hasDictationInsertTarget()) {
+      const recovered = await recoverDictationFocusTarget("insert_text");
+      if (!recovered) {
+        throw new Error(
+          "no_focus_target — click an editable field (WhatsApp, Notepad, …) then try again",
+        );
+      }
+    }
+  }
+
   if (isContextualWhatsAppComposeCommand()) {
     const body = text.trim() || getLastVoiceCommand()?.trim() || "";
     if (!body) throw new Error("No message text for WhatsApp compose");
@@ -281,6 +301,13 @@ export async function runInsertText(data?: Record<string, unknown>): Promise<str
       "[ripple-desktop] INSERT_TEXT → WhatsApp open-chat compose (OS-first)",
     );
     return insertWhatsAppComposeText(body);
+  }
+
+  if (isGoogleChatTabActive() && text.trim()) {
+    console.info(
+      "[ripple-desktop] INSERT_TEXT → Google Chat compose (OS-first)",
+    );
+    return insertBrowserChatComposeText(text.trim());
   }
 
   if (
@@ -314,6 +341,13 @@ export async function runInsertText(data?: Record<string, unknown>): Promise<str
   }
 
   await logInsertTextDiagnostics("pre_insert", { textPreview: text });
+  const { prepareDictationInsertFocus } = await import("../../focus/focusContext.js");
+  if (!(await prepareDictationInsertFocus())) {
+    throw new Error(
+      "insert_aborted:no_focus_target — click the target field and try again",
+    );
+  }
+  beforeObserve = await captureObservation();
   const msg = await smartInsertText(text, data);
   if (/^Gmail compose opened\b/i.test(msg)) {
     return msg;
@@ -338,14 +372,30 @@ async function finishTypingResult(
     console.warn(
       `[ripple-desktop] typing observe: ${verified.reason ?? "failed"} fg=${verified.after.foreground?.processName ?? "?"}`,
     );
-    // Ladder already reported Typed/Pasted — WhatsApp/web composers often fail
-    // a11y verify even when text is correct. Retrying re-emits the full string
-    // (seen live as "I want to meet you tomorrow." typed twice).
-    if (/typed|pasted/i.test(message)) {
+    // Reasons where a11y verification is known to be unreliable even though
+    // the insert actually landed correctly (web composers reporting only a
+    // placeholder name, or benign same-app foreground churn from an
+    // IntelliSense/format popup). Ladder already reported Typed/Pasted —
+    // retrying here re-emits the full string (seen live as "I want to meet
+    // you tomorrow." typed twice), so for these specific reasons only we
+    // accept without retry.
+    const verifyUnreliableHere = verified.reason === "a11y_name_mismatch";
+    if (verifyUnreliableHere && /typed|pasted/i.test(message)) {
       console.warn(
         "[ripple-desktop] typing observe failed after successful insert — skipping retry to avoid duplicate",
       );
       return message;
+    }
+    // Bug fix — any other verify failure (e.g. focus_not_editable: keys/paste
+    // landed on a non-editable control such as the Windows shell/search
+    // flyout, or keys_landed_in_ripple) must not be silently reported as
+    // success just because the ladder's own message string says "Typed"/
+    // "Pasted". Do not retry here either (same duplicate risk as above) —
+    // surface it honestly as a failure instead of a false OK.
+    if (/typed|pasted/i.test(message)) {
+      throw new Error(
+        `insert_unverified:${verified.reason ?? "unknown"} — text may not have reached the intended field`,
+      );
     }
     if (strict && expectedText?.trim()) {
       const recovered = await retryInsertAfterVerifyFail(

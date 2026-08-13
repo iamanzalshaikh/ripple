@@ -24,7 +24,11 @@ const AUTOSAVE_DEBOUNCE_MS = 600;
  * knows it's a legitimate "dictate into this note" target, not just another
  * Ripple settings field.
  */
-export function NotesPage({ onBack, initialNoteId, onInitialNoteConsumed }: Props) {
+export function NotesPage({
+  onBack,
+  initialNoteId,
+  onInitialNoteConsumed,
+}: Props) {
   const [notes, setNotes] = useState<Note[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -58,7 +62,9 @@ export function NotesPage({ onBack, initialNoteId, onInitialNoteConsumed }: Prop
       if (!data?.noteId || typeof data.body !== "string") return;
       setNotes((prev) =>
         prev.map((n) =>
-          n.id === data.noteId ? { ...n, body: data.body!, updatedAt: new Date().toISOString() } : n,
+          n.id === data.noteId
+            ? { ...n, body: data.body!, updatedAt: new Date().toISOString() }
+            : n,
         ),
       );
       setOpenNote((prev) => {
@@ -134,7 +140,10 @@ export function NotesPage({ onBack, initialNoteId, onInitialNoteConsumed }: Prop
   );
 
   async function createAndOpenNote() {
-    const res = await getRippleApi().notes.create({ title: "Untitled note", body: "" });
+    const res = await getRippleApi().notes.create({
+      title: "Untitled note",
+      body: "",
+    });
     if (!res.ok || !res.note) {
       setError(res.message ?? "Failed to create note");
       return;

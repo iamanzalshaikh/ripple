@@ -154,36 +154,112 @@ fn result_after_input(
 }
 
 #[cfg(windows)]
-pub fn focus_hwnd(hwnd: windows::Win32::Foundation::HWND, _title_hint: Option<&str>) -> Result<(), String> {
-    use windows::Win32::System::Threading::AttachThreadInput;
+fn foreground_is_desktop_shell() -> bool {
+    let Some(fg) = read_current_foreground() else {
+        return false;
+    };
+    if !fg.process_name.eq_ignore_ascii_case("explorer") {
+        return false;
+    }
+    let title = fg.window_title.trim();
+    title.is_empty() || title.eq_ignore_ascii_case("Program Manager")
+}
+
+/// ASFW_ANY — only works while this process still holds the FG lock
+/// (hotkey / simulated input). Harmless no-op otherwise.
+#[cfg(windows)]
+pub fn allow_set_foreground_any() {
+    use windows::Win32::UI::WindowsAndMessaging::AllowSetForegroundWindow;
+    unsafe {
+        let _ = AllowSetForegroundWindow(0xFFFF_FFFF);
+    }
+}
+
+/// Lock/unlock SetForegroundWindow so explorer cannot steal FG mid-restore.
+#[cfg(windows)]
+pub fn lock_set_foreground(lock: bool) {
     use windows::Win32::UI::WindowsAndMessaging::{
-        AllowSetForegroundWindow, BringWindowToTop, GetForegroundWindow,
-        GetWindowThreadProcessId, IsIconic, SetForegroundWindow, ShowWindow, SW_RESTORE, SW_SHOW,
+        LockSetForegroundWindow, LSFW_LOCK, LSFW_UNLOCK,
+    };
+    unsafe {
+        let _ = LockSetForegroundWindow(if lock { LSFW_LOCK } else { LSFW_UNLOCK });
+    }
+}
+
+#[cfg(windows)]
+fn synthetic_alt_tap() {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        keybd_event, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP, VK_MENU,
+    };
+    unsafe {
+        keybd_event(VK_MENU.0 as u8, 0, KEYBD_EVENT_FLAGS(0), 0);
+        keybd_event(VK_MENU.0 as u8, 0, KEYEVENTF_KEYUP, 0);
+    }
+}
+
+#[cfg(windows)]
+pub fn grant_foreground_permission() {
+    allow_set_foreground_any();
+    // Hotkey path: unlock so we can hand FG to the target app.
+    lock_set_foreground(false);
+    // Alt tap re-grants SetForegroundWindow rights. Skip when the desktop
+    // already holds FG — Alt then selects a desktop icon (Program Manager).
+    if !foreground_is_desktop_shell() {
+        synthetic_alt_tap();
+    }
+}
+
+#[cfg(not(windows))]
+pub fn grant_foreground_permission() {}
+
+#[cfg(not(windows))]
+pub fn allow_set_foreground_any() {}
+
+#[cfg(not(windows))]
+pub fn lock_set_foreground(_lock: bool) {}
+
+#[cfg(windows)]
+pub fn focus_hwnd(hwnd: windows::Win32::Foundation::HWND, _title_hint: Option<&str>) -> Result<(), String> {
+    use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        BringWindowToTop, GetForegroundWindow, GetWindowThreadProcessId, IsIconic,
+        SetForegroundWindow, ShowWindow, SwitchToThisWindow, SW_RESTORE, SW_SHOW,
     };
 
     unsafe {
         if hwnd.0.is_null() {
             return Err("invalid_hwnd".into());
         }
-        let _ = AllowSetForegroundWindow(0xFFFF_FFFF);
+
+        let shell_fg = foreground_is_desktop_shell();
+        allow_set_foreground_any();
+        // Alt-while-desktop-FG selects a desktop ListItem — never do that here.
+        // Do not LockSetForegroundWindow here: restoreFocusContext holds that
+        // lock around the whole retry loop; nested unlock would drop it.
+        if !shell_fg {
+            synthetic_alt_tap();
+        }
+
         if IsIconic(hwnd).as_bool() {
             let _ = ShowWindow(hwnd, SW_RESTORE);
         } else {
             let _ = ShowWindow(hwnd, SW_SHOW);
         }
         let _ = BringWindowToTop(hwnd);
+        SwitchToThisWindow(hwnd, true);
 
         let fg = GetForegroundWindow();
         let mut fg_pid = 0u32;
-        let mut target_pid = 0u32;
+        let our_thread = GetCurrentThreadId();
         let fg_thread = GetWindowThreadProcessId(fg, Some(&mut fg_pid));
-        let target_thread = GetWindowThreadProcessId(hwnd, Some(&mut target_pid));
-        if fg_thread != 0 && target_thread != 0 && fg_thread != target_thread {
-            let _ = AttachThreadInput(fg_thread, target_thread, true);
-            let _ = SetForegroundWindow(hwnd);
-            let _ = AttachThreadInput(fg_thread, target_thread, false);
-        } else {
-            let _ = SetForegroundWindow(hwnd);
+        let attached = fg_thread != 0 && fg_thread != our_thread && AttachThreadInput(our_thread, fg_thread, true).as_bool();
+
+        let _ = BringWindowToTop(hwnd);
+        let _ = SetForegroundWindow(hwnd);
+        SwitchToThisWindow(hwnd, true);
+
+        if attached {
+            let _ = AttachThreadInput(our_thread, fg_thread, false);
         }
     }
     Ok(())

@@ -1,4 +1,4 @@
-import { getForegroundWindow, focusWindowByHwnd, getWindowUnderCursorNative } from "../native/win32Bridge.js";
+import { getForegroundWindow, focusWindowByHwnd, getWindowUnderCursorNative, allowSetForegroundNative, lockSetForegroundNative } from "../native/win32Bridge.js";
 import { getMemory, setMemory } from "../storage/sessionMemory.js";
 import { rememberPdfFromFocus } from "../automation/desktop/pdfFocusMemory.js";
 import { rememberMediaFromFocus } from "../automation/desktop/mediaFocusMemory.js";
@@ -13,6 +13,7 @@ import {
   isSaveDialogModalLocked,
   isSaveDialogTitle,
 } from "./saveDialogMode.js";
+import { getMainWindow } from "../windows/mainWindow.js";
 
 const STICKY_WEB_MS = 15 * 60 * 1000;
 
@@ -194,11 +195,20 @@ export function isWeakFocusContext(
   if (isTransientInputShell(ctx)) return true;
   const title = (ctx.windowTitle ?? "").trim();
   const proc = (ctx.processName ?? "").toLowerCase();
+  // Windows Search / shell hosts are never dictation insert targets — even
+  // with a title like "Search". Treating them as strong caused cold-start
+  // pins that lost focus into the flyout (live 2026-08-10).
+  if (
+    proc === "searchhost" ||
+    proc === "shellexperiencehost" ||
+    proc === "startmenuexperiencehost" ||
+    proc === "searchapp"
+  ) {
+    return true;
+  }
   if (
     !title &&
     (proc === "explorer" ||
-      proc === "shellexperiencehost" ||
-      proc === "searchhost" ||
       proc === "applicationframehost")
   ) {
     return true;
@@ -260,49 +270,137 @@ function buildFocusContextFromRaw(raw: ForegroundWindow): FocusContext {
 export async function snapshotPreVoiceTarget(): Promise<FocusContext | null> {
   if (process.platform !== "win32") return null;
   try {
-    const raw = await getForegroundWindow();
-    if (!raw?.hwnd) return lastNonRippleFocus;
-    if (isRippleOwnWindow(raw.processName ?? "", raw.windowTitle ?? "")) {
-      return lastNonRippleFocus ?? saved;
+    try {
+      const { allowSetForegroundNative } = await import("../native/win32Bridge.js");
+      await allowSetForegroundNative?.();
+    } catch {
+      /* sidecar may be down at hotkey — restore still retries */
     }
+    const raw = await getForegroundWindow();
+    if (!raw?.hwnd) {
+      return pinVoiceTarget(
+        await recoverDictationFocusTarget("empty_fg"),
+        "empty_fg",
+      );
+    }
+
+    // Ripple main/overlay in front at hotkey — never pin Ripple; recover a
+    // real typing surface (mouse / last-good / live non-Ripple FG).
+    if (isRippleOwnWindow(raw.processName ?? "", raw.windowTitle ?? "")) {
+      return pinVoiceTarget(
+        await recoverDictationFocusTarget("ripple_fg"),
+        "ripple_fg",
+      );
+    }
+
     const ctx = buildFocusContextFromRaw(raw);
     if (!isWeakFocusContext(ctx)) {
-      voiceCommandTarget = ctx;
-      lastNonRippleFocus = ctx;
-      saved = ctx;
-      console.info(
-        `[ripple-desktop] voice target: ${ctx.processName} | "${ctx.windowTitle.slice(0, 60)}"`,
-      );
-      return ctx;
+      return pinVoiceTarget(ctx, "foreground");
     }
 
-    const underMouse = await voiceTargetFromMouseFallback();
-    if (underMouse) {
-      voiceCommandTarget = underMouse;
-      lastNonRippleFocus = underMouse;
-      saved = underMouse;
-      console.info(
-        `[ripple-desktop] voice target (mouse fallback): ${underMouse.processName} | "${underMouse.windowTitle.slice(0, 60)}"`,
-      );
-      return underMouse;
-    }
-
-    const fallback = bestStableFocus();
-    if (fallback) {
-      voiceCommandTarget = fallback;
-      console.info(
-        `[ripple-desktop] voice target (weak fg skip): ${fallback.processName} | "${fallback.windowTitle.slice(0, 60)}"`,
-      );
-      return fallback;
-    }
-
-    console.info(
-      `[ripple-desktop] voice target weak/unresolved: ${ctx.processName} | "${ctx.windowTitle.slice(0, 60)}"`,
+    // Shell / Search / IME flash — recover without clearing a warm last-good.
+    return pinVoiceTarget(
+      await recoverDictationFocusTarget("weak_fg"),
+      "weak_fg",
     );
-    return null;
   } catch {
-    return lastNonRippleFocus;
+    return pinVoiceTarget(
+      lastNonRippleFocus &&
+        !isRippleOwnWindow(
+          lastNonRippleFocus.processName,
+          lastNonRippleFocus.windowTitle,
+        ) &&
+        !isWeakFocusContext(lastNonRippleFocus)
+        ? lastNonRippleFocus
+        : null,
+      "snapshot_error",
+    );
   }
+}
+
+/**
+ * Cold-start / Ripple-FG recovery for dictation insert target.
+ * Never returns Ripple or weak shell windows. Prefer mouse → last-good → live FG.
+ * Pins the recovered target so restoreFocusContext / insert ladder can use it.
+ */
+export async function recoverDictationFocusTarget(
+  reason = "recover",
+): Promise<FocusContext | null> {
+  // Keep a stable hotkey pin — never silently swap to another Chrome window
+  // under the mouse (live: WhatsApp pin → EGC Chat under cursor).
+  if (
+    voiceCommandTarget?.hwnd &&
+    !isRippleOwnWindow(
+      voiceCommandTarget.processName,
+      voiceCommandTarget.windowTitle,
+    ) &&
+    !isWeakFocusContext(voiceCommandTarget)
+  ) {
+    console.info(
+      `[ripple-desktop] voice target keep pin (${reason}): ${voiceCommandTarget.processName} | "${voiceCommandTarget.windowTitle.slice(0, 60)}"`,
+    );
+    return voiceCommandTarget;
+  }
+
+  const underMouse = await voiceTargetFromMouseFallback();
+  if (underMouse) {
+    return pinVoiceTarget(underMouse, `${reason}/mouse`);
+  }
+
+  for (const candidate of [lastNonRippleFocus, saved, bestStableFocus()]) {
+    if (
+      candidate?.hwnd &&
+      !isRippleOwnWindow(candidate.processName, candidate.windowTitle) &&
+      !isWeakFocusContext(candidate)
+    ) {
+      return pinVoiceTarget(candidate, `${reason}/memory`);
+    }
+  }
+
+  try {
+    const raw = await getForegroundWindow();
+    if (raw?.hwnd) {
+      const live = buildFocusContextFromRaw(raw);
+      if (
+        !isRippleOwnWindow(live.processName, live.windowTitle) &&
+        !isWeakFocusContext(live)
+      ) {
+        return pinVoiceTarget(live, `${reason}/live_fg`);
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+
+  console.warn(
+    `[ripple-desktop] voice target unresolved (${reason}) — focus an editable field, then try again`,
+  );
+  return null;
+}
+
+function pinVoiceTarget(
+  ctx: FocusContext | null,
+  source: string,
+): FocusContext | null {
+  if (!ctx?.hwnd) return null;
+  if (
+    isRippleOwnWindow(ctx.processName, ctx.windowTitle) ||
+    isWeakFocusContext(ctx)
+  ) {
+    return null;
+  }
+  voiceCommandTarget = ctx;
+  lastNonRippleFocus = ctx;
+  saved = ctx;
+  console.info(
+    `[ripple-desktop] voice target (${source}): ${ctx.processName} | "${ctx.windowTitle.slice(0, 60)}"`,
+  );
+  return ctx;
+}
+
+/** True when dictation/insert has a non-Ripple window to type into. */
+export function hasDictationInsertTarget(): boolean {
+  return resolveTypingFocusTarget() != null;
 }
 
 async function voiceTargetFromMouseFallback(): Promise<FocusContext | null> {
@@ -362,6 +460,59 @@ function detectSlack(title: string, processName: string): boolean {
   const t = title.toLowerCase();
   const p = processName.toLowerCase();
   return p.includes("slack") || t.includes("slack");
+}
+
+/** Chrome tab title for Google Chat (workspace DMs). */
+export function isGoogleChatWindowTitle(title: string): boolean {
+  const t = title.toLowerCase();
+  if (t.includes("google chat")) return true;
+  if (/chat\.google\.com/i.test(title)) return true;
+  // "Space Name - Chat - Google Chrome"
+  if (/\s-\schat(\s-\s|$)/i.test(title) && /\b(chrome|edge|firefox|brave|opera)\b/i.test(t)) {
+    return true;
+  }
+  return false;
+}
+
+function detectGoogleChat(title: string, url?: string): boolean {
+  if (url && /chat\.google\.com/i.test(url)) return true;
+  return isGoogleChatWindowTitle(title);
+}
+
+function stickyOrLastFocusIsGoogleChat(): boolean {
+  for (const candidate of [lastNonRippleFocus, saved]) {
+    if (
+      candidate &&
+      !isWeakFocusContext(candidate) &&
+      (detectGoogleChat(candidate.windowTitle, candidate.activeTabUrl) ||
+        (candidate.activeTabUrl && /chat\.google\.com/i.test(candidate.activeTabUrl)))
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** True when Google Chat is the focused browser tab. */
+export function isGoogleChatTabActive(): boolean {
+  const ctx = voiceCommandTarget ?? saved;
+  if (ctx && !isWeakFocusContext(ctx) && !isTransientInputShell(ctx)) {
+    if (isClearlyDesktopForeground(ctx)) {
+      const p = ctx.processName.toLowerCase();
+      const hardDesktopLeave =
+        p === "explorer" ||
+        p.includes("calculator") ||
+        p.includes("applicationframehost") ||
+        p.includes("systemsettings");
+      if (hardDesktopLeave) return false;
+      if (stickyOrLastFocusIsGoogleChat()) return true;
+      return false;
+    }
+    if (ctx.activeTabUrl && /chat\.google\.com/i.test(ctx.activeTabUrl)) return true;
+    if (detectGoogleChat(ctx.windowTitle, ctx.activeTabUrl)) return true;
+    return false;
+  }
+  return stickyOrLastFocusIsGoogleChat();
 }
 
 /** Chrome/Edge tab title looks like Notion (avoids false positives on random pages). */
@@ -526,13 +677,30 @@ export function isWhatsAppTabActive(): boolean {
     // Real desktop app (Explorer folder, Calculator, …) — not WhatsApp.
     // Do NOT treat Windows "Input Flyout" as desktop leave; that flash was
     // clearing WA compose routing and causing insert-ladder double-type.
-    if (isClearlyDesktopForeground(ctx)) return false;
+    if (isClearlyDesktopForeground(ctx)) {
+      const p = ctx.processName.toLowerCase();
+      const hardDesktopLeave =
+        p === "explorer" ||
+        p.includes("calculator") ||
+        p.includes("applicationframehost") ||
+        p.includes("systemsettings");
+      // Soft desktop (Cursor/IDE/Notepad) must NOT kill sticky WA — otherwise
+      // compose falls to focused-field + native→sendkeys and types twice into
+      // the WhatsApp composer (live 2026-08-08).
+      if (hardDesktopLeave) return false;
+      if (stickyOrLastFocusIsWhatsApp()) return true;
+      return false;
+    }
     if (ctx.isWhatsApp) return true;
     if (ctx.activeTabUrl && /web\.whatsapp\.com/i.test(ctx.activeTabUrl)) return true;
     if (detectWhatsApp(ctx.windowTitle, ctx.processName)) return true;
     return false;
   }
   // Prefer sticky WhatsApp over a transient Input Flyout voice target.
+  return stickyOrLastFocusIsWhatsApp() || getStickyWebSurface() === "whatsapp";
+}
+
+function stickyOrLastFocusIsWhatsApp(): boolean {
   for (const candidate of [lastNonRippleFocus, saved]) {
     if (
       candidate &&
@@ -675,6 +843,21 @@ export async function captureFocusFromForeground(
       const adopted = adoptSaveDialogTarget(raw);
       rememberWebSurface(adopted);
       return adopted;
+    }
+
+    // While dictating, never repoint the pin to Cursor/explorer because the
+    // P8 watcher polled foreground during AI rewrite (live on-off bug).
+    if (
+      voiceSessionFrozen &&
+      voiceCommandTarget &&
+      !isWeakFocusContext(voiceCommandTarget) &&
+      !matchesPinnedInsertTarget(ctx, voiceCommandTarget) &&
+      !isWeakFocusContext(ctx)
+    ) {
+      console.info(
+        `[ripple-desktop] focus skip during voice — keeping pinned ${voiceCommandTarget.processName}`,
+      );
+      return voiceCommandTarget;
     }
 
     if (focusCaptureLocked || voiceSessionFrozen || isCommandFocusGraceActive()) {
@@ -885,6 +1068,227 @@ export function startMediaFocusWatcher(intervalMs = P8_FOCUS_POLL_MS): void {
   }
 }
 
+/**
+ * Soft-yield Ripple's own windows so SetForegroundWindow can land on the
+ * pinned dictation target. Does not hide/minimize the main UI.
+ */
+export function yieldRippleForeground(): void {
+  try {
+    const main = getMainWindow();
+    if (main && !main.isDestroyed() && main.isFocused()) {
+      main.blur();
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * Re-assert pinned typing target before SendKeys/paste. Retries when Ripple
+ * stole FG mid-insert; only fails closed on Ripple FG (not Cursor/Chrome hwnd churn).
+ */
+export async function ensureInsertForeground(): Promise<boolean> {
+  if (process.platform !== "win32") return true;
+
+  const fgBeforeRestore = await getForegroundWindow();
+  const shellSeenAt = Date.now();
+  const shellBeforeRestore =
+    Boolean(fgBeforeRestore) && isDesktopShellForeground(fgBeforeRestore!);
+  if (shellBeforeRestore) {
+    const pinnedPeek = resolveTypingFocusTarget();
+    console.warn(
+      `[ripple-focus-drift] insert_fg_shell_before_restore` +
+        ` t=${shellSeenAt}` +
+        ` fg=${fgBeforeRestore?.processName}` +
+        ` title="${(fgBeforeRestore?.windowTitle ?? "").slice(0, 40)}"` +
+        ` want=${pinnedPeek?.processName ?? "?"}` +
+        ` hwnd=${pinnedPeek?.hwnd ?? "?"}`,
+    );
+  }
+
+  await restoreFocusContext();
+  let fg = await getForegroundWindow();
+  if (
+    fg &&
+    isRippleOwnWindow(fg.processName ?? "", fg.windowTitle ?? "")
+  ) {
+    console.info(
+      "[ripple-desktop] insert FG is Ripple — yield + re-restore before typing",
+    );
+    yieldRippleForeground();
+    await new Promise((r) => setTimeout(r, 80));
+    await restoreFocusContext();
+    fg = await getForegroundWindow();
+  }
+
+  if (
+    fg &&
+    isRippleOwnWindow(fg.processName ?? "", fg.windowTitle ?? "")
+  ) {
+    console.warn(
+      "[ripple-desktop] insert aborted — Ripple still foreground (refusing keys/paste into Ripple)",
+    );
+    return false;
+  }
+
+  const pinned = resolveTypingFocusTarget();
+  if (pinned && fg && !matchesPinnedInsertTarget(fg, pinned)) {
+    const shellSteal = isDesktopShellForeground(fg);
+    if (shellSteal) {
+      console.warn(
+        `[ripple-focus-drift] insert_fg_shell_before_restore` +
+          ` t=${Date.now()}` +
+          ` fg=${fg.processName} title="${(fg.windowTitle ?? "").slice(0, 40)}"` +
+          ` want=${pinned.processName} hwnd=${pinned.hwnd}`,
+      );
+    } else {
+      console.warn(
+        `[ripple-desktop] insert FG mismatch — want ${pinned.processName} (hwnd=${pinned.hwnd}) ` +
+          `but have ${fg.processName ?? "?"} (hwnd=${fg.hwnd ?? "?"}) — re-restore`,
+      );
+    }
+    await restoreFocusContext();
+    await new Promise((r) => setTimeout(r, 120));
+    fg = await getForegroundWindow();
+    if (fg && !matchesPinnedInsertTarget(fg, pinned)) {
+      console.warn(
+        "[ripple-desktop] insert aborted — foreground is not the pinned dictation target",
+      );
+      return false;
+    }
+    if (shellSteal && fg && matchesPinnedInsertTarget(fg, pinned)) {
+      console.warn(
+        `[ripple-focus-drift] insert_fg_recovered_from_shell t=${Date.now()}` +
+          ` heldMs=${Date.now() - shellSeenAt}` +
+          ` → ${fg.processName}` +
+          ` title="${(fg.windowTitle ?? "").slice(0, 40)}"`,
+      );
+    }
+  } else if (
+    shellBeforeRestore &&
+    pinned &&
+    fg &&
+    matchesPinnedInsertTarget(fg, pinned)
+  ) {
+    console.warn(
+      `[ripple-focus-drift] insert_fg_recovered_from_shell t=${Date.now()}` +
+        ` heldMs=${Date.now() - shellSeenAt}` +
+        ` → ${fg.processName}` +
+        ` title="${(fg.windowTitle ?? "").slice(0, 40)}"`,
+    );
+  }
+  return true;
+}
+
+/** True when OS foreground matches the pinned voice/dictation target (hwnd or same app). */
+export function matchesPinnedInsertTarget(
+  fg: Pick<FocusContext, "hwnd" | "processName" | "windowTitle">,
+  pinned: FocusContext,
+): boolean {
+  if (!fg?.hwnd || !pinned?.hwnd) return false;
+  if (Number(fg.hwnd) === Number(pinned.hwnd)) return true;
+  const fp = (fg.processName ?? "").toLowerCase();
+  const pp = (pinned.processName ?? "").toLowerCase();
+  if (!fp || !pp) return false;
+
+  const browsers = new Set(["chrome", "msedge", "firefox", "brave", "opera"]);
+  const bothBrowsers =
+    (browsers.has(fp) || pinned.isBrowser) && browsers.has(fp) && browsers.has(pp);
+
+  // Multi-Chrome: WhatsApp vs Google Chat vs Docs are different targets.
+  // Same hwnd already returned true; allow process-only match only when
+  // titles look like the same surface (badge churn: "(59) WhatsApp" → "(60)…").
+  if (bothBrowsers || (fp === pp && browsers.has(fp))) {
+    return browserTitlesCompatible(fg.windowTitle ?? "", pinned.windowTitle ?? "");
+  }
+
+  if (fp === pp) return true;
+  return false;
+}
+
+/** Same web surface despite unread-count / " - Google Chrome" suffix churn. */
+export function browserTitlesCompatible(a: string, b: string): boolean {
+  const la = a.toLowerCase().trim();
+  const lb = b.toLowerCase().trim();
+  if (!la || !lb) return true;
+
+  const surface = (t: string): string => {
+    if (/whatsapp/i.test(t) || /web\.whatsapp\.com/i.test(t)) return "whatsapp";
+    if (isGoogleChatWindowTitle(t) || /chat\.google\.com/i.test(t)) return "google_chat";
+    if (/gmail|mail\.google/i.test(t)) return "gmail";
+    if (/docs\.google|google docs/i.test(t)) return "gdocs";
+    if (/sheets\.google|google sheets/i.test(t)) return "gsheets";
+    if (/chatgpt|claude\.ai|chat\.openai/i.test(t)) return "ai_chat";
+    if (/instagram/i.test(t)) return "instagram";
+    if (/linkedin/i.test(t)) return "linkedin";
+    if (/youtube/i.test(t)) return "youtube";
+    if (/notion/i.test(t)) return "notion";
+    return "";
+  };
+
+  const sa = surface(la);
+  const sb = surface(lb);
+  if (sa && sb) return sa === sb;
+  if (sa || sb) return false; // one known surface, other different → refuse
+
+  const strip = (t: string) =>
+    t
+      .replace(/\s*-\s*(google chrome|microsoft.?edge|firefox|brave|opera).*$/i, "")
+      .replace(/^\(\d+\)\s*/, "")
+      .trim();
+  const ca = strip(la);
+  const cb = strip(lb);
+  if (!ca || !cb) return true;
+  if (ca === cb) return true;
+  if (ca.includes(cb) || cb.includes(ca)) return true;
+  // Distinct untitled chrome windows — require hwnd match (already checked).
+  return false;
+}
+
+/**
+ * After AI rewrite: restore pinned window + click web composer before insert.
+ * Call immediately before captureObservation / paste.
+ */
+export async function prepareDictationInsertFocus(): Promise<boolean> {
+  if (!(await ensureInsertForeground())) return false;
+  try {
+    const { ensureBrowserComposerFocus } = await import("../agent/editorFocus.js");
+    await ensureBrowserComposerFocus();
+  } catch {
+    /* browser composer click is best-effort */
+  }
+  return true;
+}
+
+/**
+ * Light keep-alive while AI cleanup runs (~1–4s). Prevents explorer/Cursor from
+ * becoming the effective target before prepareDictationInsertFocus.
+ */
+export async function maintainPinnedTargetDuringRewrite(): Promise<void> {
+  if (process.platform !== "win32") return;
+  extendCommandFocusGrace(COMMAND_FOCUS_GRACE_MS * 2);
+
+  const pinned = voiceCommandTarget ?? resolveTypingFocusTarget();
+  if (!pinned?.hwnd) return;
+
+  const fg = await getForegroundWindow();
+  if (!fg?.hwnd) return;
+  if (matchesPinnedInsertTarget(fg, pinned)) return;
+
+  if (
+    isRippleOwnWindow(fg.processName ?? "", fg.windowTitle ?? "") ||
+    isWeakFocusContext(fg)
+  ) {
+    await restoreFocusContext();
+    return;
+  }
+
+  console.info(
+    `[ripple-desktop] rewrite FG drift ${fg.processName ?? "?"} → restore ${pinned.processName}`,
+  );
+  await restoreFocusContext();
+}
+
 export async function restoreFocusContext(): Promise<boolean> {
   if (isSaveDialogModalLocked()) {
     if (process.platform !== "win32") return false;
@@ -916,7 +1320,18 @@ export async function restoreFocusContext(): Promise<boolean> {
     // Prefer the WhatsApp/Chrome window the user is already looking at over a
     // stale voice-target hwnd (unread badge flips 55↔56; second Chrome window).
     // Yanking focus away is what feels like "WhatsApp went off the screen".
+    const restoreStartedAt = Date.now();
     const raw = await getForegroundWindow();
+    const fgProc = raw?.processName ?? "?";
+    const fgTitle = (raw?.windowTitle ?? "").slice(0, 40);
+    const shellBefore = raw ? isDesktopShellForeground(raw) : false;
+    console.info(
+      `[ripple-focus-drift] restore_begin t=${restoreStartedAt}` +
+        ` fg=${fgProc} title="${fgTitle}"` +
+        ` want=${target.processName} hwnd=${target.hwnd}` +
+        `${shellBefore ? " shell=1" : ""}`,
+    );
+
     if (raw?.hwnd) {
       const current = buildFocusContextFromRaw(raw);
       const sameHwnd = Number(raw.hwnd) === Number(target.hwnd);
@@ -926,7 +1341,12 @@ export async function restoreFocusContext(): Promise<boolean> {
         voiceCommandTarget = saved;
         return true;
       }
-      if (current.isWhatsApp && target.isWhatsApp) {
+      const fgIsRipple = isRippleOwnWindow(
+        current.processName,
+        current.windowTitle,
+      );
+      // Never "keep" Ripple as the insert surface — force restore to pin.
+      if (!fgIsRipple && current.isWhatsApp && target.isWhatsApp) {
         console.info(
           `[ripple-desktop] focus restore keep current WhatsApp hwnd=${raw.hwnd} (skip stale target hwnd=${target.hwnd})`,
         );
@@ -935,21 +1355,94 @@ export async function restoreFocusContext(): Promise<boolean> {
         voiceCommandTarget = current;
         return true;
       }
+      // Do not blur Ripple here. yieldRippleForeground() + delay hands FG to
+      // explorer (blank-title shell) and causes the insert flicker. While we
+      // still own FG, SetForegroundWindow can land on the pin directly.
     }
 
-    await focusWindowByHwnd(target.hwnd, target.windowTitle);
-    await new Promise((r) => setTimeout(r, 350));
-    saved = target;
-    lastNonRippleFocus = target;
-    console.info(
-      `[ripple-desktop] focus restored → ${target.processName} | "${target.windowTitle.slice(0, 60)}"`,
-    );
-    return true;
+    await allowSetForegroundNative();
+    await lockSetForegroundNative(true);
+
+    try {
+      // Q5 — verify the OS focus call actually landed. Retry even when Cursor
+      // (or any other app) holds FG — Windows often refuses the first
+      // SetForegroundWindow after the user clicked elsewhere during rewrite.
+      const maxAttempts = 3;
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        const hwndAt = Date.now();
+        await focusWindowByHwnd(target.hwnd, target.windowTitle);
+        const hwndMs = Date.now() - hwndAt;
+        await new Promise((r) => setTimeout(r, attempt === 1 ? 350 : 220));
+
+        const after = await getForegroundWindow();
+        const elapsedMs = Date.now() - restoreStartedAt;
+        if (
+          after?.hwnd &&
+          (Number(after.hwnd) === Number(target.hwnd) ||
+            matchesPinnedInsertTarget(after, target))
+        ) {
+          const landed: FocusContext = {
+            ...target,
+            hwnd: Number(after.hwnd),
+            processName: after.processName || target.processName,
+            windowTitle: after.windowTitle || target.windowTitle,
+          };
+          saved = landed;
+          lastNonRippleFocus = landed;
+          voiceCommandTarget = landed;
+          console.info(
+            `[ripple-desktop] focus restored → ${landed.processName} | "${landed.windowTitle.slice(0, 60)}"`,
+          );
+          console.info(
+            `[ripple-focus-drift] restore_end t=${Date.now()}` +
+              ` elapsedMs=${elapsedMs} hwndCallMs=${hwndMs}` +
+              ` attempt=${attempt}` +
+              ` from=${fgProc} to=${landed.processName}` +
+              `${shellBefore ? " recovered_shell=1" : ""}`,
+          );
+          return true;
+        }
+
+        if (attempt < maxAttempts) {
+          console.warn(
+            `[ripple-desktop] focus restore attempt ${attempt}/${maxAttempts}: ` +
+              `FG is ${after?.processName ?? "?"} — retrying pin ${target.processName}`,
+          );
+          console.warn(
+            `[ripple-focus-drift] restore_retry t=${Date.now()}` +
+              ` elapsedMs=${elapsedMs} hwndCallMs=${hwndMs}` +
+              ` fg=${after?.processName ?? "?"} title="${(after?.windowTitle ?? "").slice(0, 40)}"`,
+          );
+          continue;
+        }
+
+        console.warn(
+          `[ripple-desktop] focus restore FAILED to land — wanted ${target.processName} ` +
+            `(hwnd=${target.hwnd}) but foreground is now ` +
+            `${after?.processName ?? "?"} (hwnd=${after?.hwnd ?? "?"}) ` +
+            `title="${(after?.windowTitle ?? "").slice(0, 60)}"`,
+        );
+        console.warn(
+          `[ripple-focus-drift] restore_fail t=${Date.now()} elapsedMs=${elapsedMs}` +
+            ` from=${fgProc} still=${after?.processName ?? "?"}`,
+        );
+        return false;
+      }
+
+      return false;
+    } finally {
+      await lockSetForegroundNative(false);
+    }
   } catch (e: unknown) {
     console.warn(
       "[ripple-desktop] focus restore failed:",
       e instanceof Error ? e.message : e,
     );
+    try {
+      await lockSetForegroundNative(false);
+    } catch {
+      /* ignore */
+    }
     return false;
   }
 }

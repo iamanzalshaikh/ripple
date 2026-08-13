@@ -98,6 +98,9 @@ fn run_message_loop(event_tx: broadcast::Sender<NativeEvent>) -> Result<(), Stri
         const VK_SPACE: u32 = 0x20;
         const VK_ESCAPE: u32 = 0x1B;
 
+        // Never register Alt+Space — it is Windows' reserved window-system-menu
+        // chord (RegisterHotKey always fails with 0x80070581). Dictation primary
+        // is Shift+Space; Ctrl+Shift+Space is the native backup.
         let hotkeys = [
             (
                 HOTKEY_VOICE,
@@ -166,6 +169,7 @@ fn run_message_loop(event_tx: broadcast::Sender<NativeEvent>) -> Result<(), Stri
                     HOTKEY_CANCEL => "cancel_voice",
                     _ => continue,
                 };
+                crate::send_input::grant_foreground_permission();
                 let _ = event_tx.send(NativeEvent::Hotkey {
                     name: name.to_string(),
                 });

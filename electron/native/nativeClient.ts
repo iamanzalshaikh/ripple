@@ -212,6 +212,17 @@ export function disconnectNativeClient(): void {
   }
 }
 
+// Q3 — every native_rpc_timeout logged with an ISO timestamp + dev/packaged
+// tag, so timeouts can be visually correlated against Vite HMR reload lines
+// in the dev terminal to tell a dev-only artifact apart from a real risk.
+function logNativeRpcTimeout(method: string, timeoutMs: number): void {
+  const isDev = process.env.NODE_ENV !== "production";
+  console.warn(
+    `[ripple-native] native_rpc_timeout method=${method} timeoutMs=${timeoutMs} ` +
+      `at=${new Date().toISOString()} env=${isDev ? "dev" : "prod"}`,
+  );
+}
+
 export function callNativeRpc(
   method: string,
   params: Record<string, unknown> = {},
@@ -227,6 +238,7 @@ export function callNativeRpc(
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       pending.delete(id);
+      logNativeRpcTimeout(method, timeoutMs);
       reject(new Error(`native_rpc_timeout:${method}`));
     }, timeoutMs);
 

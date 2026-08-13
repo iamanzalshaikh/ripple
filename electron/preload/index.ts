@@ -259,6 +259,73 @@ const api = {
         message?: string;
       }>,
   },
+  meeting: {
+    getState: () =>
+      ipcRenderer.invoke("meeting:getState") as Promise<{
+        ok: boolean;
+        message?: string;
+        state?: {
+          state: "idle" | "recording" | "stopping";
+          meetingId: string | null;
+          noteId: string | null;
+          startedAt: number | null;
+          elapsedMs: number;
+          lastTranscriptSnippet: string | null;
+          transcriptLength: number;
+          error: string | null;
+        };
+      }>,
+    toggle: () =>
+      ipcRenderer.invoke("meeting:toggle") as Promise<{
+        ok: boolean;
+        message?: string;
+        state?: {
+          state: "idle" | "recording" | "stopping";
+          meetingId: string | null;
+          noteId: string | null;
+          startedAt: number | null;
+          elapsedMs: number;
+          lastTranscriptSnippet: string | null;
+          transcriptLength: number;
+          error: string | null;
+          failedChunks?: number;
+        };
+      }>,
+    stop: () =>
+      ipcRenderer.invoke("meeting:stop") as Promise<{
+        ok: boolean;
+        message?: string;
+      }>,
+    acceptConsent: () =>
+      ipcRenderer.invoke("meeting:acceptConsent") as Promise<{
+        ok: boolean;
+        message?: string;
+      }>,
+    declineConsent: () =>
+      ipcRenderer.invoke("meeting:declineConsent") as Promise<{
+        ok: boolean;
+        message?: string;
+      }>,
+    sendChunk: (args: {
+      chunk: Uint8Array;
+      mimeType?: string;
+      filename?: string;
+    }) =>
+      ipcRenderer.invoke("meeting:chunk", args) as Promise<{
+        ok: boolean;
+        text?: string;
+        message?: string;
+      }>,
+    end: (args?: {
+      chunk?: Uint8Array;
+      mimeType?: string;
+      filename?: string;
+    }) =>
+      ipcRenderer.invoke("meeting:end", args) as Promise<{
+        ok: boolean;
+        message?: string;
+      }>,
+  },
   language: {
     get: () =>
       ipcRenderer.invoke("language:get") as Promise<{
@@ -272,6 +339,12 @@ const api = {
         language?: string;
         message?: string;
       }>,
+  },
+  loopback: {
+    enable: () =>
+      ipcRenderer.invoke("enable-loopback-audio") as Promise<void>,
+    disable: () =>
+      ipcRenderer.invoke("disable-loopback-audio") as Promise<void>,
   },
   quietMode: {
     get: () =>
@@ -430,6 +503,38 @@ const api = {
     ) => cb(payload);
     ipcRenderer.on("overlay:voice-toggle", handler);
     return () => ipcRenderer.removeListener("overlay:voice-toggle", handler);
+  },
+  onMeetingToggle: (
+    cb: (payload: { action: "start" | "stop" }) => void,
+  ): Unsubscribe => {
+    const handler = (_: unknown, payload: { action: "start" | "stop" }) =>
+      cb(payload);
+    ipcRenderer.on("overlay:meeting-toggle", handler);
+    return () => ipcRenderer.removeListener("overlay:meeting-toggle", handler);
+  },
+  onMeetingConsent: (
+    cb: (payload: { show: boolean }) => void,
+  ): Unsubscribe => {
+    const handler = (_: unknown, payload: { show: boolean }) => cb(payload);
+    ipcRenderer.on("overlay:meeting-consent", handler);
+    return () => ipcRenderer.removeListener("overlay:meeting-consent", handler);
+  },
+  onMeetingState: (
+    cb: (payload: {
+      state: "idle" | "recording" | "stopping";
+      meetingId: string | null;
+      noteId: string | null;
+      startedAt: number | null;
+      elapsedMs: number;
+      lastTranscriptSnippet: string | null;
+      transcriptLength: number;
+      error: string | null;
+      failedChunks?: number;
+    }) => void,
+  ): Unsubscribe => {
+    const handler = (_: unknown, payload: unknown) => cb(payload as never);
+    ipcRenderer.on("overlay:meeting-state", handler);
+    return () => ipcRenderer.removeListener("overlay:meeting-state", handler);
   },
   pickDisambiguation: (path: string | null) =>
     ipcRenderer.invoke("disambiguation:pick", { path }) as Promise<{ ok: boolean }>,

@@ -36,12 +36,20 @@ export async function prepareComposeDictationText(
     /* fail-open — leave bufferText unchanged */
   }
 
+  const { maintainPinnedTargetDuringRewrite } = await import(
+    "../../focus/focusContext.js"
+  );
+  await maintainPinnedTargetDuringRewrite();
+
   const rewritten = await rewriteDictationBuffer({
     bufferText,
     committedBuffer: options?.previousText,
     applyMemoryCorrections: true,
     processName: options?.processName,
   });
+
+  await maintainPinnedTargetDuringRewrite();
+
   return {
     text: rewritten.finalText,
     kind: rewritten.kind,

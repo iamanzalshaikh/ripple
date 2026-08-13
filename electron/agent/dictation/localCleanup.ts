@@ -57,20 +57,50 @@ export function localCleanup(text: string): string {
 
 // --- Spoken list detection (Phase 7.1 "list" part) ---------------------
 
-const LIST_CUE =
-  "first|firstly|second|secondly|third|thirdly|fourth|fourthly|fifth|next|after that|finally|lastly";
-const LIST_CUE_RE = new RegExp(`\\b(?:${LIST_CUE})\\b[,:]?\\s*`, "gi");
+/** Strong ordinals — must see ≥2 of these at clause starts to format a list. */
+const PRIMARY_ORDINAL =
+  "first|firstly|second|secondly|third|thirdly|fourth|fourthly|fifth|fifthly";
+
+/** Soft sequencers — only count after a primary ordinal already matched. */
+const SOFT_SEQUENCER = "next|after that|finally|lastly";
+
+const ANY_LIST_CUE_RE = new RegExp(
+  `\\b(?:${PRIMARY_ORDINAL}|${SOFT_SEQUENCER})\\b[,:]?\\s*`,
+  "gi",
+);
 
 export type SpokenList = { intro: string; items: string[] };
 
+function wordCountLocal(text: string): number {
+  return text.trim().split(/\s+/).filter(Boolean).length;
+}
+
+/** Cue must start a clause (after .!? or newline), not sit mid-phrase ("the first main issue"). */
+function isListCueAtClauseStart(text: string, index: number): boolean {
+  if (index <= 0) return true;
+  const before = text.slice(0, index);
+  return /[.!?;]\s*$/.test(before) || /\n\s*$/.test(before);
+}
+
+function isPrimaryOrdinalCue(matched: string): boolean {
+  return new RegExp(`^(?:${PRIMARY_ORDINAL})\\b`, "i").test(matched.trim());
+}
+
 /**
- * Detect an explicit spoken list. Requires >= 2 ordinal/sequence cues so
- * ordinary sentences that happen to contain "next" or "first" once aren't
- * misread as a list.
+ * Detect an explicit spoken list.
+ * Requires ≥2 primary ordinals (first/second/…) at clause starts.
+ * Rejects conversational mush that merely says "first … second … next …"
+ * mid-sentence (live Instagram false positive 2026-08-08).
  */
 export function detectSpokenList(text: string): SpokenList | null {
-  const matches = [...text.matchAll(LIST_CUE_RE)];
+  const all = [...text.matchAll(ANY_LIST_CUE_RE)];
+  if (all.length < 2) return null;
+
+  const matches = all.filter((m) => isListCueAtClauseStart(text, m.index ?? 0));
   if (matches.length < 2) return null;
+
+  const primaryCount = matches.filter((m) => isPrimaryOrdinalCue(m[0] ?? "")).length;
+  if (primaryCount < 2) return null;
 
   const intro = text.slice(0, matches[0]!.index!).trim();
   const items: string[] = [];
@@ -81,6 +111,11 @@ export function detectSpokenList(text: string): SpokenList | null {
     if (item) items.push(item);
   }
   if (items.length < 2) return null;
+
+  // Conversational paragraphs after "second" are not list items.
+  const maxItemWords = Math.max(...items.map(wordCountLocal));
+  if (maxItemWords > 28) return null;
+
   return { intro, items };
 }
 
