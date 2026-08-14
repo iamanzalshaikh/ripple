@@ -11,10 +11,13 @@ vi.mock("../../native/win32Bridge.js", () => ({
   focusWindowByHwnd: (...args: unknown[]) => focusWindowByHwnd(...args),
   allowSetForegroundNative: vi.fn(async () => undefined),
   lockSetForegroundNative: vi.fn(async () => undefined),
+  getWindowClassNameNative: vi.fn(async () => "Progman"),
 }));
 
 vi.mock("../../windows/mainWindow.js", () => ({
   getMainWindow: () => null,
+  setMainActivationSuppressed: vi.fn(),
+  isMainActivationSuppressed: () => false,
 }));
 
 vi.mock("../../storage/sessionMemory.js", () => ({

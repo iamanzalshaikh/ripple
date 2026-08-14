@@ -3,11 +3,19 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   extendCommandFocusGrace,
+  nestedForegroundLock,
+  resolveTypingFocusTarget,
   setVoiceSessionFrozen,
   snapshotPreVoiceTarget,
 } from "../focus/focusContext.js";
 import { isVoiceInputReady } from "../services/bootReadiness.js";
 import { resolvePreloadPath } from "../utils/preloadPath.js";
+import { setMainActivationSuppressed, getMainWindow } from "./mainWindow.js";
+import {
+  allowSetForegroundNative,
+  focusWindowByHwnd,
+  getForegroundWindow,
+} from "../native/win32Bridge.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -27,6 +35,24 @@ export function getOverlayWindow(): BrowserWindow | null {
   return overlayWindow;
 }
 
+/**
+ * Electron's setFocusable(false) on Windows ends in Widget::Deactivate() —
+ * it SetForegroundWindow's the next window below in z-order even when this
+ * window never had focus. Only flip when focusable is actually on, so
+ * repeated show/hide cycles on the (visible) overlay can't deactivate the
+ * user's foreground app.
+ */
+function dropFocusable(win: BrowserWindow | null): void {
+  if (!win || win.isDestroyed()) return;
+  try {
+    if (typeof win.isFocusable !== "function" || win.isFocusable()) {
+      win.setFocusable(false);
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
 export function isVoiceSessionActive(): boolean {
   return voiceSessionActive;
 }
@@ -34,6 +60,9 @@ export function isVoiceSessionActive(): boolean {
 export function setVoiceSessionActive(active: boolean): void {
   voiceSessionActive = active;
   setVoiceSessionFrozen(active);
+  // Main titled "Ripple" must not re-activate during dictation — that is the
+  // restore_fail from=electron snap-back loop after SetForegroundWindow.
+  setMainActivationSuppressed(active);
 }
 
 function positionIndicator(win: BrowserWindow): void {
@@ -107,6 +136,7 @@ export function createOverlayWindow(): BrowserWindow {
 
   overlayWindow.webContents.on("did-finish-load", () => {
     overlayReady = true;
+    applyOverlayNoActivate(overlayWindow);
   });
 
   overlayWindow.on("closed", () => {
@@ -115,29 +145,141 @@ export function createOverlayWindow(): BrowserWindow {
     overlayReady = false;
   });
 
+  // Never accept keyboard focus even if Electron briefly flips focusable.
+  overlayWindow.on("focus", () => {
+    try {
+      dropFocusable(overlayWindow);
+      overlayWindow?.blur();
+    } catch {
+      /* ignore */
+    }
+  });
+
   positionIndicator(overlayWindow);
+  applyOverlayNoActivate(overlayWindow);
   return overlayWindow;
 }
 
+/** HWND from Electron BrowserWindow (Win32). */
+function overlayNativeHwnd(win: BrowserWindow): number | null {
+  try {
+    const buf = win.getNativeWindowHandle();
+    if (!buf || buf.length < 4) return null;
+    if (buf.length >= 8) return Number(buf.readBigUInt64LE(0));
+    return buf.readUInt32LE(0);
+  } catch {
+    return null;
+  }
+}
+
+function applyOverlayNoActivate(win: BrowserWindow | null): void {
+  if (!win || win.isDestroyed() || process.platform !== "win32") return;
+  dropFocusable(win);
+  const hwnd = overlayNativeHwnd(win);
+  if (!hwnd) return;
+  void import("../native/win32Bridge.js").then(({ applyNoActivateStyleNative }) => {
+    void applyNoActivateStyleNative(hwnd);
+  });
+}
+
 export function showOverlay(): void {
+  // Suppress main before any BrowserWindow show — Electron app activation
+  // otherwise brings title="Ripple" to the foreground.
+  setMainActivationSuppressed(true);
   if (!overlayWindow || overlayWindow.isDestroyed()) {
     overlayWindow = createOverlayWindow();
   }
+  dropFocusable(overlayWindow);
   positionIndicator(overlayWindow);
+  applyOverlayNoActivate(overlayWindow);
   overlayWindow.showInactive();
   overlayWindow.setAlwaysOnTop(true, "screen-saver");
+  applyOverlayNoActivate(overlayWindow);
 }
 
 export function hideOverlay(): void {
   if (overlayWindow && !overlayWindow.isDestroyed()) {
     // Language/code-repair paths briefly set focusable=true; force off before
     // hide so Windows does not activate Ripple chrome as the next FG window.
-    overlayWindow.setFocusable(false);
+    dropFocusable(overlayWindow);
     overlayWindow.hide();
   }
   // Do not blur the main window here. hide + blur leaves a FG vacuum that
   // Windows fills with explorer (blank title / Program Manager) — the
-  // insert flicker. Callers restore the pinned target before/after hide.
+  // insert flicker. Callers must claim the pinned target BEFORE hide
+  // (see hideOverlayToPinnedTarget).
+}
+
+/**
+ * Claim the pinned typing hwnd first, then hide the overlay — while a
+ * short-lived LockSetForegroundWindow is held — so FG never passes through
+ * explorer. Order: SetForegroundWindow(pin) → hide. Never hide-then-restore.
+ */
+export async function hideOverlayToPinnedTarget(): Promise<boolean> {
+  const pin = resolveTypingFocusTarget();
+
+  // If the pin ALREADY owns the foreground, do not touch it at all: the
+  // Focus-Hwnd ritual (AppActivate/AttachThreadInput/Alt-tap) on an
+  // already-foreground Chrome poisons its input state so the next Ctrl+V
+  // is swallowed (proven live 2026-08-14 — the failed-paste bug). No lock
+  // was acquired here, so there is nothing to unlock — just hide.
+  if (pin?.hwnd) {
+    const fg = await getForegroundWindow();
+    if (fg?.hwnd && Number(fg.hwnd) === Number(pin.hwnd)) {
+      console.info(
+        `[ripple-insert] hide_overlay pin_already_fg hwnd=${pin.hwnd} — hide only, no focus call`,
+      );
+      hideOverlay();
+      return true;
+    }
+  }
+
+  let locked = false;
+  try {
+    await allowSetForegroundNative();
+    await nestedForegroundLock(true);
+    locked = true;
+    if (pin?.hwnd) {
+      await focusWindowByHwnd(pin.hwnd, pin.windowTitle);
+      // Tiny settle under lock so the OS commits FG before hide.
+      await new Promise((r) => setTimeout(r, 40));
+    }
+    hideOverlay();
+    return Boolean(pin?.hwnd);
+  } catch (e: unknown) {
+    console.warn(
+      "[ripple-focus-drift] hideOverlayToPinnedTarget failed:",
+      e instanceof Error ? e.message : e,
+    );
+    hideOverlay();
+    return false;
+  } finally {
+    if (locked) {
+      try {
+        await nestedForegroundLock(false);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+}
+
+/** Sync snapshot of our BrowserWindows for shell-steal forensics. */
+export function describeRippleWindowsFocus(): string {
+  const describe = (label: string, win: BrowserWindow | null): string => {
+    if (!win || win.isDestroyed()) return `${label}=none`;
+    try {
+      return (
+        `${label}={focused=${win.isFocused()}` +
+        ` visible=${win.isVisible()}` +
+        ` focusable=${typeof win.isFocusable === "function" ? win.isFocusable() : "?"}` +
+        ` title="${(win.getTitle?.() ?? "").slice(0, 24)}"}`
+      );
+    } catch {
+      return `${label}=err`;
+    }
+  };
+  return `${describe("main", getMainWindow())} ${describe("overlay", overlayWindow)}`;
 }
 
 export function expandOverlayForDisambiguation(itemCount: number): void {
@@ -179,7 +321,7 @@ export function expandOverlayForLanguageMenu(itemCount: number): void {
 /** Collapse back to the normal small pill after a Flow Bar menu closes. */
 export function collapseOverlayToIndicator(): void {
   if (!overlayWindow || overlayWindow.isDestroyed()) return;
-  overlayWindow.setFocusable(false);
+  dropFocusable(overlayWindow);
   positionIndicator(overlayWindow);
 }
 
@@ -201,7 +343,7 @@ export function expandOverlayForCodeRepair(): void {
 
 export function resetOverlaySize(): void {
   if (!overlayWindow || overlayWindow.isDestroyed()) return;
-  overlayWindow.setFocusable(false);
+  dropFocusable(overlayWindow);
   positionIndicator(overlayWindow);
 }
 
@@ -267,10 +409,11 @@ export function showClarifyQuestionOnOverlay(question: string): void {
 
 export function dismissOverlay(delayMs = 1500): void {
   setTimeout(() => {
-    hideOverlay();
-    setOverlayState("idle");
-    setVoiceSessionActive(false);
-    extendCommandFocusGrace();
+    void hideOverlayToPinnedTarget().then(() => {
+      setOverlayState("idle");
+      setVoiceSessionActive(false);
+      extendCommandFocusGrace();
+    });
   }, delayMs);
 }
 
@@ -334,6 +477,12 @@ export async function handleShortcutPress(
     return;
   }
 
+  // press_sequence forensics — FG before ANY window-touching call in the
+  // press path (setVoiceSessionActive → suppression is the first toucher).
+  const pressT0 = Date.now();
+  const fgBefore =
+    process.platform === "win32" ? await getForegroundWindow() : null;
+
   const { startCommandSession, startDictationSession } = await import(
     "../agent/dictation/dictationSession.js"
   );
@@ -344,11 +493,38 @@ export async function handleShortcutPress(
   }
 
   // Snapshot target app before overlay steals attention (do not re-capture FG here)
+  // Suppress Ripple main *before* snapshot/overlay — first-boot ready-to-show
+  // otherwise activates title="Ripple" mid-hotkey.
+  setVoiceSessionActive(true);
   await snapshotPreVoiceTarget();
   showOverlay();
-  setVoiceSessionActive(true);
+  // Second snapshot right after overlay show; do not await — press latency
+  // stays unchanged, the log lands asynchronously.
+  const fgAfterOverlayPromise =
+    process.platform === "win32" ? getForegroundWindow() : Promise.resolve(null);
   setOverlayState("listening");
   sendToOverlay("overlay:voice-toggle", { action: "start", mode: uiMode });
+  if (process.platform === "win32") {
+    const fgAfterSessionPromise = getForegroundWindow();
+    void Promise.all([fgAfterOverlayPromise, fgAfterSessionPromise]).then(
+      ([fgAfterOverlay, fgAfterSession]) => {
+        const fmt = (
+          fg: { processName?: string; hwnd?: number } | null,
+        ): string => (fg?.hwnd ? `${fg.processName ?? "?"}:${fg.hwnd}` : "none");
+        const changed =
+          Number(fgBefore?.hwnd ?? 0) !== Number(fgAfterOverlay?.hwnd ?? 0) ||
+          Number(fgBefore?.hwnd ?? 0) !== Number(fgAfterSession?.hwnd ?? 0);
+        console.info(
+          `[ripple-focus-drift] press_sequence t=${pressT0}` +
+            ` durMs=${Date.now() - pressT0}` +
+            ` fg_before=${fmt(fgBefore)}` +
+            ` fg_after_overlay=${fmt(fgAfterOverlay)}` +
+            ` fg_after_session_start=${fmt(fgAfterSession)}` +
+            `${changed ? " FG_CHANGED=1" : ""}`,
+        );
+      },
+    );
+  }
 }
 
 /**

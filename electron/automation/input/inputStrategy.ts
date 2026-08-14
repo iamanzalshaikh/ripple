@@ -16,6 +16,8 @@ import { getForegroundWindow, runInputSequenceNative } from "../../native/win32B
 import { captureObservation, verifyTypingObservation } from "../../agent/observe.js";
 import type { ObservationSnapshot } from "../../agent/types.js";
 import { runVisionInsert, visionInsertEnabled } from "./visionInsert.js";
+import { assertPreSendGates } from "./insertGates.js";
+import { createHash } from "node:crypto";
 
 export type InsertStrategyName =
   | "native_text"
@@ -91,6 +93,7 @@ async function assertInsertForeground(): Promise<void> {
 async function tryNativeTextInsert(text: string): Promise<boolean> {
   await assertInsertForeground();
   await delay(120);
+  await assertPreSendGates("native_text");
   const focus = resolveTypingFocusTarget();
 
   if (text.length <= CHECKPOINT_TEXT_THRESHOLD) {
@@ -149,6 +152,7 @@ async function tryNativeTextInsert(text: string): Promise<boolean> {
 async function trySendKeysInsert(text: string): Promise<boolean> {
   await assertInsertForeground();
   await delay(120);
+  await assertPreSendGates("sendkeys");
   await simulateTyping(text);
   return true;
 }
@@ -171,11 +175,46 @@ async function tryClipboardPasteInsert(
   }
   clipboard.writeText(text);
   await delay(80);
+  // Read-back before the paste keystroke — a clipboard set that silently
+  // failed (another app clearing/owning it) pastes stale content.
+  let rewrite = 0;
+  let readBack: string | null = null;
+  try {
+    readBack =
+      typeof clipboard.readText === "function" ? clipboard.readText() : null;
+    if (readBack !== null && readBack !== text) {
+      clipboard.writeText(text);
+      await delay(60);
+      readBack = clipboard.readText();
+      rewrite = 1;
+    }
+  } catch {
+    readBack = null;
+  }
+  const checked = readBack ?? text;
+  const hash8 = createHash("sha256").update(checked).digest("hex").slice(0, 8);
+  console.info(
+    `[ripple-insert] clipboard_check len=${checked.length} hash8=${hash8}` +
+      `${rewrite ? " clipboard_rewrite=1" : ""}` +
+      `${readBack === null ? " readback=unavailable" : ""}` +
+      `${readBack !== null && readBack !== text ? " MISMATCH_AFTER_REWRITE=1" : ""}`,
+  );
   if (replaceAll) {
     await selectAll();
     await delay(60);
   }
-  await pasteFromClipboard();
+  // Gates immediately before the paste keystroke — never fire Ctrl+V while a
+  // Win key is down (shell shortcut) or at a hidden/minimized target.
+  await assertPreSendGates("clipboard_paste");
+  try {
+    await pasteFromClipboard();
+    console.info("[ripple-insert] paste_send result=ok");
+  } catch (e: unknown) {
+    console.warn(
+      `[ripple-insert] paste_send result=error error=${e instanceof Error ? e.message : e}`,
+    );
+    throw e;
+  }
   return true;
 }
 
@@ -329,12 +368,95 @@ export async function runInsertWithFallback(
         if (!verified.ok) {
           const control =
             verified.after?.focusedA11y?.controlType?.toLowerCase() ?? "";
+          const editLikeControl =
+            control.includes("edit") ||
+            control.includes("document") ||
+            control.includes("text");
+
+          // Value-change acceptance rule: a11y_name_mismatch on an editable
+          // control is only acceptable when the field VALUE actually moved.
+          // A byte-identical readable value = the paste landed nowhere (the
+          // desktop-flash false success) — never convert that to ok.
+          const normalizeValue = (s: string) =>
+            s.replace(/\s+/g, " ").trim().toLowerCase();
+          const valueBeforeNorm = normalizeValue(
+            verified.before?.focusedA11y?.value ?? "",
+          );
+          const valueAfterNorm = normalizeValue(
+            verified.after?.focusedA11y?.value ?? "",
+          );
+          const fragment = normalizeValue(text).slice(0, 24);
+          const fragmentInAfter =
+            fragment.length >= 4 && valueAfterNorm.includes(fragment);
+          const valueSignal =
+            valueBeforeNorm.length > 0 || valueAfterNorm.length > 0;
+          const valueChanged = valueAfterNorm !== valueBeforeNorm;
+
+          if (
+            options?.acceptUnverifiableEdit === true &&
+            verified.reason === "a11y_name_mismatch" &&
+            editLikeControl &&
+            valueSignal &&
+            !valueChanged &&
+            !fragmentInAfter
+          ) {
+            console.warn(
+              `[ripple-insert] strategy=${strategy.name} paste_no_effect` +
+                ` value_len=${valueAfterNorm.length} (byte-identical before/after)` +
+                ` — explicit composer click + one retry`,
+            );
+            const { ensureBrowserComposerFocus } = await import(
+              "../../agent/editorFocus.js"
+            );
+            const focusOk = await ensureBrowserComposerFocus();
+            console.info(
+              `[ripple-insert] composer_focus retry ok=${focusOk ? 1 : 0}`,
+            );
+            // Re-send is safe here: the readable field value being unchanged
+            // proves the first send landed nowhere.
+            const resent = await strategy.run(text);
+            const reverified = resent
+              ? await verifyTypingObservation({
+                  before,
+                  expectedText: text,
+                  settleMs: 260,
+                })
+              : null;
+            const reAfterNorm = normalizeValue(
+              reverified?.after?.focusedA11y?.value ?? "",
+            );
+            const landedOnRetry =
+              reverified?.ok === true ||
+              (reAfterNorm.length > 0 && reAfterNorm !== valueBeforeNorm) ||
+              (fragment.length >= 4 && reAfterNorm.includes(fragment));
+            if (landedOnRetry) {
+              console.info(
+                `[ripple-insert] strategy=${strategy.name} status=ok len=${text.length} (landed_on_retry=1)`,
+              );
+              return {
+                detail: strategyDetail(strategy.name, text),
+                strategy: strategy.name,
+              };
+            }
+            throw new Error("insert_aborted:paste_no_effect");
+          }
+
           const unverifiableEditable =
             options?.acceptUnverifiableEdit === true &&
             verified.reason === "a11y_name_mismatch" &&
-            (control.includes("edit") ||
-              control.includes("document") ||
-              control.includes("text"));
+            editLikeControl &&
+            // Accept only with evidence of landing (value moved / fragment
+            // present) or when the control exposes no value at all (WhatsApp
+            // Web contenteditable) — then a11y simply can't verify.
+            (fragmentInAfter || (valueSignal && valueChanged) || !valueSignal);
+          if (
+            unverifiableEditable &&
+            !valueSignal
+          ) {
+            console.info(
+              `[ripple-insert] paste_landing=indeterminate_no_value strategy=${strategy.name} (control exposes no value — accepting)`,
+            );
+          }
           const beforeProc = (
             verified.before?.foreground?.processName ?? ""
           ).toLowerCase();

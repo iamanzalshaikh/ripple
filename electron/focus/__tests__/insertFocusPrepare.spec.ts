@@ -20,10 +20,13 @@ vi.mock("../../native/win32Bridge.js", () => ({
     clickBrowserComposerNative(...args),
   allowSetForegroundNative: vi.fn(async () => undefined),
   lockSetForegroundNative: vi.fn(async () => undefined),
+  getWindowClassNameNative: vi.fn(async () => "Progman"),
 }));
 
 vi.mock("../../windows/mainWindow.js", () => ({
   getMainWindow: () => null,
+  setMainActivationSuppressed: vi.fn(),
+  isMainActivationSuppressed: () => false,
 }));
 
 vi.mock("../../storage/sessionMemory.js", () => ({
@@ -39,7 +42,7 @@ describe("dictation insert focus prepare", () => {
     vi.resetModules();
   });
 
-  it("matchesPinnedInsertTarget allows WhatsApp badge churn, rejects other Chrome apps", async () => {
+  it("matchesPinnedInsertTarget requires the hotkey hwnd (no silent Chrome retarget)", async () => {
     const focus = await import("../focusContext.js");
     const pinnedWa = {
       hwnd: 2,
@@ -55,12 +58,24 @@ describe("dictation insert focus prepare", () => {
       isInstagram: false,
       isBrowser: true,
     };
+    // Badge churn on the SAME hwnd is fine.
     expect(
       focus.matchesPinnedInsertTarget(
-        { hwnd: 1, processName: "chrome", windowTitle: "(63) WhatsApp - Google Chrome" },
+        { hwnd: 2, processName: "chrome", windowTitle: "(63) WhatsApp - Google Chrome" },
         pinnedWa,
       ),
     ).toBe(true);
+    // Different Chrome window — even another WhatsApp tab — must not match.
+    expect(
+      focus.matchesPinnedInsertTarget(
+        {
+          hwnd: 1,
+          processName: "chrome",
+          windowTitle: "(63) WhatsApp - Google Chrome",
+        },
+        pinnedWa,
+      ),
+    ).toBe(false);
     expect(
       focus.matchesPinnedInsertTarget(
         {
@@ -71,6 +86,28 @@ describe("dictation insert focus prepare", () => {
         pinnedWa,
       ),
     ).toBe(false);
+  });
+
+  it("ensureInsertForeground aborts when a different Chrome hwnd holds FG", async () => {
+    const focus = await import("../focusContext.js");
+
+    getForegroundWindow.mockResolvedValue({
+      hwnd: 300,
+      processName: "chrome",
+      windowTitle: "(59) WhatsApp - Google Chrome",
+    });
+    await focus.snapshotPreVoiceTarget();
+
+    // Another Chrome window stole FG; restore cannot land on pin hwnd.
+    getForegroundWindow.mockResolvedValue({
+      hwnd: 999,
+      processName: "chrome",
+      windowTitle: "EGC India Shopping club - Chat - Google Chrome",
+    });
+    focusWindowByHwnd.mockResolvedValue(undefined);
+
+    const ok = await focus.ensureInsertForeground();
+    expect(ok).toBe(false);
   });
 
   it("ensureInsertForeground rejects Cursor when pinned target is chrome", async () => {
@@ -189,6 +226,48 @@ describe("dictation insert focus prepare", () => {
     const order = vi.mocked(lockSetForegroundNative).mock.calls.map((c) => c[0]);
     expect(order[0]).toBe(true);
     expect(order[order.length - 1]).toBe(false);
+  });
+
+  it("restoreFocusContext skips OS restore when FG already matches the pin", async () => {
+    const { lockSetForegroundNative } = await import("../../native/win32Bridge.js");
+    const focus = await import("../focusContext.js");
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+
+    getForegroundWindow.mockResolvedValue({
+      hwnd: 500,
+      processName: "chrome",
+      windowTitle: "(1) WhatsApp - Google Chrome",
+    });
+    await focus.snapshotPreVoiceTarget();
+
+    focusWindowByHwnd.mockClear();
+    vi.mocked(lockSetForegroundNative).mockClear();
+
+    const ok = await focus.restoreFocusContext();
+    expect(ok).toBe(true);
+    expect(focusWindowByHwnd).not.toHaveBeenCalled();
+    expect(lockSetForegroundNative).not.toHaveBeenCalled();
+    expect(
+      info.mock.calls.some((c) => String(c[0]).includes("restore_begin")),
+    ).toBe(false);
+
+    info.mockRestore();
+  });
+
+  it("ensureInsertForeground is a no-op when FG already matches the pin", async () => {
+    const focus = await import("../focusContext.js");
+
+    getForegroundWindow.mockResolvedValue({
+      hwnd: 500,
+      processName: "chrome",
+      windowTitle: "(1) WhatsApp - Google Chrome",
+    });
+    await focus.snapshotPreVoiceTarget();
+
+    focusWindowByHwnd.mockClear();
+    const ok = await focus.ensureInsertForeground();
+    expect(ok).toBe(true);
+    expect(focusWindowByHwnd).not.toHaveBeenCalled();
   });
 
   it("prepareDictationInsertFocus clicks browser composer after restore", async () => {

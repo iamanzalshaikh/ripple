@@ -19,6 +19,7 @@ vi.mock("../dictation/aiRewriteDictation.js", () => ({
 
 vi.mock("../../windows/overlay.js", () => ({
   hideOverlay: vi.fn(),
+  hideOverlayToPinnedTarget: vi.fn(async () => true),
 }));
 
 vi.mock("../../focus/focusContext.js", () => ({

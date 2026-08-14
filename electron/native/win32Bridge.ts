@@ -52,6 +52,7 @@ public class RippleNative {
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
   [DllImport("user32.dll")] public static extern IntPtr MonitorFromPoint(POINT pt, uint dwFlags);
   [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+  [DllImport("user32.dll")] public static extern short GetAsyncKeyState(int vKey);
   [StructLayout(LayoutKind.Sequential)]
   public struct POINT { public int X; public int Y; }
   [StructLayout(LayoutKind.Sequential)]
@@ -75,33 +76,71 @@ function Get-Title([IntPtr]$h) {
 }
 
 function Focus-Hwnd([IntPtr]$h, [string]$titleHint) {
+  # Already foreground: touching it (AppActivate / AttachThreadInput) poisons
+  # Chrome's input state so the next Ctrl+V is swallowed (live 2026-08-14).
+  if ([RippleNative]::GetForegroundWindow() -eq $h) { return }
   [void][RippleNative]::AllowSetForegroundWindow(-1)
-  [void][RippleNative]::LockSetForegroundWindow(1)
-  try {
-    $ws = New-Object -ComObject WScript.Shell
-    if ($titleHint) { $null = $ws.AppActivate($titleHint) }
-    if ([RippleNative]::IsIconic($h)) { [void][RippleNative]::ShowWindow($h, 9) }
-    [void][RippleNative]::BringWindowToTop($h)
-    $fg = [RippleNative]::GetForegroundWindow()
-    $fgPid = [uint32]0; $targetPid = [uint32]0
-    $fgThread = [RippleNative]::GetWindowThreadProcessId($fg, [ref]$fgPid)
-    $targetThread = [RippleNative]::GetWindowThreadProcessId($h, [ref]$targetPid)
-    if ($fgThread -ne 0 -and $targetThread -ne 0) {
-      [void][RippleNative]::AttachThreadInput($fgThread, $targetThread, $true)
-    }
-    [void][RippleNative]::SetForegroundWindow($h)
-    if ($fgThread -ne 0 -and $targetThread -ne 0) {
-      [void][RippleNative]::AttachThreadInput($fgThread, $targetThread, $false)
-    }
-  } finally {
-    [void][RippleNative]::LockSetForegroundWindow(2)
+  # Caller owns LockSetForegroundWindow for claim-then-hide sequences.
+  # Nested Lock/Unlock here previously dropped the outer lock before hide,
+  # handing FG to explorer (shell=1 blink).
+  $ws = New-Object -ComObject WScript.Shell
+  if ($titleHint) { $null = $ws.AppActivate($titleHint) }
+  if ([RippleNative]::IsIconic($h)) { [void][RippleNative]::ShowWindow($h, 9) }
+  [void][RippleNative]::BringWindowToTop($h)
+  $fg = [RippleNative]::GetForegroundWindow()
+  $fgPid = [uint32]0; $targetPid = [uint32]0
+  $fgThread = [RippleNative]::GetWindowThreadProcessId($fg, [ref]$fgPid)
+  $targetThread = [RippleNative]::GetWindowThreadProcessId($h, [ref]$targetPid)
+  if ($fgThread -ne 0 -and $targetThread -ne 0) {
+    [void][RippleNative]::AttachThreadInput($fgThread, $targetThread, $true)
   }
+  [void][RippleNative]::SetForegroundWindow($h)
+  if ($fgThread -ne 0 -and $targetThread -ne 0) {
+    [void][RippleNative]::AttachThreadInput($fgThread, $targetThread, $false)
+  }
+}
+
+function Get-Class([IntPtr]$h) {
+  $sb = New-Object System.Text.StringBuilder 256
+  [void][RippleNative]::GetClassName($h, $sb, 256)
+  return ($sb.ToString() -replace '[\\u0000-\\u001F\\u007F]', ' ').Trim()
 }
 
 switch ($Action) {
   'getForeground' {
     $h = [RippleNative]::GetForegroundWindow()
-  @{ hwnd = [int64]$h; processName = (Get-ProcName $h); windowTitle = (Get-Title $h) } | ConvertTo-Json -Compress
+  @{ hwnd = [int64]$h; processName = (Get-ProcName $h); windowTitle = (Get-Title $h); className = (Get-Class $h) } | ConvertTo-Json -Compress
+  }
+  'getWindowClass' {
+    $h = [IntPtr][int64]$args.hwnd
+    @{ hwnd = [int64]$h; className = (Get-Class $h) } | ConvertTo-Json -Compress
+  }
+  'preSendState' {
+    $down = { param($vk) (([RippleNative]::GetAsyncKeyState($vk)) -band 0x8000) -ne 0 }
+    $winDown = (& $down 0x5B) -or (& $down 0x5C)
+    $h = if ($args.hwnd) { [IntPtr][int64]$args.hwnd } else { [IntPtr]::Zero }
+    $visible = $false; $iconic = $false
+    if ($h -ne [IntPtr]::Zero) {
+      $visible = [bool][RippleNative]::IsWindowVisible($h)
+      $iconic = [bool][RippleNative]::IsIconic($h)
+    }
+    $fg = [RippleNative]::GetForegroundWindow()
+    @{
+      win = [bool]$winDown
+      ctrl = [bool](& $down 0x11)
+      shift = [bool](& $down 0x10)
+      alt = [bool](& $down 0x12)
+      visible = $visible
+      iconic = $iconic
+      fgHwnd = [int64]$fg
+      fgProc = (Get-ProcName $fg)
+    } | ConvertTo-Json -Compress
+  }
+  'lockForeground' {
+    $lock = [bool]$args.lock
+    $code = if ($lock) { [uint32]1 } else { [uint32]2 }
+    [void][RippleNative]::LockSetForegroundWindow($code)
+    @{ ok = $true; lock = $lock } | ConvertTo-Json -Compress
   }
   'focusHwnd' {
     $h = [IntPtr][int64]$args.hwnd
@@ -501,6 +540,139 @@ export async function focusWindowByHwnd(
   await invokeWin32("focusHwnd", { hwnd, titleHint });
 }
 
+/**
+ * Mark a window WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW so show/alwaysOnTop cannot
+ * steal foreground (dictation overlay / mic indicator).
+ */
+export async function applyNoActivateStyleNative(hwnd: number): Promise<void> {
+  if (!isWin32NativeAvailable() || !hwnd) return;
+  const script = `
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public class RippleNoAct {
+  [DllImport("user32.dll")] public static extern int GetWindowLong(IntPtr h, int n);
+  [DllImport("user32.dll")] public static extern int SetWindowLong(IntPtr h, int n, int v);
+  [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
+}
+"@
+$h = [IntPtr]${Number(hwnd)}
+$ex = [RippleNoAct]::GetWindowLong($h, -20)
+$ex = $ex -bor 0x08000000 -bor 0x00000080
+[void][RippleNoAct]::SetWindowLong($h, -20, $ex)
+[void][RippleNoAct]::SetWindowPos($h, [IntPtr]::Zero, 0, 0, 0, 0, 0x0017)
+@{ ok = $true } | ConvertTo-Json -Compress
+`.trim();
+  try {
+    await execFileAsync(
+      "powershell",
+      ["-NoProfile", "-STA", "-Command", script],
+      { windowsHide: true, maxBuffer: 64 * 1024 },
+    );
+  } catch (e: unknown) {
+    console.warn(
+      "[ripple-native] applyNoActivate failed:",
+      e instanceof Error ? e.message : e,
+    );
+  }
+}
+
+/**
+ * Modifier + target-window state snapshot taken immediately before a
+ * synthetic send. A held Win key turns our next keystroke into a shell
+ * shortcut (Win+D show desktop / Win+M minimize all); an iconic/hidden
+ * target means the paste lands nowhere.
+ */
+export type PreSendState = {
+  win: boolean;
+  ctrl: boolean;
+  shift: boolean;
+  alt: boolean;
+  visible: boolean;
+  iconic: boolean;
+  fgHwnd: number;
+  fgProc: string;
+};
+
+export async function getPreSendStateNative(
+  hwnd?: number,
+): Promise<PreSendState | null> {
+  if (!isWin32NativeAvailable()) return null;
+  try {
+    const raw = await invokeWin32<{
+      win?: boolean;
+      ctrl?: boolean;
+      shift?: boolean;
+      alt?: boolean;
+      visible?: boolean;
+      iconic?: boolean;
+      fgHwnd?: number;
+      fgProc?: string;
+    }>("preSendState", { hwnd: hwnd ?? 0 });
+    return {
+      win: raw?.win === true,
+      ctrl: raw?.ctrl === true,
+      shift: raw?.shift === true,
+      alt: raw?.alt === true,
+      visible: raw?.visible === true,
+      iconic: raw?.iconic === true,
+      fgHwnd: Number(raw?.fgHwnd ?? 0),
+      fgProc: raw?.fgProc ?? "",
+    };
+  } catch (e: unknown) {
+    console.warn(
+      "[ripple-native] preSendState failed:",
+      e instanceof Error ? e.message : e,
+    );
+    return null;
+  }
+}
+
+/**
+ * Toggle ONLY WS_EX_NOACTIVATE on a window. Unlike Electron's
+ * setFocusable(false) this has zero activation side effects — Electron's call
+ * ends in Widget::Deactivate(), which SetForegroundWindow's the next visible
+ * window below in z-order even when the target window never had focus (the
+ * "Notepad surfaces at hotkey press" bug). Also unlike applyNoActivateStyleNative
+ * it does not add WS_EX_TOOLWINDOW, so the main window keeps its taskbar entry.
+ */
+export async function setWindowNoActivateNative(
+  hwnd: number,
+  enable: boolean,
+): Promise<void> {
+  if (!isWin32NativeAvailable() || !hwnd) return;
+  const mutate = enable
+    ? "$ex = $ex -bor 0x08000000"
+    : "$ex = $ex -band (-bnot 0x08000000)";
+  const script = `
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public class RippleNoActToggle {
+  [DllImport("user32.dll")] public static extern int GetWindowLong(IntPtr h, int n);
+  [DllImport("user32.dll")] public static extern int SetWindowLong(IntPtr h, int n, int v);
+}
+"@
+$h = [IntPtr]${Number(hwnd)}
+$ex = [RippleNoActToggle]::GetWindowLong($h, -20)
+${mutate}
+[void][RippleNoActToggle]::SetWindowLong($h, -20, $ex)
+@{ ok = $true } | ConvertTo-Json -Compress
+`.trim();
+  try {
+    await execFileAsync(
+      "powershell",
+      ["-NoProfile", "-STA", "-Command", script],
+      { windowsHide: true, maxBuffer: 64 * 1024 },
+    );
+  } catch (e: unknown) {
+    console.warn(
+      "[ripple-native] setWindowNoActivate failed:",
+      e instanceof Error ? e.message : e,
+    );
+  }
+}
+
 /** Call at hotkey time — sidecar asks Windows to allow later SetForegroundWindow. */
 export async function allowSetForegroundNative(): Promise<void> {
   if (!isNativeClientAuthenticated()) return;
@@ -513,11 +685,35 @@ export async function allowSetForegroundNative(): Promise<void> {
 
 /** Prevent explorer from stealing FG during restore (LockSetForegroundWindow). */
 export async function lockSetForegroundNative(lock: boolean): Promise<void> {
-  if (!isNativeClientAuthenticated()) return;
+  if (!isWin32NativeAvailable()) return;
+  if (isNativeClientAuthenticated()) {
+    try {
+      await callNativeRpc("lock_set_foreground", { lock });
+      return;
+    } catch {
+      /* fall through to PowerShell */
+    }
+  }
   try {
-    await callNativeRpc("lock_set_foreground", { lock });
+    await invokeWin32("lockForeground", { lock });
+  } catch (e: unknown) {
+    console.warn(
+      "[ripple-native] lockForeground failed:",
+      e instanceof Error ? e.message : e,
+    );
+  }
+}
+
+/** Win32 GetClassName for shell-steal forensics (Progman / Shell_TrayWnd / …). */
+export async function getWindowClassNameNative(hwnd: number): Promise<string> {
+  if (!isWin32NativeAvailable() || !hwnd) return "";
+  try {
+    const res = await invokeWin32<{ className?: string }>("getWindowClass", {
+      hwnd,
+    });
+    return (res.className ?? "").trim();
   } catch {
-    /* older sidecar — restore still proceeds */
+    return "";
   }
 }
 

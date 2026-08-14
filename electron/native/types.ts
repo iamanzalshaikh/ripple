@@ -2,6 +2,8 @@ export type ForegroundWindow = {
   hwnd: number;
   processName: string;
   windowTitle: string;
+  /** Win32 GetClassName — present when PS/native path provides it. */
+  className?: string;
 };
 
 export type VisibleWindow = ForegroundWindow & {
@@ -58,6 +60,9 @@ export type NativeCapabilities = {
 
 export type Win32Action =
   | "getForeground"
+  | "getWindowClass"
+  | "preSendState"
+  | "lockForeground"
   | "focusHwnd"
   | "closeHwnd"
   | "minimizeAll"

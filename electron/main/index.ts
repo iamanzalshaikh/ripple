@@ -26,8 +26,10 @@ import { extractRephraseSourceText } from "../automation/rephraseParse.js";
 import { normalizeTranscript } from "../automation/voice/normalizeTranscript.js";
 import {
   commandTextFromTranscript,
+  languageHintForStt,
   logTranscriptStage,
   processTranscriptFromStt,
+  sanitizeWhisperLanguageTag,
   transcriptDebugLabel,
 } from "../automation/voice/transcriptPipeline.js";
 import { setLastVoiceCommand } from "../state/lastCommand.js";
@@ -490,11 +492,12 @@ function registerIpc(): void {
         const data = await rippleSocket.endVoice(
           args.streamId,
           args.sessionId ?? sessionId ?? undefined,
-          args.language,
+          languageHintForStt(args.language),
         );
-        const payload = data as { text?: string; language?: string };
+        const payload = (data ?? {}) as { text?: string; language?: string };
         const text = payload?.text;
         if (text) {
+          payload.language = sanitizeWhisperLanguageTag(text, payload.language);
           const snapshot = processTranscriptFromStt(text, payload.language);
           logTranscriptStage("stt_raw", { ...snapshot, text: snapshot.raw });
           logTranscriptStage("after_utf_repair", {
@@ -522,7 +525,7 @@ function registerIpc(): void {
             );
           }
         }
-        return { ok: true, data };
+        return { ok: true, data: payload };
       } catch (e: unknown) {
         return {
           ok: false,

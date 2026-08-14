@@ -231,6 +231,13 @@ pub fn focus_hwnd(hwnd: windows::Win32::Foundation::HWND, _title_hint: Option<&s
             return Err("invalid_hwnd".into());
         }
 
+        // Already foreground: leave it alone. The Alt tap + AttachThreadInput
+        // ritual on an already-foreground Chrome flips it into Alt-menu
+        // mnemonic mode, which swallows the next Ctrl+V (failed-paste bug).
+        if GetForegroundWindow() == hwnd {
+            return Ok(());
+        }
+
         let shell_fg = foreground_is_desktop_shell();
         allow_set_foreground_any();
         // Alt-while-desktop-FG selects a desktop ListItem — never do that here.

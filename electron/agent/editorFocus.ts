@@ -137,14 +137,18 @@ export async function ensureBrowserComposerFocus(): Promise<boolean> {
 
   const a11y = await getFocusedA11yElement();
   if (isEditLikeControl(a11y?.controlType) && !isOmniboxA11y(a11y)) {
+    console.info(
+      `[ripple-insert] composer_focus method=already_focused ok=1` +
+        ` control=${a11y?.controlType ?? "?"} target=${target.processName}`,
+    );
     return true;
   }
 
   const result = await clickBrowserComposerNative({ hwnd: target.hwnd });
   if (result?.ok) {
     console.info(
-      `[ripple-desktop] composer focus → ${target.processName}` +
-        ` method=${result.method ?? "?"} (${result.x ?? "?"},${result.y ?? "?"})` +
+      `[ripple-insert] composer_focus method=${result.method ?? "?"} ok=1` +
+        ` target=${target.processName} (${result.x ?? "?"},${result.y ?? "?"})` +
         ` name="${(result.name ?? "").slice(0, 40)}"`,
     );
     await new Promise((r) => setTimeout(r, 220));
@@ -188,6 +192,10 @@ export async function ensureBrowserComposerFocus(): Promise<boolean> {
       `[ripple-desktop] composer click missed — ${result?.reason ?? "unknown"} (hwnd=${target.hwnd})`,
     );
   }
+  console.warn(
+    `[ripple-insert] composer_focus method=${result?.method ?? "none"} ok=0` +
+      ` reason=${result?.reason ?? "unknown"} target=${target.processName}`,
+  );
   return false;
 }
 
@@ -257,18 +265,38 @@ export async function ensureEditorKeyboardFocus(opts?: {
     return;
   }
 
-  // Clipboard paste path: restore FG; only re-target composer if not already in edit.
-  // Avoids a second physical click after prepareDictationInsertFocus (shell-steal risk).
+  // Clipboard paste path: restore FG only on mismatch; only re-target composer
+  // if not already in edit. Avoids a second physical click after
+  // prepareDictationInsertFocus (shell-steal risk) and skips redundant restores
+  // when assertInsertForeground already confirmed chrome is FG.
   if (
     opts?.clipboardOp &&
     (target.isBrowser || isBrowserProcess(target.processName))
   ) {
-    await restoreFocusContext();
-    await new Promise((r) => setTimeout(r, 180));
-    const a11y = await getFocusedA11yElement();
-    if (isEditLikeControl(a11y?.controlType) && !isOmniboxA11y(a11y)) {
-      return;
+    const fg = await getForegroundWindow();
+    const onTarget = Boolean(fg?.hwnd) && hwndMatches(fg?.hwnd, target.hwnd);
+    if (!onTarget) {
+      await restoreFocusContext();
+      await new Promise((r) => setTimeout(r, 180));
+      // A real Focus-Hwnd ritual can leave Chrome in Alt-menu mnemonic mode
+      // where the next Ctrl+V is swallowed; ESC exits that mode (verified
+      // live 2026-08-14). Only after an actual restore — never on the
+      // fast path, and never for non-browser targets (Save dialogs!).
+      try {
+        const { sendKeyChord } = await import("../automation/keyboard.js");
+        await sendKeyChord("{ESC}");
+        await new Promise((r) => setTimeout(r, 90));
+        console.info(
+          "[ripple-insert] altmenu_neutralized target=browser (post-restore ESC)",
+        );
+      } catch {
+        /* best-effort */
+      }
     }
+    // Caret placement ALWAYS runs before a browser clipboard paste — even on
+    // the fg-match fast path. ensureBrowserComposerFocus does its own cheap
+    // already-focused check (logged composer_focus method=already_focused),
+    // so skipping it here only ever skipped the log + the SetFocus safety.
     await ensureBrowserComposerFocus();
     return;
   }

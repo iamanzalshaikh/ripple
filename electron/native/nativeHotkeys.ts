@@ -12,7 +12,15 @@ import { isVoiceInputReady } from "../services/bootReadiness.js";
 let unsubscribe: (() => void) | null = null;
 
 function resolveMode(name: string): VoiceUiMode {
-  if (name === "dictation" && isDictationModeEnabled()) return "dictation";
+  if (name === "dictation") {
+    if (isDictationModeEnabled()) return "dictation";
+    // First-run hazard: a dictation hotkey silently downgraded to COMMAND
+    // mode routes the spoken text through the planner, which can run desktop
+    // actions (e.g. minimize-all). Make the downgrade loud.
+    console.warn(
+      "[ripple-focus-drift] hotkey_mode_downgrade dictation→command (dictation mode disabled at press)",
+    );
+  }
   return "command";
 }
 

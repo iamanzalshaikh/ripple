@@ -1,13 +1,14 @@
-import { hideOverlay } from "../../windows/overlay.js";
+import { clipboard } from "electron";
+import { hideOverlayToPinnedTarget } from "../../windows/overlay.js";
 import { runInsertText } from "../../automation/actions/insertText.js";
 import { processTranscriptFromStt } from "../../automation/voice/transcriptPipeline.js";
 import {
   extendCommandFocusGrace,
+  getLastInsertAbortReason,
   hasDictationInsertTarget,
   prepareDictationInsertFocus,
   recoverDictationFocusTarget,
   resolveTypingFocusTarget,
-  restoreFocusContext,
 } from "../../focus/focusContext.js";
 import {
   appendDictationUtterance,
@@ -188,12 +189,9 @@ export async function executeDictationUtterance(
   }
 
   try {
-    // Restore the pinned app BEFORE hiding the overlay. hideOverlay used to
-    // blur Ripple's main window, which handed FG to explorer and caused a
-    // visible desktop flicker (insert_fg_shell_before_restore).
-    await restoreFocusContext();
-    hideOverlay();
-    await new Promise((r) => setTimeout(r, 120));
+    // Claim pin FIRST, hide overlay SECOND, under one FG lock — never unlock
+    // between them (that vacuum is the explorer shell=1 blink).
+    await hideOverlayToPinnedTarget();
     extendCommandFocusGrace();
 
     // P7.8 — if we already typed a provisional hypothesis, reconcile in place
@@ -238,7 +236,7 @@ export async function executeDictationUtterance(
           console.warn(
             "[ripple-desktop] dictation insert aborted — no focus target (click a field first)",
           );
-          notifyDictationInsertFailure("no_focus_target");
+          notifyDictationInsertFailure("no_focus_target", confirmed.text);
           logAndRecordLanguageTelemetry({
             intent: "dictation",
             ok: false,
@@ -260,10 +258,12 @@ export async function executeDictationUtterance(
         }
       }
       if (!(await prepareDictationInsertFocus())) {
+        const abortReason =
+          getLastInsertAbortReason() ?? "insert_aborted:restore_failed";
         console.warn(
-          "[ripple-desktop] dictation insert aborted — could not restore pinned target",
+          `[ripple-desktop] dictation insert aborted — ${abortReason}`,
         );
-        notifyDictationInsertFailure("insert_aborted:restore_failed");
+        notifyDictationInsertFailure(abortReason, confirmed.text);
         logAndRecordLanguageTelemetry({
           intent: "dictation",
           ok: false,
@@ -279,7 +279,7 @@ export async function executeDictationUtterance(
           finalText: confirmed.text,
           inserted: false,
           correctionKind: prepared.kind,
-          error: "insert_aborted:restore_failed",
+          error: abortReason,
           session: session ?? undefined,
         };
       }
@@ -340,7 +340,7 @@ export async function executeDictationUtterance(
     };
   } catch (e: unknown) {
     const errMsg = e instanceof Error ? e.message : "dictation_insert_failed";
-    notifyDictationInsertFailure(errMsg);
+    notifyDictationInsertFailure(errMsg, confirmed.text);
     logAndRecordLanguageTelemetry({
       intent: "dictation",
       ok: false,
@@ -362,23 +362,46 @@ export async function executeDictationUtterance(
   }
 }
 
-function notifyDictationInsertFailure(message: string): void {
+function notifyDictationInsertFailure(
+  message: string,
+  fallbackText?: string,
+): void {
   if (
-    !/no_focus_target|wrong_insert_target|insert_aborted|insert_unverified|ripple_foreground|focus_not_editable|restore_failed/i.test(
+    !/no_focus_target|wrong_insert_target|insert_aborted|insert_unverified|ripple_foreground|focus_not_editable|restore_failed|wrong_hwnd/i.test(
       message,
     )
   ) {
     return;
   }
-  let hint = "Click the target field, then dictate again";
-  if (/restore_failed|could not restore/i.test(message)) {
-    hint = "Couldn't reach the target window — click the field and try again";
+  let hint =
+    "Couldn't insert — click into your target field and try again";
+  if (/target_window_changed/i.test(message)) {
+    hint = "Couldn't insert — target window changed";
+  } else if (/modifier_win_down/i.test(message)) {
+    hint = "Couldn't insert — a key was held down; release and try again";
+  } else if (/target_not_visible/i.test(message)) {
+    hint = "Couldn't insert — target window is minimized or hidden";
+  } else if (/paste_no_effect/i.test(message)) {
+    hint = "Couldn't insert — paste didn't reach the field";
+  } else if (/restore_failed|could not restore|wrong_hwnd|hwnd/i.test(message)) {
+    hint =
+      "Couldn't reach the target window — click the field and try again";
   } else if (/wrong_insert_target/i.test(message)) {
-    hint = "Focus Google Chat / WhatsApp first — text went to the wrong app";
+    hint = "Wrong window — click the field you meant, then try again";
   } else if (/ripple_foreground|keys_landed_in_ripple/i.test(message)) {
     hint = "Click your chat field — Ripple had focus";
   } else if (/focus_not_editable/i.test(message)) {
     hint = "Click inside the message box, then try again";
+  }
+
+  const copy = (fallbackText ?? "").trim();
+  if (copy) {
+    try {
+      clipboard.writeText(copy);
+      hint = `${hint} — text copied to clipboard`;
+    } catch {
+      /* clipboard best-effort */
+    }
   }
   void import("../../windows/overlay.js").then(({ showDictationInsertFailure }) => {
     showDictationInsertFailure(hint);

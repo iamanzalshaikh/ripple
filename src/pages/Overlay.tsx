@@ -348,6 +348,11 @@ export function OverlayPage() {
         .language.get()
         .catch(() => ({ ok: false as const, language: undefined }));
 
+      const languageHint =
+        languageRes.ok && languageRes.language && languageRes.language !== "auto"
+          ? languageRes.language
+          : undefined;
+
       // P7.8 — if chunks were streamed during recording, don't re-upload the
       // full blob (would double the server buffer). Only upload when batch.
       if (!alreadyStreamed) {
@@ -369,7 +374,7 @@ export function OverlayPage() {
           .flushVoice({
             streamId: streamIdRef.current,
             sessionId: sessionIdRef.current,
-            language: languageRes.ok ? languageRes.language : undefined,
+            language: languageHint,
           })
           .catch(() => undefined);
       }
@@ -377,7 +382,7 @@ export function OverlayPage() {
       const endRes = await getRippleApi().endVoice({
         streamId: streamIdRef.current,
         sessionId: sessionIdRef.current,
-        language: languageRes.ok ? languageRes.language : undefined,
+        language: languageHint,
       });
 
       if (!endRes.ok) {
@@ -405,7 +410,7 @@ export function OverlayPage() {
       // anything decided here.
       if (voiceModeRef.current === "dictation" || voiceModeRef.current === "transform") {
         await runDictation(text, {
-          requestedLanguage: languageRes.ok ? languageRes.language : undefined,
+          requestedLanguage: languageHint ?? "auto",
           detectedLanguage,
         });
       } else {

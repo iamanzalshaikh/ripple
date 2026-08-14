@@ -82,6 +82,65 @@ export function commandTextFromTranscript(snapshot: TranscriptSnapshot): string 
   return normalized || snapshot.raw.trim();
 }
 
+/**
+ * Whisper auto-detect often tags plain English as sd/ur/pa. That does not
+ * always ruin the transcript (when no language hint was sent), but it must
+ * not be treated as a confident non-English result for UI / telemetry.
+ * Returns a corrected tag, or undefined when the guess should be ignored.
+ */
+const LOW_CONFIDENCE_NON_ENGLISH = new Set([
+  "sd",
+  "sindhi",
+  "ur",
+  "urdu",
+  "pa",
+  "punjabi",
+  "ps",
+  "pashto",
+  "ne",
+  "nepali",
+  "gu",
+  "gujarati",
+  "mr",
+  "marathi",
+]);
+
+const ENGLISH_MARKERS =
+  /\b(the|and|you|please|hello|i|to|for|is|it|a|my|me|we|that|this|with|have|not|are|was|be|on|as|at|or|from|your|come|back|miss|much|love)\b/i;
+
+export function sanitizeWhisperLanguageTag(
+  text: string,
+  detected?: string | null,
+): string | undefined {
+  const tag = (detected ?? "").trim().toLowerCase();
+  if (!tag || tag === "auto") return undefined;
+
+  const sample = (text ?? "").trim();
+  if (!sample) return detected ?? undefined;
+
+  const letters = sample.replace(/\s+/g, "");
+  if (!letters) return detected ?? undefined;
+  const latin = [...letters].filter((ch) => /[A-Za-z]/.test(ch)).length;
+  const latinRatio = latin / letters.length;
+  const looksPlainEnglish =
+    latinRatio >= 0.85 && ENGLISH_MARKERS.test(sample) && !/[^\u0000-\u00ff]/.test(sample);
+
+  if (looksPlainEnglish && LOW_CONFIDENCE_NON_ENGLISH.has(tag)) {
+    console.warn(
+      `[ripple-transcript] language_override detected=${tag} → en (plain latin english text)`,
+    );
+    return "en";
+  }
+  return detected ?? undefined;
+}
+
+/** Prefer undefined over the literal "auto" so Whisper auto-detects without a bad hint. */
+export function languageHintForStt(requested?: string | null): string | undefined {
+  const tag = (requested ?? "").trim().toLowerCase();
+  if (!tag || tag === "auto") return undefined;
+  return requested!.trim();
+}
+
 /** NLU slot line for GPT when preprocess improved the utterance. */
 export function nluTextForGpt(snapshot: TranscriptSnapshot): string | undefined {
   const nlu = snapshot.nlu.trim();

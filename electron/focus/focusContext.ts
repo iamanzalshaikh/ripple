@@ -1,4 +1,4 @@
-import { getForegroundWindow, focusWindowByHwnd, getWindowUnderCursorNative, allowSetForegroundNative, lockSetForegroundNative } from "../native/win32Bridge.js";
+import { getForegroundWindow, focusWindowByHwnd, getWindowUnderCursorNative, allowSetForegroundNative, lockSetForegroundNative, getWindowClassNameNative } from "../native/win32Bridge.js";
 import { getMemory, setMemory } from "../storage/sessionMemory.js";
 import { rememberPdfFromFocus } from "../automation/desktop/pdfFocusMemory.js";
 import { rememberMediaFromFocus } from "../automation/desktop/mediaFocusMemory.js";
@@ -13,7 +13,7 @@ import {
   isSaveDialogModalLocked,
   isSaveDialogTitle,
 } from "./saveDialogMode.js";
-import { getMainWindow } from "../windows/mainWindow.js";
+import { setMainActivationSuppressed } from "../windows/mainWindow.js";
 
 const STICKY_WEB_MS = 15 * 60 * 1000;
 
@@ -153,6 +153,61 @@ let commandFocusGraceUntil = 0;
 
 const COMMAND_FOCUS_GRACE_MS = 8000;
 
+/** Shell hwnds seen during the current dictation (same-hwnd? across steals). */
+const shellStealHwndsThisDictation: number[] = [];
+
+/**
+ * Short-lived LockSetForegroundWindow held only around an individual
+ * SetForegroundWindow call (restore / claim-then-hide). The session-scoped
+ * dictation lock (session_fg_lock) is gone: it slowed shell recovery ~5x
+ * and never blocked the steals it was added for.
+ */
+export async function nestedForegroundLock(lock: boolean): Promise<void> {
+  await lockSetForegroundNative(lock);
+}
+
+function classifyShellClass(className: string): string {
+  const c = (className ?? "").trim();
+  if (!c) return "unknown";
+  if (c === "Progman" || c === "WorkerW") return "desktop";
+  if (c === "Shell_TrayWnd") return "taskbar";
+  if (c === "Shell_SecondaryTrayWnd") return "secondary_tray";
+  if (c === "NotifyIconOverflowWindow") return "tray_overflow";
+  if (/IME|Input|TextInput|Candidate|MSCTFIME|Windows\.UI\.Input/i.test(c)) {
+    return "ime_input";
+  }
+  if (c === "Windows.UI.Core.CoreWindow") return "uwp_core";
+  if (c === "#32769") return "desktop_root";
+  return "other";
+}
+
+/** Log explorer hwnd + GetClassName + same-hwnd-within-dictation. */
+export async function logShellForegroundIdentity(
+  fg: Pick<ForegroundWindow, "hwnd" | "processName" | "windowTitle" | "className">,
+  reason: string,
+): Promise<void> {
+  const hwnd = Number(fg.hwnd) || 0;
+  let className = (fg.className ?? "").trim();
+  if (!className && hwnd) {
+    className = await getWindowClassNameNative(hwnd);
+  }
+  const kind = classifyShellClass(className);
+  const prev = shellStealHwndsThisDictation[shellStealHwndsThisDictation.length - 1];
+  shellStealHwndsThisDictation.push(hwnd);
+  const sameTag =
+    prev === undefined
+      ? "same_hwnd=first"
+      : prev === hwnd
+        ? "same_hwnd=1"
+        : `same_hwnd=0 prior=${prev}`;
+  console.warn(
+    `[ripple-focus-drift] shell_fg_identity reason=${reason}` +
+      ` hwnd=${hwnd} class="${className || "?"}" kind=${kind} ${sameTag}` +
+      ` title="${(fg.windowTitle ?? "").slice(0, 40)}"`,
+  );
+  logRippleWindowsBeforeShell(reason);
+}
+
 /** Explorer desktop shell — never a valid keyboard/mouse typing target. */
 export function isDesktopShellForeground(
   ctx: Pick<FocusContext, "processName" | "windowTitle">,
@@ -266,43 +321,111 @@ function buildFocusContextFromRaw(raw: ForegroundWindow): FocusContext {
   };
 }
 
+function describePinCandidate(
+  ctx:
+    | Pick<FocusContext, "hwnd" | "processName" | "windowTitle">
+    | ForegroundWindow
+    | null
+    | undefined,
+): string {
+  if (!ctx?.hwnd) return "none";
+  return `${ctx.processName ?? "?"}:${ctx.hwnd} "${(ctx.windowTitle ?? "").slice(0, 30)}"`;
+}
+
 /** Snapshot the app the user was in when voice hotkey fired (before overlay). */
 export async function snapshotPreVoiceTarget(): Promise<FocusContext | null> {
   if (process.platform !== "win32") return null;
+  // The pin must come from live OS state at this exact moment — never from a
+  // pre-hotkey cached pin. A stale voiceCommandTarget (previous session /
+  // focus-watcher cache) pinned WhatsApp while the user dictated into another
+  // window, and insert then yanked the screen back (live on/off bug).
+  const cachedPin = voiceCommandTarget;
+  voiceCommandTarget = null;
+  shellStealHwndsThisDictation.length = 0;
   try {
+    // Hotkey path: never let titled Ripple main steal FG during pin+overlay.
+    yieldRippleForeground();
     try {
-      const { allowSetForegroundNative } = await import("../native/win32Bridge.js");
-      await allowSetForegroundNative?.();
+      await allowSetForegroundNative();
     } catch {
       /* sidecar may be down at hotkey — restore still retries */
     }
-    const raw = await getForegroundWindow();
+    // Live GetForegroundWindow at hotkey-press; retry once on an RPC hiccup
+    // so a transient null doesn't dump us onto cached memory.
+    let raw = await getForegroundWindow();
     if (!raw?.hwnd) {
-      return pinVoiceTarget(
+      raw = await getForegroundWindow();
+    }
+    let pinned: FocusContext | null = null;
+    let pinSource = "live_fg";
+    if (!raw?.hwnd) {
+      pinSource = "empty_fg";
+      pinned = pinVoiceTarget(
         await recoverDictationFocusTarget("empty_fg"),
         "empty_fg",
       );
-    }
-
-    // Ripple main/overlay in front at hotkey — never pin Ripple; recover a
-    // real typing surface (mouse / last-good / live non-Ripple FG).
-    if (isRippleOwnWindow(raw.processName ?? "", raw.windowTitle ?? "")) {
-      return pinVoiceTarget(
+    } else if (isRippleOwnWindow(raw.processName ?? "", raw.windowTitle ?? "")) {
+      // Ripple main/overlay in front at hotkey — never pin Ripple; recover a
+      // real typing surface (mouse / last-good / live non-Ripple FG).
+      pinSource = "ripple_fg";
+      pinned = pinVoiceTarget(
         await recoverDictationFocusTarget("ripple_fg"),
         "ripple_fg",
       );
+    } else {
+      const ctx = buildFocusContextFromRaw(raw);
+      if (!isWeakFocusContext(ctx)) {
+        pinned = pinVoiceTarget(ctx, "foreground");
+      } else {
+        // Shell / Search / IME flash — recover without clearing a warm last-good.
+        pinSource = "weak_fg";
+        pinned = pinVoiceTarget(
+          await recoverDictationFocusTarget("weak_fg"),
+          "weak_fg",
+        );
+      }
     }
 
-    const ctx = buildFocusContextFromRaw(raw);
-    if (!isWeakFocusContext(ctx)) {
-      return pinVoiceTarget(ctx, "foreground");
-    }
-
-    // Shell / Search / IME flash — recover without clearing a warm last-good.
-    return pinVoiceTarget(
-      await recoverDictationFocusTarget("weak_fg"),
-      "weak_fg",
+    const staleCacheDropped =
+      cachedPin?.hwnd && Number(cachedPin.hwnd) !== Number(pinned?.hwnd ?? 0);
+    console.info(
+      `[ripple-focus-drift] hotkey_pin pin_source=${pinSource}` +
+        ` fg=${describePinCandidate(raw)}` +
+        ` cached=${describePinCandidate(cachedPin)}` +
+        ` pinned=${describePinCandidate(pinned)}` +
+        `${staleCacheDropped ? " stale_cache_dropped=1" : ""}`,
     );
+
+    // Re-assert the pin under LockSetForegroundWindow so the overlay
+    // showInactive transition does not leave a FG vacuum for explorer —
+    // but ONLY when the pin is not already the live foreground. In the
+    // normal press (target focused, hotkey pressed) touching the FG window
+    // at all (AppActivate / BringWindowToTop / SetForegroundWindow) risks a
+    // visible z-order blip; press must cause zero foreground change.
+    if (pinned?.hwnd && Number(pinned.hwnd) === Number(raw?.hwnd ?? 0)) {
+      console.info(
+        `[ripple-focus-drift] press_reassert=skip_fg_match t=${Date.now()} hwnd=${pinned.hwnd}`,
+      );
+    } else if (pinned?.hwnd) {
+      console.info(
+        `[ripple-focus-drift] press_reassert=focus t=${Date.now()}` +
+          ` hwnd=${pinned.hwnd} fg=${describePinCandidate(raw)}`,
+      );
+      try {
+        await allowSetForegroundNative();
+        await nestedForegroundLock(true);
+        await focusWindowByHwnd(pinned.hwnd, pinned.windowTitle);
+      } catch {
+        /* best-effort — insert restore still recovers */
+      } finally {
+        try {
+          await nestedForegroundLock(false);
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+    return pinned;
   } catch {
     return pinVoiceTarget(
       lastNonRippleFocus &&
@@ -1070,32 +1193,77 @@ export function startMediaFocusWatcher(intervalMs = P8_FOCUS_POLL_MS): void {
 
 /**
  * Soft-yield Ripple's own windows so SetForegroundWindow can land on the
- * pinned dictation target. Does not hide/minimize the main UI.
+ * pinned dictation target. Delegates to setMainActivationSuppressed, which
+ * guards the dangerous case: Electron's setFocusable(false) on a VISIBLE but
+ * unfocused main runs Widget::Deactivate() and SetForegroundWindow's the
+ * window below main in z-order — that deactivated the user's target at
+ * hotkey press (Notepad surfacing). Never call setFocusable/blur here directly.
  */
 export function yieldRippleForeground(): void {
   try {
-    const main = getMainWindow();
-    if (main && !main.isDestroyed() && main.isFocused()) {
-      main.blur();
-    }
+    setMainActivationSuppressed(true);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Which of our windows (if any) held focus when shell stole FG. */
+function logRippleWindowsBeforeShell(reason: string): void {
+  try {
+    // Dynamic import avoids overlay ↔ focusContext cycle at module load.
+    void import("../windows/overlay.js").then(({ describeRippleWindowsFocus }) => {
+      console.warn(
+        `[ripple-focus-drift] ripple_wins_before_shell reason=${reason} ${describeRippleWindowsFocus()}`,
+      );
+    });
   } catch {
     /* ignore */
   }
 }
 
 /**
+ * Transient shell hosts (secondary-monitor taskbar, Win11 XAML explorer
+ * island). They flash FG briefly and are never real typing targets —
+ * restore through them instantly, no settle delay.
+ */
+const FAST_RESTORE_SHELL_CLASSES = new Set([
+  "Shell_SecondaryTrayWnd",
+  "XamlExplorerHostIslandWindow_WASDK",
+]);
+
+async function isFastRestoreShellForeground(
+  fg: Pick<ForegroundWindow, "hwnd" | "className"> | null | undefined,
+): Promise<boolean> {
+  if (!fg?.hwnd) return false;
+  let cls = (fg.className ?? "").trim();
+  if (!cls) cls = await getWindowClassNameNative(Number(fg.hwnd));
+  return FAST_RESTORE_SHELL_CLASSES.has(cls);
+}
+
+let lastInsertAbortReason: string | null = null;
+
+/** Why the last ensureInsertForeground returned false (toast/error routing). */
+export function getLastInsertAbortReason(): string | null {
+  return lastInsertAbortReason;
+}
+
+/**
  * Re-assert pinned typing target before SendKeys/paste. Retries when Ripple
- * stole FG mid-insert; only fails closed on Ripple FG (not Cursor/Chrome hwnd churn).
+ * or a transient shell stole FG mid-insert. Fails closed — never yanks —
+ * when a different REAL window owns FG: the user moved on, and force-
+ * foregrounding the pin visibly switches their screen (the on/off bug).
  */
 export async function ensureInsertForeground(): Promise<boolean> {
   if (process.platform !== "win32") return true;
+  lastInsertAbortReason = null;
 
   const fgBeforeRestore = await getForegroundWindow();
   const shellSeenAt = Date.now();
   const shellBeforeRestore =
     Boolean(fgBeforeRestore) && isDesktopShellForeground(fgBeforeRestore!);
+  const pinnedPeek = resolveTypingFocusTarget();
+
   if (shellBeforeRestore) {
-    const pinnedPeek = resolveTypingFocusTarget();
     console.warn(
       `[ripple-focus-drift] insert_fg_shell_before_restore` +
         ` t=${shellSeenAt}` +
@@ -1104,6 +1272,47 @@ export async function ensureInsertForeground(): Promise<boolean> {
         ` want=${pinnedPeek?.processName ?? "?"}` +
         ` hwnd=${pinnedPeek?.hwnd ?? "?"}`,
     );
+    await logShellForegroundIdentity(fgBeforeRestore!, "insert_fg_shell");
+  }
+
+  // Already on the exact hotkey hwnd — skip restore entirely so we don't burn
+  // 350ms×N settle loops while WhatsApp's DOM is still settling for verify.
+  if (
+    fgBeforeRestore &&
+    pinnedPeek &&
+    !shellBeforeRestore &&
+    !isRippleOwnWindow(
+      fgBeforeRestore.processName ?? "",
+      fgBeforeRestore.windowTitle ?? "",
+    ) &&
+    Number(fgBeforeRestore.hwnd) === Number(pinnedPeek.hwnd)
+  ) {
+    return true;
+  }
+
+  // Never yank across windows silently: if a different REAL window owns FG
+  // (not Ripple, not desktop shell, not a transient input/tray host), the
+  // user switched targets — abort so the caller falls back to clipboard +
+  // toast instead of force-foregrounding the pin.
+  if (
+    fgBeforeRestore?.hwnd &&
+    pinnedPeek &&
+    !shellBeforeRestore &&
+    Number(fgBeforeRestore.hwnd) !== Number(pinnedPeek.hwnd) &&
+    !isRippleOwnWindow(
+      fgBeforeRestore.processName ?? "",
+      fgBeforeRestore.windowTitle ?? "",
+    ) &&
+    !isWeakFocusContext(buildFocusContextFromRaw(fgBeforeRestore)) &&
+    !(await isFastRestoreShellForeground(fgBeforeRestore))
+  ) {
+    lastInsertAbortReason = "insert_aborted:target_window_changed";
+    console.warn(
+      `[ripple-focus-drift] insert_aborted reason=target_window_changed` +
+        ` fg=${describePinCandidate(fgBeforeRestore)}` +
+        ` pinned=${describePinCandidate(pinnedPeek)} (no force-foreground)`,
+    );
+    return false;
   }
 
   await restoreFocusContext();
@@ -1128,11 +1337,12 @@ export async function ensureInsertForeground(): Promise<boolean> {
     console.warn(
       "[ripple-desktop] insert aborted — Ripple still foreground (refusing keys/paste into Ripple)",
     );
+    lastInsertAbortReason = "insert_aborted:ripple_foreground";
     return false;
   }
 
   const pinned = resolveTypingFocusTarget();
-  if (pinned && fg && !matchesPinnedInsertTarget(fg, pinned)) {
+  if (pinned && fg && Number(fg.hwnd) !== Number(pinned.hwnd)) {
     const shellSteal = isDesktopShellForeground(fg);
     if (shellSteal) {
       console.warn(
@@ -1141,22 +1351,25 @@ export async function ensureInsertForeground(): Promise<boolean> {
           ` fg=${fg.processName} title="${(fg.windowTitle ?? "").slice(0, 40)}"` +
           ` want=${pinned.processName} hwnd=${pinned.hwnd}`,
       );
+      await logShellForegroundIdentity(fg, "insert_fg_shell_after_restore");
     } else {
       console.warn(
-        `[ripple-desktop] insert FG mismatch — want ${pinned.processName} (hwnd=${pinned.hwnd}) ` +
-          `but have ${fg.processName ?? "?"} (hwnd=${fg.hwnd ?? "?"}) — re-restore`,
+        `[ripple-desktop] insert FG hwnd mismatch — want ${pinned.processName} ` +
+          `(hwnd=${pinned.hwnd}) but have ${fg.processName ?? "?"} ` +
+          `(hwnd=${fg.hwnd ?? "?"}) — restoring pin, not retargeting`,
       );
     }
     await restoreFocusContext();
     await new Promise((r) => setTimeout(r, 120));
     fg = await getForegroundWindow();
-    if (fg && !matchesPinnedInsertTarget(fg, pinned)) {
+    if (!fg || Number(fg.hwnd) !== Number(pinned.hwnd)) {
       console.warn(
-        "[ripple-desktop] insert aborted — foreground is not the pinned dictation target",
+        "[ripple-desktop] insert aborted — foreground hwnd is not the hotkey-pinned window",
       );
+      lastInsertAbortReason = "insert_aborted:restore_failed";
       return false;
     }
-    if (shellSteal && fg && matchesPinnedInsertTarget(fg, pinned)) {
+    if (shellSteal) {
       console.warn(
         `[ripple-focus-drift] insert_fg_recovered_from_shell t=${Date.now()}` +
           ` heldMs=${Date.now() - shellSeenAt}` +
@@ -1168,7 +1381,7 @@ export async function ensureInsertForeground(): Promise<boolean> {
     shellBeforeRestore &&
     pinned &&
     fg &&
-    matchesPinnedInsertTarget(fg, pinned)
+    Number(fg.hwnd) === Number(pinned.hwnd)
   ) {
     console.warn(
       `[ripple-focus-drift] insert_fg_recovered_from_shell t=${Date.now()}` +
@@ -1180,30 +1393,15 @@ export async function ensureInsertForeground(): Promise<boolean> {
   return true;
 }
 
-/** True when OS foreground matches the pinned voice/dictation target (hwnd or same app). */
+/** True when OS foreground is the exact window pinned at hotkey (hwnd lock). */
 export function matchesPinnedInsertTarget(
   fg: Pick<FocusContext, "hwnd" | "processName" | "windowTitle">,
   pinned: FocusContext,
 ): boolean {
   if (!fg?.hwnd || !pinned?.hwnd) return false;
-  if (Number(fg.hwnd) === Number(pinned.hwnd)) return true;
-  const fp = (fg.processName ?? "").toLowerCase();
-  const pp = (pinned.processName ?? "").toLowerCase();
-  if (!fp || !pp) return false;
-
-  const browsers = new Set(["chrome", "msedge", "firefox", "brave", "opera"]);
-  const bothBrowsers =
-    (browsers.has(fp) || pinned.isBrowser) && browsers.has(fp) && browsers.has(pp);
-
-  // Multi-Chrome: WhatsApp vs Google Chat vs Docs are different targets.
-  // Same hwnd already returned true; allow process-only match only when
-  // titles look like the same surface (badge churn: "(59) WhatsApp" → "(60)…").
-  if (bothBrowsers || (fp === pp && browsers.has(fp))) {
-    return browserTitlesCompatible(fg.windowTitle ?? "", pinned.windowTitle ?? "");
-  }
-
-  if (fp === pp) return true;
-  return false;
+  // Hard hwnd lock — never accept another Chrome/Notepad window just because
+  // the title looks similar (live: WhatsApp pin → other Chrome tab paste).
+  return Number(fg.hwnd) === Number(pinned.hwnd);
 }
 
 /** Same web surface despite unread-count / " - Google Chrome" suffix churn. */
@@ -1283,10 +1481,12 @@ export async function maintainPinnedTargetDuringRewrite(): Promise<void> {
     return;
   }
 
+  // A REAL window (Cursor, another Chrome, …) owns FG mid-rewrite — the user
+  // switched deliberately. Do NOT force-foreground the pin here; that yanks
+  // the screen. ensureInsertForeground decides (and fails closed) at insert.
   console.info(
-    `[ripple-desktop] rewrite FG drift ${fg.processName ?? "?"} → restore ${pinned.processName}`,
+    `[ripple-desktop] rewrite FG drift ${fg.processName ?? "?"} — keeping user's window (pin ${pinned.processName} verified at insert)`,
   );
-  await restoreFocusContext();
 }
 
 export async function restoreFocusContext(): Promise<boolean> {
@@ -1320,8 +1520,33 @@ export async function restoreFocusContext(): Promise<boolean> {
     // Prefer the WhatsApp/Chrome window the user is already looking at over a
     // stale voice-target hwnd (unread badge flips 55↔56; second Chrome window).
     // Yanking focus away is what feels like "WhatsApp went off the screen".
-    const restoreStartedAt = Date.now();
     const raw = await getForegroundWindow();
+    if (raw?.hwnd) {
+      const current = buildFocusContextFromRaw(raw);
+      const fgIsRipple = isRippleOwnWindow(
+        current.processName,
+        current.windowTitle,
+      );
+      const sameHwnd = Number(raw.hwnd) === Number(target.hwnd);
+
+      // Fast path: exact hotkey hwnd already owns FG. Never retarget to
+      // another Chrome window with a compatible title.
+      if (!fgIsRipple && sameHwnd) {
+        const keep: FocusContext = {
+          ...target,
+          windowTitle: current.windowTitle || target.windowTitle,
+        };
+        saved = keep;
+        lastNonRippleFocus = keep;
+        voiceCommandTarget = keep;
+        return true;
+      }
+      // Do not blur Ripple here. yieldRippleForeground() + delay hands FG to
+      // explorer (blank-title shell) and causes the insert flicker. While we
+      // still own FG, SetForegroundWindow can land on the pin directly.
+    }
+
+    const restoreStartedAt = Date.now();
     const fgProc = raw?.processName ?? "?";
     const fgTitle = (raw?.windowTitle ?? "").slice(0, 40);
     const shellBefore = raw ? isDesktopShellForeground(raw) : false;
@@ -1331,37 +1556,20 @@ export async function restoreFocusContext(): Promise<boolean> {
         ` want=${target.processName} hwnd=${target.hwnd}` +
         `${shellBefore ? " shell=1" : ""}`,
     );
-
-    if (raw?.hwnd) {
-      const current = buildFocusContextFromRaw(raw);
-      const sameHwnd = Number(raw.hwnd) === Number(target.hwnd);
-      if (sameHwnd) {
-        saved = { ...target, windowTitle: current.windowTitle || target.windowTitle };
-        lastNonRippleFocus = saved;
-        voiceCommandTarget = saved;
-        return true;
-      }
-      const fgIsRipple = isRippleOwnWindow(
-        current.processName,
-        current.windowTitle,
-      );
-      // Never "keep" Ripple as the insert surface — force restore to pin.
-      if (!fgIsRipple && current.isWhatsApp && target.isWhatsApp) {
-        console.info(
-          `[ripple-desktop] focus restore keep current WhatsApp hwnd=${raw.hwnd} (skip stale target hwnd=${target.hwnd})`,
-        );
-        saved = current;
-        lastNonRippleFocus = current;
-        voiceCommandTarget = current;
-        return true;
-      }
-      // Do not blur Ripple here. yieldRippleForeground() + delay hands FG to
-      // explorer (blank-title shell) and causes the insert flicker. While we
-      // still own FG, SetForegroundWindow can land on the pin directly.
+    if (shellBefore) {
+      await logShellForegroundIdentity(raw!, "restore_begin_shell");
     }
 
+    // Fast-path: secondary taskbar / XAML explorer island are transient FG
+    // flashes, not real targets — restore instantly with no settle delay.
+    let fgClass = (raw?.className ?? "").trim();
+    if (!fgClass && raw?.hwnd && shellBefore) {
+      fgClass = await getWindowClassNameNative(Number(raw.hwnd));
+    }
+    const fastShellRestore = FAST_RESTORE_SHELL_CLASSES.has(fgClass);
+
     await allowSetForegroundNative();
-    await lockSetForegroundNative(true);
+    await nestedForegroundLock(true);
 
     try {
       // Q5 — verify the OS focus call actually landed. Retry even when Cursor
@@ -1372,15 +1580,13 @@ export async function restoreFocusContext(): Promise<boolean> {
         const hwndAt = Date.now();
         await focusWindowByHwnd(target.hwnd, target.windowTitle);
         const hwndMs = Date.now() - hwndAt;
-        await new Promise((r) => setTimeout(r, attempt === 1 ? 350 : 220));
+        await new Promise((r) =>
+          setTimeout(r, fastShellRestore ? 40 : attempt === 1 ? 350 : 220),
+        );
 
         const after = await getForegroundWindow();
         const elapsedMs = Date.now() - restoreStartedAt;
-        if (
-          after?.hwnd &&
-          (Number(after.hwnd) === Number(target.hwnd) ||
-            matchesPinnedInsertTarget(after, target))
-        ) {
+        if (after?.hwnd && Number(after.hwnd) === Number(target.hwnd)) {
           const landed: FocusContext = {
             ...target,
             hwnd: Number(after.hwnd),
@@ -1398,7 +1604,8 @@ export async function restoreFocusContext(): Promise<boolean> {
               ` elapsedMs=${elapsedMs} hwndCallMs=${hwndMs}` +
               ` attempt=${attempt}` +
               ` from=${fgProc} to=${landed.processName}` +
-              `${shellBefore ? " recovered_shell=1" : ""}`,
+              `${shellBefore ? " recovered_shell=1" : ""}` +
+              `${fastShellRestore ? " fast_shell=1" : ""}`,
           );
           return true;
         }
@@ -1413,6 +1620,14 @@ export async function restoreFocusContext(): Promise<boolean> {
               ` elapsedMs=${elapsedMs} hwndCallMs=${hwndMs}` +
               ` fg=${after?.processName ?? "?"} title="${(after?.windowTitle ?? "").slice(0, 40)}"`,
           );
+          // Electron snap-back: suppress main before the next SetForegroundWindow.
+          if (
+            after &&
+            isRippleOwnWindow(after.processName ?? "", after.windowTitle ?? "")
+          ) {
+            yieldRippleForeground();
+            await new Promise((r) => setTimeout(r, 40));
+          }
           continue;
         }
 
@@ -1431,7 +1646,7 @@ export async function restoreFocusContext(): Promise<boolean> {
 
       return false;
     } finally {
-      await lockSetForegroundNative(false);
+      await nestedForegroundLock(false);
     }
   } catch (e: unknown) {
     console.warn(
@@ -1439,7 +1654,7 @@ export async function restoreFocusContext(): Promise<boolean> {
       e instanceof Error ? e.message : e,
     );
     try {
-      await lockSetForegroundNative(false);
+      await nestedForegroundLock(false);
     } catch {
       /* ignore */
     }

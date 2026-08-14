@@ -1,4 +1,4 @@
-import { hideOverlay } from "../../windows/overlay.js";
+import { hideOverlayToPinnedTarget } from "../../windows/overlay.js";
 import { runWhatsAppMessageFlow } from "../adapters/whatsapp/whatsappAdapter.js";
 import {
   extractContactName,
@@ -66,20 +66,15 @@ export async function runInsertText(data?: Record<string, unknown>): Promise<str
     sequenceSteps: sequence.length || undefined,
   });
 
-  if (hasKeyInput) {
-    hideOverlay();
-  }
+  // Claim pin then hide — never hide first (shell vacuum).
+  await hideOverlayToPinnedTarget();
 
   let beforeObserve: Awaited<ReturnType<typeof captureObservation>> | undefined;
   if (hasKeyInput || mouseAction) {
     beforeObserve = await captureObservation();
   }
-  if (!hasKeyInput && !mouseAction) {
-    hideOverlay();
-  }
 
   if (mouseAction) {
-    hideOverlay();
     await restoreFocusContext();
     await new Promise((r) => setTimeout(r, 150));
     const target = resolveTypingFocusTarget();

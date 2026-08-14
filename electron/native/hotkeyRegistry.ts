@@ -79,7 +79,14 @@ const DEFAULT_BINDINGS: HotkeyBinding[] = [
 const registered: string[] = [];
 
 function modeForAction(action: HotkeyBinding["action"]): VoiceUiMode {
-  if (action === "dictation" && isDictationModeEnabled()) return "dictation";
+  if (action === "dictation") {
+    if (isDictationModeEnabled()) return "dictation";
+    // Loud downgrade — a dictation press routed to the command planner can
+    // execute desktop actions (minimize-all, …) from dictated speech.
+    console.warn(
+      "[ripple-focus-drift] hotkey_mode_downgrade dictation→command (dictation mode disabled at press)",
+    );
+  }
   return "command";
 }
 

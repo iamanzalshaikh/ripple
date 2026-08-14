@@ -345,6 +345,8 @@ export async function smartInsertText(
     clipboard.writeText(insertBody);
     await delay(120);
     try {
+      const { assertPreSendGates } = await import("./input/insertGates.js");
+      await assertPreSendGates("fallback_paste");
       await pasteFromClipboard();
       return focus
         ? `Pasted ${insertBody.length} chars into ${focus.processName} (fallback)`

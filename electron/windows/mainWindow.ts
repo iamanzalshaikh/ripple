@@ -6,9 +6,110 @@ import { resolvePreloadPath } from "../utils/preloadPath.js";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 let mainWindow: BrowserWindow | null = null;
+/** While true, main must not take FG (dictation / transforms / insert). */
+let mainActivationSuppressed = false;
+/** WS_EX_NOACTIVATE applied natively (visible-unfocused suppression path). */
+let mainNativeNoActivateApplied = false;
 
 export function getMainWindow(): BrowserWindow | null {
   return mainWindow;
+}
+
+export function isMainActivationSuppressed(): boolean {
+  return mainActivationSuppressed;
+}
+
+/** HWND from the main BrowserWindow (Win32). */
+function mainNativeHwnd(win: BrowserWindow): number | null {
+  try {
+    const buf = win.getNativeWindowHandle();
+    if (!buf || buf.length < 4) return null;
+    if (buf.length >= 8) return Number(buf.readBigUInt64LE(0));
+    return buf.readUInt32LE(0);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Make main non-activatable WITHOUT deactivating anyone else.
+ *
+ * Electron's setFocusable(false) on Windows ends in Widget::Deactivate(),
+ * which SetForegroundWindow's the next visible window BELOW main in z-order —
+ * even when main never had focus. With main open in the background this
+ * deactivated the user's target at hotkey press and visibly surfaced the
+ * window behind main (e.g. Notepad) — and the press itself is what grants
+ * Electron the foreground rights that let that stray activation succeed.
+ * So Electron's call is only safe when main is hidden (Focus(false) early-
+ * returns) or when main itself holds FG (deactivating IS the intended yield).
+ */
+function applyMainSuppression(main: BrowserWindow, reason: string): void {
+  const focused = main.isFocused();
+  const visible =
+    typeof main.isVisible === "function" ? main.isVisible() : false;
+  const focusable =
+    typeof main.isFocusable === "function" ? main.isFocusable() : true;
+  let branch: string;
+  if (!focusable) {
+    branch = "already_nonfocusable";
+  } else if (focused) {
+    // Main owns FG — Electron's deactivate-to-next lands on the previous app.
+    main.setFocusable(false);
+    if (main.isFocused()) main.blur();
+    branch = "focused_yield";
+  } else if (!visible) {
+    // Hidden window: Electron's Focus(false) early-returns — safe.
+    main.setFocusable(false);
+    branch = "hidden";
+  } else if (mainNativeNoActivateApplied) {
+    branch = "native_already_applied";
+  } else {
+    // Visible but NOT focused — the dangerous case. Set WS_EX_NOACTIVATE
+    // natively (zero activation side effects); the focus-event blur below
+    // stays as backstop if Windows activates main anyway.
+    const hwnd = mainNativeHwnd(main);
+    if (hwnd) {
+      mainNativeNoActivateApplied = true;
+      void import("../native/win32Bridge.js").then(
+        ({ setWindowNoActivateNative }) => setWindowNoActivateNative(hwnd, true),
+      );
+    }
+    branch = "visible_native_noactivate";
+  }
+  console.info(
+    `[ripple-focus-drift] main_suppress t=${Date.now()} branch=${branch} reason=${reason} visible=${visible} focused=${focused}`,
+  );
+}
+
+/**
+ * Prevent the titled "Ripple" BrowserWindow from re-taking foreground during
+ * dictation. Windows will otherwise snap FG back to Electron after
+ * SetForegroundWindow(chrome) — the restore_fail from=electron loop.
+ */
+export function setMainActivationSuppressed(suppressed: boolean): void {
+  mainActivationSuppressed = suppressed;
+  const main = mainWindow;
+  if (!main || main.isDestroyed()) return;
+  try {
+    if (suppressed) {
+      applyMainSuppression(main, "suppress");
+    } else {
+      main.setFocusable(true);
+      // Clear the natively-set WS_EX_NOACTIVATE too (Electron clears its own).
+      if (mainNativeNoActivateApplied) {
+        mainNativeNoActivateApplied = false;
+        const hwnd = mainNativeHwnd(main);
+        if (hwnd) {
+          void import("../native/win32Bridge.js").then(
+            ({ setWindowNoActivateNative }) =>
+              setWindowNoActivateNative(hwnd, false),
+          );
+        }
+      }
+    }
+  } catch {
+    /* ignore */
+  }
 }
 
 export function createMainWindow(): BrowserWindow {
@@ -27,12 +128,35 @@ export function createMainWindow(): BrowserWindow {
     },
   });
 
+  // Do NOT call show() here. Boot arms hotkeys before createMainWindow(); a
+  // late ready-to-show → show() steals FG from Chrome mid first dictation
+  // (title="Ripple", process=electron) and causes multi-second restore fights.
+  // Login / tray / activate paths call showMainWindow() explicitly.
   mainWindow.on("ready-to-show", () => {
-    mainWindow?.show();
-    // DevTools auto-open triggers harmless Autofill.enable Chromium console noise.
-    // Opt in: RIPPLE_DEVTOOLS=1 npm run dev
     if (process.env.ELECTRON_RENDERER_URL && process.env.RIPPLE_DEVTOOLS === "1") {
       mainWindow?.webContents.openDevTools({ mode: "detach" });
+    }
+  });
+
+  mainWindow.on("focus", () => {
+    if (!mainActivationSuppressed) return;
+    try {
+      mainWindow?.blur();
+    } catch {
+      /* ignore */
+    }
+  });
+
+  mainWindow.on("show", () => {
+    if (!mainActivationSuppressed || !mainWindow || mainWindow.isDestroyed()) {
+      return;
+    }
+    try {
+      // Route through the guarded suppression — a raw setFocusable(false)+blur
+      // here deactivates whatever the user is focused on (Widget::Deactivate).
+      applyMainSuppression(mainWindow, "show_event");
+    } catch {
+      /* ignore */
     }
   });
 
@@ -57,7 +181,31 @@ export function createMainWindow(): BrowserWindow {
 
 export function showMainWindow(): void {
   if (!mainWindow) {
-    createMainWindow();
+    const win = createMainWindow();
+    // New window still hidden until ready; show once load finishes.
+    win.once("ready-to-show", () => {
+      if (!mainWindow || mainWindow.isDestroyed()) return;
+      if (mainActivationSuppressed) {
+        // setFocusable(false) BEFORE show — safe while hidden; after show it
+        // would deactivate the user's FG window (Widget::Deactivate).
+        mainWindow.setFocusable(false);
+        mainWindow.showInactive();
+        return;
+      }
+      mainWindow.show();
+      mainWindow.focus();
+    });
+    return;
+  }
+  if (mainActivationSuppressed) {
+    // Never activate during dictation (e.g. accidental tray click).
+    // Drop focusable while still hidden (safe); once visible, the show
+    // handler applies the native no-activate path instead.
+    if (typeof mainWindow.isVisible !== "function" || !mainWindow.isVisible()) {
+      mainWindow.setFocusable(false);
+    }
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.showInactive();
     return;
   }
   if (mainWindow.isMinimized()) mainWindow.restore();

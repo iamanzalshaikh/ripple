@@ -1,6 +1,7 @@
 import { clipboard } from "electron";
-import { hideOverlay } from "../../windows/overlay.js";
+import { hideOverlayToPinnedTarget } from "../../windows/overlay.js";
 import {
+  getLastInsertAbortReason,
   prepareDictationInsertFocus,
   restoreFocusContext,
 } from "../../focus/focusContext.js";
@@ -117,6 +118,10 @@ async function replaceFieldViaClipboard(content: string): Promise<void> {
   await delay(200);
   clipboard.writeText(content);
   await delay(80);
+  const { assertPreSendGates } = await import(
+    "../../automation/input/insertGates.js"
+  );
+  await assertPreSendGates("transform_replace");
   await selectAll();
   await delay(80);
   await pasteFromClipboard();
@@ -159,7 +164,7 @@ export async function executeTransform(
   }
 
   try {
-    hideOverlay();
+    await hideOverlayToPinnedTarget();
     // HWND restore is not enough: explorer steal leaves Chrome FG without
     // caret in the WhatsApp composer. Dictation insert uses this; transform
     // used to Ctrl+A the chat pane (field=0 fake success).
@@ -170,7 +175,7 @@ export async function executeTransform(
         originalText: original,
         finalText,
         inserted: false,
-        error: "restore_failed",
+        error: getLastInsertAbortReason() ?? "restore_failed",
       };
     }
     await delay(150);
