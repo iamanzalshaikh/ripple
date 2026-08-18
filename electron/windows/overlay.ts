@@ -23,8 +23,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // status text + divider + language/session badges (the old plain pill was
 // narrower and shorter; this redesign needs the extra room).
 // P11.3/11.4 — room for language badge + Scratchpad + Transforms wand.
-const INDICATOR_WIDTH = 328;
-const INDICATOR_HEIGHT = 60;
+// Layout only — do not change show/hide/focus behavior when bumping these.
+const INDICATOR_WIDTH = 420;
+const INDICATOR_HEIGHT = 72;
 const BOTTOM_MARGIN = 32;
 
 let overlayWindow: BrowserWindow | null = null;
@@ -486,10 +487,17 @@ export async function handleShortcutPress(
   const { startCommandSession, startDictationSession } = await import(
     "../agent/dictation/dictationSession.js"
   );
-  if (mode === "dictation") {
-    startDictationSession();
-  } else {
+  if (mode === "command") {
+    const { isJarvisEnabled } = await import("../config/featureFlags.js");
+    if (!isJarvisEnabled()) {
+      console.info(
+        "[ripple-desktop] command session blocked — Jarvis off (RIPPLE_JARVIS=1 to enable)",
+      );
+      return;
+    }
     startCommandSession();
+  } else {
+    startDictationSession();
   }
 
   // Snapshot target app before overlay steals attention (do not re-capture FG here)

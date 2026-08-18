@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   detectSpokenList,
   formatSpokenList,
+  formatTranscript,
   localCleanup,
+  stripFillersAndStutters,
 } from "../localCleanup.js";
 
 describe("Wispr-Flow Phase 7.1 — local filler/punct/list cleanup", () => {
@@ -32,6 +34,18 @@ describe("Wispr-Flow Phase 7.1 — local filler/punct/list cleanup", () => {
 
   it("adds terminal punctuation and capitalizes", () => {
     expect(localCleanup("this is important")).toBe("This is important.");
+  });
+
+  it("cleanup-only strip leaves punctuation off", () => {
+    expect(stripFillersAndStutters("um I think we should go")).toBe(
+      "I think we should go",
+    );
+  });
+
+  it("format-only capitalizes without stripping fillers", () => {
+    expect(formatTranscript("um I think we should go")).toBe(
+      "Um I think we should go.",
+    );
   });
 
   it("uses a question mark for interrogative openers", () => {

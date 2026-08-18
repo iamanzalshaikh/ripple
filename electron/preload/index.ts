@@ -1,5 +1,48 @@
 import { contextBridge, ipcRenderer } from "electron";
 
+/**
+ * Renderer crash visibility (desktop.md pass 1).
+ *
+ * Installed here rather than in src/ so every renderer window (main UI and the
+ * dictation overlay) is covered with no app-code changes. Forwards to the main
+ * process, which writes the trace synchronously to a crash log file.
+ */
+function installRendererCrashHandlers(): void {
+  const report = (kind: string, detail: Record<string, unknown>): void => {
+    try {
+      ipcRenderer.send("diag:renderer-crash", { kind, ...detail });
+    } catch {
+      /* never throw from the crash reporter */
+    }
+  };
+
+  window.addEventListener("error", (event: ErrorEvent) => {
+    report("renderer.window_error", {
+      message: event.message,
+      source: event.filename,
+      line: event.lineno,
+      column: event.colno,
+      stack: event.error instanceof Error ? event.error.stack : undefined,
+      url: location.href,
+    });
+  });
+
+  window.addEventListener(
+    "unhandledrejection",
+    (event: PromiseRejectionEvent) => {
+      const reason = event.reason;
+      report("renderer.unhandled_rejection", {
+        message:
+          reason instanceof Error ? reason.message : String(reason ?? "unknown"),
+        stack: reason instanceof Error ? reason.stack : undefined,
+        url: location.href,
+      });
+    },
+  );
+}
+
+installRendererCrashHandlers();
+
 export interface RippleUser {
   id: string;
   email: string;
@@ -360,6 +403,46 @@ const api = {
         message?: string;
       }>,
   },
+  micDevice: {
+    get: () =>
+      ipcRenderer.invoke("micDevice:get") as Promise<{
+        ok: boolean;
+        deviceId?: string;
+        message?: string;
+      }>,
+    set: (deviceId: string) =>
+      ipcRenderer.invoke("micDevice:set", { deviceId }) as Promise<{
+        ok: boolean;
+        deviceId?: string;
+        message?: string;
+      }>,
+  },
+  pipeline: {
+    get: () =>
+      ipcRenderer.invoke("pipeline:get") as Promise<{
+        ok: boolean;
+        level?: string;
+        layers?: {
+          transcribe: true;
+          cleanup: boolean;
+          format: boolean;
+          context: boolean;
+        };
+        message?: string;
+      }>,
+    set: (args: { level?: string; cleanup?: boolean; format?: boolean; context?: boolean }) =>
+      ipcRenderer.invoke("pipeline:set", args) as Promise<{
+        ok: boolean;
+        level?: string;
+        layers?: {
+          transcribe: true;
+          cleanup: boolean;
+          format: boolean;
+          context: boolean;
+        };
+        message?: string;
+      }>,
+  },
   dictionary: {
     list: () =>
       ipcRenderer.invoke("dictionary:list") as Promise<{
@@ -425,20 +508,35 @@ const api = {
         message?: string;
         items?: Array<{
           processName: string;
-          tone: "professional" | "casual" | "neutral";
+          tone:
+            | "very_casual"
+            | "casual"
+            | "neutral"
+            | "professional"
+            | "formal";
           updatedAt: string;
         }>;
       }>,
     set: (args: {
       processName: string;
-      tone: "professional" | "casual" | "neutral";
+      tone:
+        | "very_casual"
+        | "casual"
+        | "neutral"
+        | "professional"
+        | "formal";
     }) =>
       ipcRenderer.invoke("styles:set", args) as Promise<{
         ok: boolean;
         message?: string;
         entry?: {
           processName: string;
-          tone: "professional" | "casual" | "neutral";
+          tone:
+            | "very_casual"
+            | "casual"
+            | "neutral"
+            | "professional"
+            | "formal";
           updatedAt: string;
         };
       }>,

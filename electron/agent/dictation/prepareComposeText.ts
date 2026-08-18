@@ -1,5 +1,6 @@
 import { rewriteDictationBuffer } from "./dictationRewrite.js";
 import { biasUtteranceFromScreen } from "./screenNameBias.js";
+import { applyDevModeText } from "./devModeText.js";
 
 export type PreparedComposeText = {
   text: string;
@@ -17,23 +18,25 @@ export async function prepareComposeDictationText(
   options?: { surface?: string; previousText?: string; processName?: string },
 ): Promise<PreparedComposeText> {
   let bufferText = raw.trim();
+  const { resolvePipelineLayers } = await import("./pipelineLayers.js");
+  const layers = await resolvePipelineLayers();
 
-  // P7.7 — Mechanism 1 (Wispr context awareness): bias STT tokens toward
-  // names/terms already visible near the cursor. Runs before dictionary +
-  // cleanup so screen-correct spellings are protected like nor→Noor.
-  try {
-    const biased = await biasUtteranceFromScreen(bufferText);
-    if (biased.replacements.length > 0) {
-      console.info(
-        `[ripple-screen-bias] surface=${options?.surface ?? "dictation"} ` +
-          `terms=${biased.terms.length} fixes=${biased.replacements
-            .map((r) => `${r.from}→${r.to}`)
-            .join(", ")}`,
-      );
-      bufferText = biased.text;
+  // P7.7 — context layer: bias STT tokens toward names/terms already visible.
+  if (layers.context) {
+    try {
+      const biased = await biasUtteranceFromScreen(bufferText);
+      if (biased.replacements.length > 0) {
+        console.info(
+          `[ripple-screen-bias] surface=${options?.surface ?? "dictation"} ` +
+            `terms=${biased.terms.length} fixes=${biased.replacements
+              .map((r) => `${r.from}→${r.to}`)
+              .join(", ")}`,
+        );
+        bufferText = biased.text;
+      }
+    } catch {
+      /* fail-open — leave bufferText unchanged */
     }
-  } catch {
-    /* fail-open — leave bufferText unchanged */
   }
 
   const { maintainPinnedTargetDuringRewrite } = await import(
@@ -41,21 +44,34 @@ export async function prepareComposeDictationText(
   );
   await maintainPinnedTargetDuringRewrite();
 
+  // Tag files / camelCase symbols before cleanup so High rewrite cannot
+  // erase "is login error" / filenames. Insert and focus are unchanged.
+  const beforeRewrite = await applyDevModeText(bufferText, {
+    processName: options?.processName,
+  });
+  bufferText = beforeRewrite.text;
+
   const rewritten = await rewriteDictationBuffer({
     bufferText,
     committedBuffer: options?.previousText,
     applyMemoryCorrections: true,
     processName: options?.processName,
+    layers,
   });
 
   await maintainPinnedTargetDuringRewrite();
 
+  const afterRewrite = await applyDevModeText(rewritten.finalText, {
+    processName: options?.processName,
+  });
+
+  const model = rewritten.decisionLog.modelUsed;
+  const localOnly =
+    model.startsWith("local-") || model === "snippet" || model === "none_fallback";
+
   return {
-    text: rewritten.finalText,
+    text: afterRewrite.text,
     kind: rewritten.kind,
-    aiUsed:
-      rewritten.decisionLog.modelUsed !== "none_fallback" &&
-      (rewritten.decisionLog.layer2aCalled ||
-        rewritten.decisionLog.layer2bCalled),
+    aiUsed: !localOnly && rewritten.decisionLog.applied,
   };
 }

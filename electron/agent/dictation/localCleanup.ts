@@ -44,15 +44,21 @@ function finishingTouches(s: string): string {
   return out.charAt(0).toUpperCase() + out.slice(1);
 }
 
-/** Baseline cleanup — always safe, always applied, no LLM required. */
-export function localCleanup(text: string): string {
-  let out = text;
-  out = out.replace(FILLER_WORDS, " ");
+/** Cleanup layer only — fillers + stutters. No punctuation or capitalization. */
+export function stripFillersAndStutters(text: string): string {
+  let out = text.replace(FILLER_WORDS, " ");
   out = collapseStutters(out);
-  out = collapseSpaces(out);
-  out = tidyPunctuationSpacing(out);
-  out = finishingTouches(out);
-  return out;
+  return collapseSpaces(out);
+}
+
+/** Format layer only — spacing, capitalization, terminal punctuation. */
+export function formatTranscript(text: string): string {
+  return finishingTouches(tidyPunctuationSpacing(collapseSpaces(text)));
+}
+
+/** Baseline cleanup — cleanup + format composed. No LLM required. */
+export function localCleanup(text: string): string {
+  return formatTranscript(stripFillersAndStutters(text));
 }
 
 // --- Spoken list detection (Phase 7.1 "list" part) ---------------------

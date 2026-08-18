@@ -6,6 +6,8 @@ import {
   type InsertTextA11yDiagnostics,
 } from "../../native/win32Bridge.js";
 
+import { app } from "electron";
+
 const LOG_PREFIX = "[ripple-insert-text-diag]";
 
 export type InsertTextDiagPhase =
@@ -15,7 +17,13 @@ export type InsertTextDiagPhase =
   | "verify_fail";
 
 export function insertTextDiagnosticsEnabled(): boolean {
-  return process.env.RIPPLE_INSERT_TEXT_DIAG !== "0";
+  if (process.env.RIPPLE_INSERT_TEXT_DIAG === "1") return true;
+  if (process.env.RIPPLE_INSERT_TEXT_DIAG === "0") return false;
+  try {
+    return !app.isPackaged;
+  } catch {
+    return false;
+  }
 }
 
 function preview(value: string, max = 120): string {

@@ -57,7 +57,7 @@ describe("prepareComposeDictationText AI layer", () => {
     );
     expect(out.aiUsed).toBe(false);
     expect(out.text).toBe(
-      "Meet tomorrow, no, day after tomorrow at 8 o'clock",
+      "Meet tomorrow, no, day after tomorrow at 8 o'clock.",
     );
   });
 });

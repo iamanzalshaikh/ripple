@@ -68,8 +68,31 @@ describe("pre-send insert gates", () => {
     );
   });
 
-  it("aborts insert_aborted:target_not_visible when target stays hidden", async () => {
-    getPreSendStateNative.mockResolvedValue(state({ visible: false }));
+  it("aborts insert_aborted:target_not_visible when target stays hidden AND is not foreground", async () => {
+    getPreSendStateNative.mockResolvedValue(
+      state({ visible: false, fgHwnd: 999 }),
+    );
+    const { assertPreSendGates } = await import("../insertGates.js");
+    await expect(assertPreSendGates("native_text")).rejects.toThrow(
+      /insert_aborted:target_not_visible/,
+    );
+  });
+
+  it("proceeds when visible=0 but the target IS the foreground (Windows 11 Notepad)", async () => {
+    // Win11 Notepad's WinUI shell reports IsWindowVisible=0 for its own
+    // foreground window (verified live). It is reachable by definition, so
+    // the gate must not refuse — this previously blocked every Notepad insert.
+    getPreSendStateNative.mockResolvedValue(
+      state({ visible: false, iconic: false, fgHwnd: 777 }),
+    );
+    const { assertPreSendGates } = await import("../insertGates.js");
+    await expect(assertPreSendGates("native_text")).resolves.toBeUndefined();
+  });
+
+  it("still aborts when the target is minimized even if it reports foreground", async () => {
+    getPreSendStateNative.mockResolvedValue(
+      state({ visible: true, iconic: true, fgHwnd: 777 }),
+    );
     const { assertPreSendGates } = await import("../insertGates.js");
     await expect(assertPreSendGates("native_text")).rejects.toThrow(
       /insert_aborted:target_not_visible/,

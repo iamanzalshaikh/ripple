@@ -6,6 +6,7 @@ import {
 import {
   ensureEditorKeyboardFocus,
   isClassicTextEditorProcess,
+  isElectronEditorProcess,
 } from "../agent/editorFocus.js";
 import { getLastVoiceCommand, isEditIntent } from "../state/lastCommand.js";
 import { isWhatsAppMessagingCommand } from "./adapters/whatsapp/parseContact.js";
@@ -321,12 +322,24 @@ export async function smartInsertText(
     // after the text already landed. Falling through to sendkeys retypes the
     // full string (live double message). Prefer clipboard + abort on native fail.
     const browserComposer = Boolean(focus?.isBrowser) || isWhatsAppContext();
+    // Electron-based editors (Cursor / VS Code AI chat inputs) are Chromium
+    // contenteditables: the focused UIA node is ControlType.Edit with an empty
+    // name and NO ValuePattern (live: class="aislash-editor-input" inside a
+    // vscode-file:// document). Verification is therefore structurally
+    // impossible — exactly the WhatsApp Web contenteditable case — so treating
+    // "cannot verify" as failure aborted a send that had already landed.
+    // Only the accept-unverifiable rule is shared; ladder order, partial-fail
+    // abort and vision stay keyed off browserComposer so the Chrome path and
+    // the desktop SendInput path are both unchanged.
+    const unverifiableEditor = focus
+      ? isElectronEditorProcess(focus.processName)
+      : false;
     const { detail } = await runInsertWithFallback(insertBody, {
       verify: process.env.RIPPLE_P85_INSERT_VERIFY !== "0",
       beforeObserve,
       preferFirst: browserComposer ? "clipboard_paste" : undefined,
       abortLadderOnPartialNativeFail: browserComposer,
-      acceptUnverifiableEdit: browserComposer,
+      acceptUnverifiableEdit: browserComposer || unverifiableEditor,
       includeVision: !browserComposer,
     });
     return detail;

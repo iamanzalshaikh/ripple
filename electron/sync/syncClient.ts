@@ -102,6 +102,8 @@ export function applyPulledItem(item: SyncPullItem): void {
       if (
         item.key === "language" ||
         item.key === "quiet_mode" ||
+        item.key === "mic_device_id" ||
+        item.key === "pipeline_layers" ||
         item.key === "meeting_consent"
       ) {
         updateUserPreference(item.key, payload.value);
@@ -215,6 +217,14 @@ async function pushAllLocalState(accessToken: string): Promise<void> {
       kind: "preference",
       key: "quiet_mode",
       payload: { value: prefs.quietMode },
+      updatedAt: prefsUpdatedAt,
+    });
+  }
+  if (prefs.pipelineLayers) {
+    items.push({
+      kind: "preference",
+      key: "pipeline_layers",
+      payload: { value: prefs.pipelineLayers },
       updatedAt: prefsUpdatedAt,
     });
   }

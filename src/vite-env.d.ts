@@ -148,6 +148,29 @@ interface RippleApi {
     get: () => Promise<{ ok: boolean; quietMode?: boolean; message?: string }>;
     set: (enabled: boolean) => Promise<{ ok: boolean; quietMode?: boolean; message?: string }>;
   };
+  micDevice: {
+    get: () => Promise<{ ok: boolean; deviceId?: string; message?: string }>;
+    set: (deviceId: string) => Promise<{ ok: boolean; deviceId?: string; message?: string }>;
+  };
+  pipeline: {
+    get: () => Promise<{
+      ok: boolean;
+      level?: string;
+      layers?: { transcribe: true; cleanup: boolean; format: boolean; context: boolean };
+      message?: string;
+    }>;
+    set: (args: {
+      level?: string;
+      cleanup?: boolean;
+      format?: boolean;
+      context?: boolean;
+    }) => Promise<{
+      ok: boolean;
+      level?: string;
+      layers?: { transcribe: true; cleanup: boolean; format: boolean; context: boolean };
+      message?: string;
+    }>;
+  };
   dictionary: {
     list: () => Promise<{
       ok: boolean;
@@ -206,19 +229,34 @@ interface RippleApi {
       message?: string;
       items?: Array<{
         processName: string;
-        tone: "professional" | "casual" | "neutral";
+        tone:
+          | "very_casual"
+          | "casual"
+          | "neutral"
+          | "professional"
+          | "formal";
         updatedAt: string;
       }>;
     }>;
     set: (args: {
       processName: string;
-      tone: "professional" | "casual" | "neutral";
+      tone:
+        | "very_casual"
+        | "casual"
+        | "neutral"
+        | "professional"
+        | "formal";
     }) => Promise<{
       ok: boolean;
       message?: string;
       entry?: {
         processName: string;
-        tone: "professional" | "casual" | "neutral";
+        tone:
+          | "very_casual"
+          | "casual"
+          | "neutral"
+          | "professional"
+          | "formal";
         updatedAt: string;
       };
     }>;

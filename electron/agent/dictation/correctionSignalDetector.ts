@@ -6,7 +6,7 @@ import type {
 const IDIOMATIC_NO =
   /^(?:no problem|no worries|no chance|no idea|no thanks)\b/i;
 const TONE_DIRECTIVE =
-  /\b(?:make (?:it|this|that)?\s*(?:more\s+)?(?:professional|formal|casual|friendly|shorter|longer)|rewrite|rephrase)\b/i;
+  /\b(?:make (?:it|this|that)?\s*(?:more\s+|very\s+|super\s+)?(?:professional|formal|casual|friendly|shorter|longer)|rewrite|rephrase)\b/i;
 const DELETE_DIRECTIVE =
   /\b(?:delete|remove|erase)\s+(?:the\s+)?(?:last\s+(?:sentence|part|phrase)|that\s+(?:sentence|part|phrase)|(?:word|phrase)\s+.+)$/i;
 const SCRATCH_THAT = /\bscratch\s+that\b/i;

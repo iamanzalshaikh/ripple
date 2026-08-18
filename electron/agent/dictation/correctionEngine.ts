@@ -2,6 +2,8 @@
  * P7.2 — Correction Understanding Engine (heuristics, no GPT required for v1).
  */
 
+import type { StyleTone } from "../../storage/styleTone.js";
+
 export type CorrectionKind =
   | "noop"
   | "replace_tail"
@@ -19,8 +21,12 @@ const NO_NO =
   /\b(?:no+\s*no+|nope|wait|actually|scratch that|i mean)\b/i;
 const REMOVE =
   /\b(?:remove|delete|erase)\s+(.+?)\s*$/i;
+const MAKE_VERY_CASUAL =
+  /\b(?:make (?:it |this )?(?:very|super) casual|very casual)\b/i;
+const MAKE_FORMAL =
+  /\b(?:make (?:it |this )?(?:more |very )?formal|more formal|very formal)\b/i;
 const MAKE_PROFESSIONAL =
-  /\b(?:make (?:it |this )?(?:more )?professional|rewrite (?:it |this )?professionally|more formal)\b/i;
+  /\b(?:make (?:it |this )?(?:more )?professional|rewrite (?:it |this )?professionally)\b/i;
 const MAKE_CASUAL =
   /\b(?:make (?:it |this )?casual|more casual|informal)\b/i;
 
@@ -57,25 +63,23 @@ export function applyCorrectionHeuristics(
     return { kind: "noop", text: "" };
   }
 
-  if (MAKE_PROFESSIONAL.test(combined)) {
+  const spokenTone = parseSpokenStyleInstruction(combined);
+  if (spokenTone && spokenTone !== "neutral") {
+    const stripRe =
+      spokenTone === "very_casual"
+        ? MAKE_VERY_CASUAL
+        : spokenTone === "formal"
+          ? MAKE_FORMAL
+          : spokenTone === "professional"
+            ? MAKE_PROFESSIONAL
+            : MAKE_CASUAL;
     const body = collapseSpaces(
-      combined.replace(MAKE_PROFESSIONAL, " ").replace(NO_NO, " "),
+      combined.replace(stripRe, " ").replace(NO_NO, " "),
     );
     return {
       kind: "tone_rewrite",
-      text: toProfessionalTone(body || bufferText),
-      detail: "professional",
-    };
-  }
-
-  if (MAKE_CASUAL.test(combined)) {
-    const body = collapseSpaces(
-      combined.replace(MAKE_CASUAL, " ").replace(NO_NO, " "),
-    );
-    return {
-      kind: "tone_rewrite",
-      text: toCasualTone(body || bufferText),
-      detail: "casual",
+      text: applyStyleTone(body || bufferText, spokenTone),
+      detail: spokenTone,
     };
   }
 
@@ -279,4 +283,77 @@ export function toProfessionalTone(text: string): string {
 
 export function toCasualTone(text: string): string {
   return stripFillers(text).replace(/\bHello\b/g, "Hey");
+}
+
+/** Slack / chat: contractions and greetings, no forced period. */
+export function toVeryCasualTone(text: string): string {
+  let out = collapseSpaces(text);
+  out = out.replace(/\bwould like to\b/gi, "wanna");
+  out = stripFillers(out);
+  out = out.replace(/\bHello\b/g, "Hey");
+  out = out.replace(/\bHi\b/g, "Hey");
+  out = out.replace(/\bneed to\b/gi, "gotta");
+  out = out.replace(/\bthank you\b/gi, "thanks");
+  out = out.replace(/\bI am\b/g, "I'm");
+  out = out.replace(/\bdo not\b/gi, "don't");
+  out = out.replace(/\bcannot\b/gi, "can't");
+  return out;
+}
+
+/** Email / docs: expand slang and contractions. */
+export function toFormalTone(text: string): string {
+  let out = stripFillers(text);
+  out = out.replace(/\bgonna\b/gi, "going to");
+  out = out.replace(/\bgotta\b/gi, "must");
+  out = out.replace(/\bwanna\b/gi, "would like to");
+  out = out.replace(/\bhey\b/gi, "Hello");
+  out = out.replace(/\bhi\b/gi, "Hello");
+  out = out.replace(/\bthanks\b/gi, "thank you");
+  out = out.replace(/\bcan't\b/gi, "cannot");
+  out = out.replace(/\bdon't\b/gi, "do not");
+  out = out.replace(/\bI'm\b/g, "I am");
+  out = out.replace(/\bwe're\b/gi, "we are");
+  out = out.replace(/\bit's\b/gi, "it is");
+  if (out && !/[.!?]$/.test(out)) out = `${out}.`;
+  return out.charAt(0).toUpperCase() + out.slice(1);
+}
+
+/**
+ * Map a spoken rewrite instruction to the Wispr scale.
+ * Returns null when the utterance is not a tone command (Transforms keeps AI).
+ */
+export function parseSpokenStyleInstruction(
+  instruction: string,
+): StyleTone | null {
+  const s = instruction.trim();
+  if (!s) return null;
+  if (MAKE_VERY_CASUAL.test(s) || /\bvery\s+casual\b|\bsuper\s+casual\b/i.test(s)) {
+    return "very_casual";
+  }
+  if (MAKE_FORMAL.test(s) || /\b(?:more\s+|very\s+)?formal\b/i.test(s)) {
+    return "formal";
+  }
+  if (MAKE_PROFESSIONAL.test(s) || /\bprofessional(?:ly)?\b|\bpolished\b/i.test(s)) {
+    return "professional";
+  }
+  if (MAKE_CASUAL.test(s) || /\b(?:casual|informal|friendly)\b/i.test(s)) {
+    return "casual";
+  }
+  return null;
+}
+
+/** Ambient per-app style. Neutral leaves text unchanged. */
+export function applyStyleTone(text: string, tone: StyleTone): string {
+  switch (tone) {
+    case "very_casual":
+      return toVeryCasualTone(text);
+    case "casual":
+      return toCasualTone(text);
+    case "professional":
+      return toProfessionalTone(text);
+    case "formal":
+      return toFormalTone(text);
+    default:
+      return text;
+  }
 }

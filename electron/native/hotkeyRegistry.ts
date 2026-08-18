@@ -12,6 +12,7 @@ import {
   type VoiceUiMode,
 } from "../agent/dictation/dictationSession.js";
 import { getSidecarCapabilities, isNativeClientAuthenticated } from "./nativeClient.js";
+import { isJarvisEnabled } from "../config/featureFlags.js";
 
 export type HotkeyBinding = {
   accelerator: string;
@@ -91,6 +92,12 @@ function modeForAction(action: HotkeyBinding["action"]): VoiceUiMode {
 }
 
 function runHotkeyAction(action: HotkeyBinding["action"]): void {
+  if (action === "command" && !isJarvisEnabled()) {
+    console.info(
+      "[ripple-desktop] Jarvis (Ctrl+Space command) is off — set RIPPLE_JARVIS=1 to enable",
+    );
+    return;
+  }
   if (action === "cancel_voice") {
     cancelVoiceSession();
     return;
@@ -140,6 +147,12 @@ export function registerNativeHotkeys(
   }
 
   for (const binding of bindings) {
+    if (binding.action === "command" && !isJarvisEnabled()) {
+      console.info(
+        `[ripple-native] hotkey skipped (Jarvis off): ${binding.accelerator} (${binding.label})`,
+      );
+      continue;
+    }
     if (registered.includes(binding.accelerator)) continue;
 
     const success = globalShortcut.register(binding.accelerator, () => {

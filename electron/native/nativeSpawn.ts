@@ -13,6 +13,7 @@ import {
   disconnectNativeClient,
   pingNativeSidecar,
 } from "./nativeClient.js";
+import { crashBreadcrumb, writeCrashLog } from "../diagnostics/crashLog.js";
 
 let child: ChildProcess | null = null;
 let restartBackoffMs = 1000;
@@ -167,9 +168,23 @@ export async function spawnNativeSidecar(): Promise<NativeSessionInfo | null> {
     if (line) console.warn(`[ripple-native:stderr] ${line}`);
   });
 
+  // A ChildProcess that emits 'error' with NO listener throws an unhandled
+  // 'error' event, which kills the Electron main process outright. There was no
+  // listener here — spawn/kill failures could take the whole app down silently.
+  child.on("error", (err) => {
+    console.warn(`[ripple-native] sidecar process error: ${err.message}`);
+    writeCrashLog("sidecar.process_error", err, { pid: spawnedPid, exe });
+    child = null;
+    disconnectNativeClient();
+  });
+
   child.on("exit", (code, signal) => {
     console.warn(
       `[ripple-native] sidecar exited code=${code ?? "?"} signal=${signal ?? ""}`,
+    );
+    crashBreadcrumb(
+      "sidecar_exit",
+      `pid=${spawnedPid} code=${code ?? "?"} signal=${signal ?? ""}`,
     );
     child = null;
     disconnectNativeClient();

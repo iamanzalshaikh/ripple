@@ -36,9 +36,54 @@ function filenameForMime(mimeType: string): string {
   return "voice.webm";
 }
 
+const SYSTEM_AUDIO_LABEL =
+  /stereo mix|loopback|wave out|what u hear|system audio|virtual audio/i;
+
+function buildMicConstraints(
+  quiet: boolean,
+  deviceId?: string,
+): MediaTrackConstraints | boolean {
+  const processing: MediaTrackConstraints = quiet
+    ? {
+        autoGainControl: true,
+        noiseSuppression: false,
+        echoCancellation: false,
+      }
+    : {
+        autoGainControl: true,
+        noiseSuppression: true,
+        echoCancellation: true,
+      };
+
+  if (deviceId) {
+    return { ...processing, deviceId: { ideal: deviceId } };
+  }
+  return processing;
+}
+
+function logMicTrack(stream: MediaStream, quiet: boolean): void {
+  const track = stream.getAudioTracks()[0];
+  if (!track) {
+    console.warn("[ripple-voice] mic track missing after getUserMedia");
+    return;
+  }
+  const label = track.label || "unknown";
+  const settings = track.getSettings();
+  console.info(
+    `[ripple-voice] mic label="${label}" deviceId=${settings.deviceId ?? "?"} quiet=${quiet}`,
+  );
+  if (SYSTEM_AUDIO_LABEL.test(label)) {
+    console.warn(
+      `[ripple-voice] "${label}" records system/loopback audio — open Language → Microphone and pick your headset mic`,
+    );
+  }
+}
+
 export interface VoiceCaptureStartOptions {
   /** P9.6 — boost + de-noise-suppress for soft/whispered speech. */
   quiet?: boolean;
+  /** Saved MediaDevices audioinput id — avoids Windows default (often Stereo Mix). */
+  deviceId?: string;
   /**
    * P7.8 — called for each MediaRecorder timeslice while recording so the
    * client can upload chunks for mid-utterance `voice:flush` partials.
@@ -260,6 +305,7 @@ export function useVoiceCapture() {
   const start = useCallback(
     async (options?: VoiceCaptureStartOptions): Promise<void> => {
       const quiet = options?.quiet === true;
+      const deviceId = options?.deviceId?.trim() || undefined;
       onChunkRef.current = options?.onChunk;
       onFlushRef.current = options?.onFlush;
       continuousRef.current = options?.continuous === true;
@@ -275,13 +321,7 @@ export function useVoiceCapture() {
         // cannot block mic recording (live bug: meeting ended with 0 transcript).
         const wantSystem = options?.includeSystemAudio === true;
         const micPromise = navigator.mediaDevices.getUserMedia({
-          audio: quiet
-            ? {
-                autoGainControl: true,
-                noiseSuppression: false,
-                echoCancellation: false,
-              }
-            : true,
+          audio: buildMicConstraints(quiet, deviceId),
         });
         const systemPromise = wantSystem
           ? acquireSystemAudioStream()
@@ -292,6 +332,7 @@ export function useVoiceCapture() {
           systemPromise,
         ]);
         micStreamRef.current = micStream;
+        logMicTrack(micStream, quiet);
         partsRef.current = [];
 
         let recordStream = micStream;

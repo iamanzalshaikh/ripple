@@ -8,6 +8,7 @@ import {
 } from "../agent/dictation/dictationSession.js";
 import { onNativeEvent } from "./nativeClient.js";
 import { isVoiceInputReady } from "../services/bootReadiness.js";
+import { isJarvisEnabled } from "../config/featureFlags.js";
 
 let unsubscribe: (() => void) | null = null;
 
@@ -36,7 +37,17 @@ function handleSidecarHotkey(name: string): void {
     return;
   }
   // "voice" kept as command alias for older sidecar builds
-  if (name === "command" || name === "voice" || name === "dictation") {
+  if (name === "command" || name === "voice") {
+    if (!isJarvisEnabled()) {
+      console.info(
+        "[ripple-native] sidecar command hotkey ignored — Jarvis off (RIPPLE_JARVIS=1 to enable)",
+      );
+      return;
+    }
+    void handleShortcutPress(resolveMode(name));
+    return;
+  }
+  if (name === "dictation") {
     void handleShortcutPress(resolveMode(name));
   }
 }

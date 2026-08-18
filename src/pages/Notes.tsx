@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getRippleApi } from "../lib/rippleApi";
+import { PageHeader, PrimaryButton, SecondaryButton } from "../components/theme/ui";
 
 interface Props {
   onBack: () => void;
@@ -183,16 +184,15 @@ export function NotesPage({
 
   if (openNote) {
     return (
-      <div className="min-h-full bg-zinc-950 text-zinc-100">
-        <header className="flex items-center justify-between border-b border-zinc-800 px-8 py-6">
+      <div className="min-h-full bg-onboard-bg">
+        <header className="flex items-center justify-between border-b border-onboard-border-soft px-8 py-6">
           <div className="flex min-w-0 items-center gap-3">
-            <button
-              type="button"
+            <SecondaryButton
               onClick={() => void closeEditor()}
-              className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 transition hover:border-zinc-500 hover:bg-zinc-900"
+              className="px-3 py-1.5"
             >
               ← Notes
-            </button>
+            </SecondaryButton>
             <input
               type="text"
               value={title}
@@ -200,16 +200,16 @@ export function NotesPage({
                 setTitle(e.target.value);
                 scheduleSave(openNote.id, { title: e.target.value });
               }}
-              className="min-w-0 flex-1 bg-transparent text-lg font-semibold text-zinc-100 focus:outline-none"
+              className="min-w-0 flex-1 bg-transparent text-lg font-semibold text-onboard-ink focus:outline-none"
               placeholder="Untitled note"
             />
           </div>
-          <span className="shrink-0 text-xs text-zinc-500">
+          <span className="shrink-0 text-xs text-onboard-subtle">
             {saving ? "Saving…" : "Saved"}
           </span>
         </header>
         <main className="mx-auto max-w-2xl p-8">
-          <p className="mb-3 text-xs text-zinc-500">
+          <p className="mb-3 text-xs text-onboard-muted">
             Hold Shift+Space while this box is focused to dictate directly into
             the note.
           </p>
@@ -226,7 +226,7 @@ export function NotesPage({
             // the insert (seen live: note focused → text pasted into WhatsApp).
             // Active note is cleared only when leaving the editor (closeEditor).
             placeholder="Start writing, or hold Shift+Space and dictate…"
-            className="h-[60vh] w-full resize-none rounded-2xl border border-zinc-800 bg-zinc-900/50 p-4 text-sm leading-relaxed text-zinc-100 placeholder:text-zinc-500 focus:border-violet-500 focus:outline-none"
+            className="h-[60vh] w-full resize-none rounded-2xl border border-onboard-border bg-onboard-surface p-4 text-sm leading-relaxed text-onboard-ink placeholder:text-onboard-subtle focus:border-onboard-accent focus:outline-none"
           />
         </main>
       </div>
@@ -234,38 +234,24 @@ export function NotesPage({
   }
 
   return (
-    <div className="min-h-full bg-zinc-950 text-zinc-100">
-      <header className="flex items-center justify-between border-b border-zinc-800 px-8 py-6">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Notes</h1>
-          <p className="mt-1 text-sm text-zinc-400">
-            Dictate notes that sync across your machines.
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={() => void createAndOpenNote()}
-            className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-violet-500"
-          >
+    <div className="min-h-full bg-onboard-bg">
+      <PageHeader
+        title="Notes"
+        subtitle="Dictate notes that sync across your machines."
+        onBack={onBack}
+        actions={
+          <PrimaryButton onClick={() => void createAndOpenNote()}>
             New note
-          </button>
-          <button
-            type="button"
-            onClick={onBack}
-            className="rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-300 transition hover:border-zinc-500 hover:bg-zinc-900"
-          >
-            Back
-          </button>
-        </div>
-      </header>
+          </PrimaryButton>
+        }
+      />
 
       <main className="mx-auto max-w-2xl p-8">
-        {error ? <p className="mb-3 text-xs text-red-400">{error}</p> : null}
+        {error ? <p className="mb-3 text-xs text-red-600">{error}</p> : null}
         {loading ? (
-          <p className="text-sm text-zinc-500">Loading…</p>
+          <p className="text-sm text-onboard-muted">Loading…</p>
         ) : notes.length === 0 ? (
-          <p className="text-sm text-zinc-500">
+          <p className="text-sm text-onboard-muted">
             No notes yet. Click "New note" to create one.
           </p>
         ) : (
@@ -273,24 +259,24 @@ export function NotesPage({
             {notes.map((note) => (
               <li
                 key={note.id}
-                className="flex items-center justify-between gap-3 rounded-lg border border-zinc-800 bg-zinc-900/50 px-4 py-3 transition hover:border-zinc-600"
+                className="flex items-center justify-between gap-3 rounded-lg border border-onboard-border bg-onboard-surface px-4 py-3 transition hover:border-onboard-accent/40"
               >
                 <button
                   type="button"
                   onClick={() => openNoteEditor(note)}
                   className="min-w-0 flex-1 text-left"
                 >
-                  <p className="truncate text-sm font-medium text-zinc-100">
+                  <p className="truncate text-sm font-medium text-onboard-ink">
                     {note.title}
                   </p>
-                  <p className="truncate text-xs text-zinc-500">
+                  <p className="truncate text-xs text-onboard-muted">
                     {note.body.trim() ? note.body.trim() : "Empty note"}
                   </p>
                 </button>
                 <button
                   type="button"
                   onClick={() => void removeNote(note.id)}
-                  className="shrink-0 text-xs text-zinc-500 transition hover:text-red-400"
+                  className="shrink-0 text-xs text-onboard-subtle transition hover:text-red-600"
                 >
                   Delete
                 </button>

@@ -9,6 +9,8 @@ import { SnippetsPage } from "./Snippets";
 import { StylesPage } from "./Styles";
 import { LanguagePage } from "./Language";
 import { NotesPage } from "./Notes";
+import { LogOutIcon } from "../components/theme/icons";
+import { AppShell, Card, NavPill, StatusDot } from "../components/theme/ui";
 
 interface Props {
   user: RippleUser;
@@ -22,11 +24,10 @@ function statusLabel(status: string, connected: boolean): string {
   return "Disconnected";
 }
 
-function statusColor(status: string, connected: boolean): string {
-  if (connected) return "bg-emerald-500";
-  if (status === "reconnecting" || status === "connecting")
-    return "bg-amber-400";
-  return "bg-zinc-500";
+function statusTone(status: string, connected: boolean): "ok" | "warn" | "neutral" {
+  if (connected) return "ok";
+  if (status === "reconnecting" || status === "connecting") return "warn";
+  return "neutral";
 }
 
 function summarizeCommandResult(data: unknown): string {
@@ -64,15 +65,15 @@ function DebugRow({
 }) {
   const color =
     tone === "ok"
-      ? "text-emerald-300"
+      ? "text-emerald-600"
       : tone === "warn"
-        ? "text-amber-300"
+        ? "text-amber-600"
         : tone === "err"
-          ? "text-red-300"
-          : "text-zinc-200";
+          ? "text-red-600"
+          : "text-onboard-ink";
   return (
     <div className="grid grid-cols-[7rem_1fr] gap-3">
-      <span className="text-zinc-500">{label}</span>
+      <span className="text-onboard-subtle">{label}</span>
       <span
         className={`${color} ${multiline ? "max-h-48 overflow-y-auto whitespace-pre-wrap break-words" : "truncate"}`}
       >
@@ -80,6 +81,14 @@ function DebugRow({
       </span>
     </div>
   );
+}
+
+function isDebugUi(): boolean {
+  try {
+    return window.localStorage.getItem("ripple:debug") === "1";
+  } catch {
+    return false;
+  }
 }
 
 export function HomePage({ user, sessionId }: Props) {
@@ -141,6 +150,8 @@ export function HomePage({ user, sessionId }: Props) {
     });
   }, []);
 
+  const debugUi = isDebugUi();
+
   async function runTextCommand() {
     const cmd = textCommand.trim();
     if (!cmd || commandBusy) return;
@@ -165,23 +176,23 @@ export function HomePage({ user, sessionId }: Props) {
 
   if (view === "history") {
     return (
-      <div className="min-h-full bg-zinc-950 text-zinc-100">
-        <header className="border-b border-zinc-800 px-8 py-4">
-          <p className="text-sm text-zinc-400">Signed in as {user.email}</p>
-        </header>
+      <AppShell>
+        <div className="border-b border-onboard-border-soft px-8 py-4">
+          <p className="text-sm text-onboard-muted">Signed in as {user.email}</p>
+        </div>
         <HistoryPage onBack={() => setView("dashboard")} />
-      </div>
+      </AppShell>
     );
   }
 
   if (view === "telemetry") {
     return (
-      <div className="min-h-full bg-zinc-950 text-zinc-100">
-        <header className="border-b border-zinc-800 px-8 py-4">
-          <p className="text-sm text-zinc-400">Signed in as {user.email}</p>
-        </header>
+      <AppShell>
+        <div className="border-b border-onboard-border-soft px-8 py-4">
+          <p className="text-sm text-onboard-muted">Signed in as {user.email}</p>
+        </div>
         <TelemetryPage onBack={() => setView("dashboard")} />
-      </div>
+      </AppShell>
     );
   }
 
@@ -212,119 +223,80 @@ export function HomePage({ user, sessionId }: Props) {
   }
 
   return (
-    <div className="min-h-full bg-zinc-950 text-zinc-100">
-      <header className="flex items-start justify-between border-b border-zinc-800 px-8 py-6">
+    <AppShell>
+      <header className="flex flex-wrap items-start justify-between gap-4 border-b border-onboard-border-soft px-8 py-6">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Ripple</h1>
-          <p className="mt-1 text-sm text-zinc-400">Signed in as {user.email}</p>
+          <h1 className="text-2xl font-bold tracking-tight text-onboard-ink">
+            Dashboard
+          </h1>
+          <p className="mt-1 text-sm text-onboard-muted">
+            Voice typing for Windows · {user.email}
+          </p>
         </div>
-        <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={() => setView("notes")}
-            className="rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-300 transition hover:border-violet-500 hover:text-white"
-          >
-            Notes
-          </button>
-          <button
-            type="button"
-            onClick={() => setView("language")}
-            className="rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-300 transition hover:border-violet-500 hover:text-white"
-          >
-            Language
-          </button>
-          <button
-            type="button"
-            onClick={() => setView("styles")}
-            className="rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-300 transition hover:border-violet-500 hover:text-white"
-          >
-            Styles
-          </button>
-          <button
-            type="button"
-            onClick={() => setView("snippets")}
-            className="rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-300 transition hover:border-violet-500 hover:text-white"
-          >
-            Snippets
-          </button>
-          <button
-            type="button"
-            onClick={() => setView("dictionary")}
-            className="rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-300 transition hover:border-violet-500 hover:text-white"
-          >
-            Dictionary
-          </button>
-          <button
-            type="button"
-            onClick={() => setView("telemetry")}
-            className="rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-300 transition hover:border-violet-500 hover:text-white"
-          >
-            Telemetry
-          </button>
-          <button
-            type="button"
-            onClick={() => setView("history")}
-            className="rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-300 transition hover:border-violet-500 hover:text-white"
-          >
-            History
-          </button>
-          <button
-            type="button"
-            onClick={() => logout()}
-            className="rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-300 transition hover:border-zinc-500 hover:bg-zinc-900"
-          >
+        <div className="flex flex-wrap gap-2">
+          <NavPill onClick={() => setView("notes")}>Notes</NavPill>
+          <NavPill onClick={() => setView("language")}>Language</NavPill>
+          <NavPill onClick={() => setView("styles")}>Styles</NavPill>
+          <NavPill onClick={() => setView("snippets")}>Snippets</NavPill>
+          <NavPill onClick={() => setView("dictionary")}>Dictionary</NavPill>
+          {debugUi ? (
+            <NavPill onClick={() => setView("telemetry")}>Telemetry</NavPill>
+          ) : null}
+          <NavPill onClick={() => setView("history")}>History</NavPill>
+          <NavPill onClick={() => void logout()} className="gap-1.5">
+            <LogOutIcon width={14} height={14} />
             Log out
-          </button>
+          </NavPill>
         </div>
       </header>
 
-      <main className="mx-auto grid max-w-4xl gap-6 p-8 md:grid-cols-2">
-        <section className="rounded-2xl border border-zinc-800 bg-zinc-900/50 p-6">
+      <div className="mx-auto grid max-w-4xl gap-6 p-8 md:grid-cols-2">
+        <Card className="bg-onboard-card-soft p-6">
           <div className="flex items-center gap-2">
-            <span
-              className={`h-2.5 w-2.5 rounded-full ${statusColor(status, connected)}`}
-            />
-            <h2 className="text-lg font-medium">Demo readiness</h2>
+            <StatusDot tone={statusTone(status, connected)} />
+            <h2 className="text-lg font-medium text-onboard-ink">
+              Demo readiness
+            </h2>
           </div>
-          <p className="mt-2 text-sm text-zinc-400">
+          <p className="mt-2 text-sm text-onboard-muted">
             Socket:{" "}
-            <span className="text-zinc-200">
+            <span className="text-onboard-ink">
               {statusLabel(status, connected)}
             </span>
             {preflight ? (
               <span
-                className={`ml-2 ${preflight.ready ? "text-emerald-400" : "text-amber-400"}`}
+                className={`ml-2 ${preflight.ready ? "text-emerald-600" : "text-amber-600"}`}
               >
                 · {preflight.ready ? "Ready for demo" : "Fix items below"}
               </span>
             ) : null}
           </p>
           {preflight?.checks.length ? (
-            <ul className="mt-3 space-y-1 text-xs text-zinc-400">
+            <ul className="mt-3 space-y-1 text-xs text-onboard-muted">
               {preflight.checks.map((c) => (
-                <li key={c.id} className={c.ok ? "text-zinc-400" : "text-amber-400"}>
+                <li key={c.id} className={c.ok ? "text-onboard-muted" : "text-amber-600"}>
                   {c.ok ? "✓" : "○"} {c.detail}
                 </li>
               ))}
             </ul>
           ) : null}
-          <ul className="mt-4 space-y-2 text-sm text-zinc-300">
+          <ul className="mt-4 space-y-2 text-sm text-onboard-ink">
             <li>
-              <kbd className="rounded border border-zinc-600 bg-zinc-800 px-1.5 py-0.5 text-xs">
-                Ctrl
+              <kbd className="rounded border border-onboard-border bg-onboard-surface px-1.5 py-0.5 text-xs">
+                Shift
               </kbd>{" "}
               +{" "}
-              <kbd className="rounded border border-zinc-600 bg-zinc-800 px-1.5 py-0.5 text-xs">
+              <kbd className="rounded border border-onboard-border bg-onboard-surface px-1.5 py-0.5 text-xs">
                 Space
               </kbd>{" "}
-              — voice command
+              — dictate
             </li>
             <li>Or type a command below (backup if mic fails)</li>
           </ul>
-        </section>
+        </Card>
 
-        <section className="rounded-2xl border border-violet-500/30 bg-violet-950/20 p-6">
-          <h3 className="text-sm font-medium uppercase tracking-wide text-violet-300">
+        <Card className="border-onboard-accent/30 bg-onboard-accent/5 p-6">
+          <h3 className="text-sm font-medium uppercase tracking-wide text-onboard-accent-hover">
             Type command
           </h3>
           <div className="mt-3 flex gap-2">
@@ -337,14 +309,14 @@ export function HomePage({ user, sessionId }: Props) {
                 if (e.key === "Enter") void runTextCommand();
               }}
               placeholder='e.g. "Download kholo" or "Open my resume"'
-              className="min-w-0 flex-1 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:border-violet-500 focus:outline-none"
+              className="min-w-0 flex-1 rounded-lg border border-onboard-border bg-onboard-surface px-3 py-2 text-sm text-onboard-ink placeholder:text-onboard-subtle outline-none focus:border-onboard-accent"
             />
             <button
               type="button"
               data-testid="ripple-command-run"
               disabled={commandBusy || !textCommand.trim()}
               onClick={() => void runTextCommand()}
-              className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-violet-500 disabled:opacity-50"
+              className="rounded-lg bg-onboard-accent px-4 py-2 text-sm font-medium text-white transition hover:bg-onboard-accent-hover disabled:opacity-50"
             >
               {commandBusy ? "…" : "Run"}
             </button>
@@ -352,47 +324,47 @@ export function HomePage({ user, sessionId }: Props) {
           {commandResult ? (
             <p
               data-testid="ripple-command-result"
-              className={`mt-3 text-xs ${commandResult.startsWith("Executed") ? "text-emerald-400" : "text-amber-300"}`}
+              className={`mt-3 text-xs ${commandResult.startsWith("Executed") ? "text-emerald-600" : "text-amber-600"}`}
             >
               {commandResult}
             </p>
           ) : null}
-        </section>
+        </Card>
 
-        <section className="rounded-2xl border border-violet-500/20 bg-violet-950/20 p-6 md:col-span-2">
-          <h3 className="text-sm font-medium uppercase tracking-wide text-violet-300">
+        <Card className="border-onboard-accent/20 bg-onboard-accent/5 p-6 md:col-span-2">
+          <h3 className="text-sm font-medium uppercase tracking-wide text-onboard-accent-hover">
             Last voice command
           </h3>
           {lastTranscript ? (
-            <p className="mt-3 text-sm leading-relaxed text-zinc-200">
+            <p className="mt-3 text-sm leading-relaxed text-onboard-ink">
               “{lastTranscript}”
             </p>
           ) : (
-            <p className="mt-3 text-sm text-zinc-500">No transcript yet</p>
+            <p className="mt-3 text-sm text-onboard-subtle">No transcript yet</p>
           )}
           {lastGeneratedText ? (
-            <p className="mt-3 max-h-32 overflow-y-auto rounded-lg bg-zinc-900/80 p-3 text-xs leading-relaxed text-zinc-300">
+            <p className="mt-3 max-h-32 overflow-y-auto rounded-lg bg-onboard-surface p-3 text-xs leading-relaxed text-onboard-ink">
               {lastGeneratedText}
             </p>
           ) : lastCommandPreview ? (
-            <p className="mt-3 text-xs text-emerald-400/90">
+            <p className="mt-3 text-xs text-emerald-600">
               {lastCommandPreview}
             </p>
           ) : null}
           {lastError ? (
-            <p className="mt-3 text-xs text-red-400">{lastError}</p>
+            <p className="mt-3 text-xs text-red-600">{lastError}</p>
           ) : null}
-        </section>
+        </Card>
 
-        <section
+        <Card
           data-testid="ripple-debug-console"
-          className="md:col-span-2 rounded-2xl border border-cyan-500/30 bg-cyan-950/15 p-6"
+          className="border-sky-500/30 bg-sky-500/5 p-6 md:col-span-2"
         >
           <div className="flex items-baseline justify-between gap-3">
-            <h3 className="text-sm font-medium uppercase tracking-wide text-cyan-300">
+            <h3 className="text-sm font-medium uppercase tracking-wide text-sky-700">
               Ripple Debug Console
             </h3>
-            <p className="text-[11px] text-zinc-500">
+            <p className="text-[11px] text-onboard-subtle">
               transcript · intent · tool · response
             </p>
           </div>
@@ -440,26 +412,26 @@ export function HomePage({ user, sessionId }: Props) {
               ) : null}
             </div>
           ) : (
-            <p className="mt-4 text-sm text-zinc-500">
+            <p className="mt-4 text-sm text-onboard-subtle">
               Run a voice or typed command — debug output appears here.
             </p>
           )}
 
           {debugLog.length > 1 ? (
-            <div className="mt-5 border-t border-cyan-900/50 pt-4">
-              <p className="mb-2 text-[11px] uppercase tracking-wide text-zinc-500">
+            <div className="mt-5 border-t border-onboard-border-soft pt-4">
+              <p className="mb-2 text-[11px] uppercase tracking-wide text-onboard-subtle">
                 Recent
               </p>
-              <ul className="max-h-40 space-y-1 overflow-y-auto text-[11px] text-zinc-400">
+              <ul className="max-h-40 space-y-1 overflow-y-auto text-[11px] text-onboard-muted">
                 {debugLog.slice(1).map((d, i) => (
                   <li key={`${d.at}-${i}`} className="truncate">
                     <span
                       className={
                         d.status === "SUCCESS"
-                          ? "text-emerald-400"
+                          ? "text-emerald-600"
                           : d.status === "CLARIFY"
-                            ? "text-amber-300"
-                            : "text-red-400"
+                            ? "text-amber-600"
+                            : "text-red-600"
                       }
                     >
                       {d.status}
@@ -470,26 +442,26 @@ export function HomePage({ user, sessionId }: Props) {
               </ul>
             </div>
           ) : null}
-        </section>
+        </Card>
 
         {lastExecution?.length ? (
-          <section className="md:col-span-2 rounded-2xl border border-emerald-500/20 bg-emerald-950/10 p-6">
-            <h3 className="text-sm font-medium text-emerald-300">
+          <Card className="border-emerald-500/20 bg-emerald-500/5 p-6 md:col-span-2">
+            <h3 className="text-sm font-medium text-emerald-700">
               Last actions executed
             </h3>
             <ul className="mt-3 space-y-2">
               {lastExecution.map((r) => (
                 <li
                   key={r.index}
-                  className="flex items-start gap-2 text-sm text-zinc-300"
+                  className="flex items-start gap-2 text-sm text-onboard-ink"
                 >
                   <span
                     className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${
-                      r.status === "executed" ? "bg-emerald-400" : "bg-red-400"
+                      r.status === "executed" ? "bg-emerald-500" : "bg-red-500"
                     }`}
                   />
                   <span>
-                    <span className="font-mono text-xs text-violet-300">
+                    <span className="font-mono text-xs text-onboard-accent-hover">
                       {r.type}
                     </span>
                     {" — "}
@@ -500,9 +472,9 @@ export function HomePage({ user, sessionId }: Props) {
                 </li>
               ))}
             </ul>
-          </section>
+          </Card>
         ) : null}
-      </main>
-    </div>
+      </div>
+    </AppShell>
   );
 }

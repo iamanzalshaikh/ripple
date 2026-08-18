@@ -11,6 +11,11 @@
  * P10.2 — Meeting Notetaker mode (red pulse + elapsed + stop).
  */
 
+import {
+  CLEANUP_TAG_LABEL,
+  type CleanupTag,
+} from "../lib/cleanupTags";
+
 export type FlowBarMode = "command" | "dictation" | "transform" | "meeting";
 export type FlowBarPhase = "idle" | "listening" | "processing" | "result" | "error";
 
@@ -30,6 +35,8 @@ type Props = {
   detectedLanguageBadge: string | null;
   /** P10.2 — live transcript snippet while meeting. */
   meetingSnippet?: string | null;
+  /** Display-only Wispr chips. Does not change cleanup. */
+  cleanupTags?: CleanupTag[];
 };
 
 const MODE_ACCENT: Record<FlowBarMode, { ring: string; glow: string; fg: string }> = {
@@ -232,6 +239,7 @@ export function FlowBar({
   sessionBadge,
   detectedLanguageBadge,
   meetingSnippet,
+  cleanupTags = [],
 }: Props) {
   const accent = MODE_ACCENT[mode];
   const badgeCode = languageCode === "auto" ? "AUTO" : languageCode.toUpperCase();
@@ -244,7 +252,7 @@ export function FlowBar({
       title={hotkeyHint}
     >
       <div
-        className={`flowbar flex items-center gap-2 rounded-[14px] border bg-zinc-950/95 px-3 py-2 backdrop-blur-xl ${accent.ring} ${accent.glow}`}
+        className={`flowbar flex max-w-full items-center gap-2.5 rounded-full border bg-zinc-950/80 px-3.5 py-2 backdrop-blur-2xl ${accent.ring} ${accent.glow}`}
         style={{ fontFamily: "var(--font-hud)" }}
       >
         <span
@@ -253,15 +261,26 @@ export function FlowBar({
           <IndicatorCore mode={mode} phase={phase} />
         </span>
 
-        <div className="flex min-w-0 flex-col">
+        <div className="flex min-w-0 flex-col gap-0.5">
           <span
-            className={`max-w-[140px] truncate text-[10.5px] font-medium tracking-[0.08em] uppercase ${
-              phase === "error" ? "text-amber-300" : isMeeting ? "text-rose-200" : "text-zinc-200"
+            className={`max-w-[168px] truncate text-[11px] font-medium tracking-[0.04em] ${
+              phase === "error" ? "text-amber-300" : isMeeting ? "text-rose-200" : "text-zinc-100"
             }`}
           >
             {statusText}
           </span>
-          {isMeeting && meetingSnippet ? (
+          {cleanupTags.length > 0 ? (
+            <span className="flex max-w-[220px] flex-wrap gap-1">
+              {cleanupTags.map((tag) => (
+                <span
+                  key={tag}
+                  className="flowbar-pop inline-flex items-center rounded-full border border-emerald-400/25 bg-emerald-500/10 px-1.5 py-px text-[8px] font-medium tracking-wide text-emerald-200/90"
+                >
+                  {CLEANUP_TAG_LABEL[tag]}
+                </span>
+              ))}
+            </span>
+          ) : isMeeting && meetingSnippet ? (
             <span className="max-w-[160px] truncate text-[9px] normal-case tracking-normal text-zinc-500">
               {meetingSnippet}
             </span>

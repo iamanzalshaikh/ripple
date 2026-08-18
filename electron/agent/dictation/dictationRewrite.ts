@@ -1,12 +1,13 @@
 import { applyCorrectionsToUtterance } from "../../storage/voiceCorrections.js";
 import { resolveSnippetTrigger } from "../../storage/snippets.js";
 import { getStyleProfileForProcess } from "../../storage/styleProfiles.js";
+import type { StyleTone } from "../../storage/styleTone.js";
 import {
   aiRewriteDictation,
   analyzeDictationCorrection,
   generateDictationCorrection,
 } from "./aiRewriteDictation.js";
-import { toCasualTone, toProfessionalTone } from "./correctionEngine.js";
+import { applyStyleTone } from "./correctionEngine.js";
 import { detectCorrectionSignal } from "./correctionSignalDetector.js";
 import {
   altCollapseIsPlausible,
@@ -16,7 +17,9 @@ import { detectSoftSelfCorrection } from "./softSelfCorrection.js";
 import {
   detectSpokenList,
   formatSpokenList,
+  formatTranscript,
   localCleanup,
+  stripFillersAndStutters,
 } from "./localCleanup.js";
 import type {
   CorrectionDecision,
@@ -24,6 +27,11 @@ import type {
   ProductionDictationRewriteResult,
 } from "./dictationCorrectionTypes.js";
 import { applyCorrectionDecision } from "./safeRewriteEngine.js";
+import {
+  PIPELINE_LAYERS_HIGH,
+  cleanupLevelForLayers,
+  type PipelineLayers,
+} from "./pipelineLayers.js";
 
 export type DictationRewriteInput = {
   bufferText: string;
@@ -33,6 +41,11 @@ export type DictationRewriteInput = {
   applyMemoryCorrections?: boolean;
   /** Foreground process name (P7.3 — per-app Styles tone). */
   processName?: string;
+  /**
+   * Override pipeline layers (tests). When omitted, user prefs apply
+   * (default High = current always-on cleanup + format + context).
+   */
+  layers?: PipelineLayers;
 };
 
 export type DictationRewriteResult = ProductionDictationRewriteResult;
@@ -170,6 +183,8 @@ export async function rewriteDictationBuffer(
   input: DictationRewriteInput,
 ): Promise<DictationRewriteResult> {
   const started = Date.now();
+  const layers = input.layers ?? PIPELINE_LAYERS_HIGH;
+  const level = cleanupLevelForLayers(layers);
   const committedBuffer = input.committedBuffer?.trim() ?? "";
   const rawUtterance = input.utterance?.trim()
     ? `${input.bufferText.trim()} ${input.utterance.trim()}`.trim()
@@ -228,7 +243,7 @@ export async function rewriteDictationBuffer(
   let generation = null;
   let modelUsed = "local-signal-v1";
 
-  if (signal.requiresLLM) {
+  if (layers.cleanup && signal.requiresLLM) {
     layer2aCalled = true;
     const analyzed = await analyzeDictationCorrection({
       committedBuffer,
@@ -240,6 +255,7 @@ export async function rewriteDictationBuffer(
   }
 
   if (
+    layers.cleanup &&
     decision &&
     (decision.type === "tone_change" || decision.type === "rewrite") &&
     decision.confidence >= 0.8 &&
@@ -266,29 +282,27 @@ export async function rewriteDictationBuffer(
         applied: false,
         text: currentUtterance,
         dropped: [] as string[],
-        reason: signal.requiresLLM ? "llm_unavailable" : "no_signal",
+        reason: signal.requiresLLM
+          ? layers.cleanup
+            ? "llm_unavailable"
+            : "cleanup_layer_off"
+          : "no_signal",
       };
 
   let finalText = applied.text;
   let cleanupApplied = false;
   let cleanupReason = applied.reason;
 
-  // Always-on Wispr-style cleanup: whenever the structured pipeline left the
-  // text unchanged (no signal, ambiguous "no", classifier said not-correction,
-  // or LLM unavailable), run one conservative cleanup pass over the utterance.
-  // Directive signals (tone/delete/scratch) are excluded — they either applied
-  // structurally or must stay literal. Fully fail-open via cleanupWithinBounds.
+  // Layered Wispr cleanup: skip AI/local passes the user turned off.
+  // High (cleanup+format+context) is the historical always-on path.
   if (!applied.applied && !DIRECTIVE_SIGNALS.has(signal.signal)) {
-    // Explicit spoken lists ("first… second… third…") get deterministic local
-    // formatting instead of AI cleanup — an LLM has no reason to know you
-    // want a numbered list rather than reflowed prose, so this beats hoping.
-    const spokenList = detectSpokenList(currentUtterance);
+    const spokenList = layers.format ? detectSpokenList(currentUtterance) : null;
     if (spokenList) {
       finalText = formatSpokenList(spokenList);
       cleanupApplied = true;
       cleanupReason = "list_format";
       modelUsed = "local-list-format";
-    } else {
+    } else if (layers.cleanup && layers.format && layers.context) {
       const cleaned = await aiRewriteDictation(currentUtterance, {
         surface: "dictation",
         previousText: committedBuffer || undefined,
@@ -302,9 +316,6 @@ export async function rewriteDictationBuffer(
           allowAlternativeCollapse: alt.detected,
           allowSoftRevision: soft.detected,
         });
-      // Soft production guard: when competitors were detected, reject only
-      // clearly still-jammed AI output (both greetings/times left). Not strict —
-      // does not force "last wins"; name/greeting lead already in bounds.
       const altOk =
         !alt.detected ||
         altCollapseIsPlausible(currentUtterance, cleaned ?? "", alt.kind);
@@ -327,10 +338,6 @@ export async function rewriteDictationBuffer(
           );
         }
       } else {
-        // aiRewriteDictation fails open to null on ANY network/auth/timeout
-        // failure — previously that meant zero cleanup at all (raw transcript,
-        // every "um"/stutter, straight to the field) whenever the backend
-        // wasn't reachable. Local cleanup is a real baseline either way.
         const local = localCleanup(currentUtterance);
         if (local && local !== currentUtterance) {
           finalText = local;
@@ -338,6 +345,30 @@ export async function rewriteDictationBuffer(
           cleanupReason = "local_cleanup";
           modelUsed = "local-cleanup-v1";
         }
+      }
+    } else if (layers.cleanup && layers.format) {
+      const local = localCleanup(currentUtterance);
+      if (local && local !== currentUtterance) {
+        finalText = local;
+        cleanupApplied = true;
+        cleanupReason = "local_cleanup";
+        modelUsed = "local-cleanup-v1";
+      }
+    } else if (layers.cleanup) {
+      const stripped = stripFillersAndStutters(currentUtterance);
+      if (stripped && stripped !== currentUtterance) {
+        finalText = stripped;
+        cleanupApplied = true;
+        cleanupReason = "filler_only";
+        modelUsed = "local-cleanup-light";
+      }
+    } else if (layers.format) {
+      const formatted = formatTranscript(currentUtterance);
+      if (formatted && formatted !== currentUtterance) {
+        finalText = formatted;
+        cleanupApplied = true;
+        cleanupReason = "format_only";
+        modelUsed = "local-format-v1";
       }
     }
   }
@@ -356,15 +387,12 @@ export async function rewriteDictationBuffer(
   // already give an explicit spoken tone instruction this utterance (that
   // already ran via the directive signal above and must win) — this is the
   // passive "in Slack, always keep it casual" behavior, not a one-off request.
-  let styleApplied: "professional" | "casual" | null = null;
-  if (signal.signal !== "tone_directive" && finalText.trim()) {
+  let styleApplied: StyleTone | null = null;
+  if (layers.context && signal.signal !== "tone_directive" && finalText.trim()) {
     const tone = getStyleProfileForProcess(input.processName);
-    if (tone === "professional") {
-      finalText = toProfessionalTone(finalText);
-      styleApplied = "professional";
-    } else if (tone === "casual") {
-      finalText = toCasualTone(finalText);
-      styleApplied = "casual";
+    if (tone !== "neutral") {
+      finalText = applyStyleTone(finalText, tone);
+      styleApplied = tone;
     }
   }
 
@@ -383,6 +411,9 @@ export async function rewriteDictationBuffer(
     modelUsed,
     reason: styleApplied ? `${cleanupReason}+style_${styleApplied}` : cleanupReason,
   };
+  console.info(
+    `[ripple-pipeline] transcribe=on cleanup=${layers.cleanup ? "on" : "off"} format=${layers.format ? "on" : "off"} context=${layers.context ? "on" : "off"} level=${level}`,
+  );
   console.info(`[ripple-dictation-decision] ${JSON.stringify(log)}`);
 
   return {

@@ -35,8 +35,14 @@ function buildTrayIcon(recording: boolean): Electron.NativeImage {
 function rebuildMenu(onQuit: () => void): void {
   if (!tray) return;
   const menu = Menu.buildFromTemplate([
-    { label: "Open Ripple", click: () => showMainWindow() },
-    { label: "Voice (Ctrl+Space)", click: () => void handleShortcutPress() },
+    { label: "Open Ripple", click: () => {
+      console.info("[ripple-desktop] tray: Open Ripple");
+      showMainWindow({ userInitiated: true });
+    } },
+    {
+      label: "Dictate (Shift+Space)",
+      click: () => void handleShortcutPress("dictation"),
+    },
     { type: "separator" },
     meetingRecording
       ? {
@@ -63,7 +69,7 @@ export function createTray(onQuit: () => void): Tray {
   tray = new Tray(buildTrayIcon(false));
   tray.setToolTip("Ripple");
   rebuildMenu(onQuit);
-  tray.on("double-click", () => showMainWindow());
+  tray.on("double-click", () => showMainWindow({ userInitiated: true }));
   return tray;
 }
 

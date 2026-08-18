@@ -11,6 +11,24 @@
      the app's UI sans everywhere else. Cascadia Code ships with Windows
      Terminal/VS Code so it's very likely already installed. */
   --font-hud: "Cascadia Code", "JetBrains Mono", "SF Mono", ui-monospace, "Consolas", monospace;
+
+  /* Onboarding wizard — warm/light theme, distinct from the dark app shell.
+     Sampled from the setup-flow mocks in .cursor/. */
+  --color-onboard-bg: #faf3ec;
+  --color-onboard-card: #f6e9db;
+  --color-onboard-card-soft: #f9efe4;
+  --color-onboard-surface: #ffffff;
+  --color-onboard-border: #e7d8c4;
+  --color-onboard-border-soft: #eee1d0;
+  --color-onboard-ink: #1b2436;
+  --color-onboard-muted: #5b6472;
+  --color-onboard-subtle: #8b8375;
+  --color-onboard-accent: #d97a4a;
+  --color-onboard-accent-hover: #c76a3c;
+  --color-onboard-accent-soft: #f6ddc8;
+  --color-onboard-success: #3ea173;
+  --color-onboard-success-soft: #d9efe3;
+  --font-onboard-serif: Georgia, "Iowan Old Style", "Palatino Linotype", "Book Antiqua", serif;
 }
 
 @layer base {
@@ -24,8 +42,8 @@
     @apply font-sans antialiased;
   }
 
-  body.app-shell {
-    @apply bg-zinc-950 text-zinc-100;
+  body.onboard-shell {
+    @apply bg-onboard-bg text-onboard-ink;
   }
 
   html.overlay-html,

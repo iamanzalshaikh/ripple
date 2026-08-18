@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { useHistoryStore } from "../store/historyStore";
+import { BackLink, SecondaryButton } from "../components/theme/ui";
 
 const INTENTS = [
   "",
@@ -41,24 +42,19 @@ export function HistoryPage({ onBack }: Props) {
     <div className="mx-auto max-w-4xl p-8">
       <div className="mb-6 flex items-center justify-between">
         <div>
-          <button
-            type="button"
-            onClick={onBack}
-            className="text-sm text-violet-400 hover:text-violet-300"
-          >
-            ← Dashboard
-          </button>
-          <h2 className="mt-2 text-xl font-semibold">Command history</h2>
-          <p className="text-sm text-zinc-500">{total} commands total</p>
+          <BackLink onClick={onBack}>Dashboard</BackLink>
+          <h2 className="mt-2 text-xl font-semibold text-onboard-ink">
+            Dictation history
+          </h2>
+          <p className="text-sm text-onboard-subtle">{total} entries</p>
         </div>
-        <button
-          type="button"
+        <SecondaryButton
           onClick={() => void fetch(page)}
           disabled={loading}
-          className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-900 disabled:opacity-50"
+          className="px-3 py-1.5"
         >
           Refresh
-        </button>
+        </SecondaryButton>
       </div>
 
       <div className="mb-4 flex flex-wrap gap-2">
@@ -69,8 +65,8 @@ export function HistoryPage({ onBack }: Props) {
             onClick={() => applyFilter(intent)}
             className={`rounded-full px-3 py-1 text-xs font-medium transition ${
               intentFilter === intent
-                ? "bg-violet-600 text-white"
-                : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"
+                ? "bg-onboard-accent text-white"
+                : "bg-onboard-surface text-onboard-muted hover:bg-onboard-card-soft"
             }`}
           >
             {intent || "All"}
@@ -79,33 +75,33 @@ export function HistoryPage({ onBack }: Props) {
       </div>
 
       {error ? (
-        <p className="rounded-lg border border-red-500/30 bg-red-950/30 p-4 text-sm text-red-400">
+        <p className="rounded-lg border border-red-500/30 bg-red-500/5 p-4 text-sm text-red-600">
           {error}
         </p>
       ) : null}
 
       {loading && items.length === 0 ? (
-        <p className="text-sm text-zinc-500">Loading…</p>
+        <p className="text-sm text-onboard-muted">Loading…</p>
       ) : null}
 
       <ul className="space-y-3">
         {items.map((item) => (
           <li
             key={item.id}
-            className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4"
+            className="rounded-2xl border border-onboard-border bg-onboard-card p-4"
           >
             <div className="flex items-start justify-between gap-3">
-              <p className="text-sm font-medium text-zinc-100">{item.command}</p>
-              <span className="shrink-0 rounded-full bg-zinc-800 px-2 py-0.5 font-mono text-[10px] uppercase text-violet-300">
+              <p className="text-sm font-medium text-onboard-ink">{item.command}</p>
+              <span className="shrink-0 rounded-full bg-onboard-accent/10 px-2 py-0.5 font-mono text-[10px] uppercase text-onboard-accent-hover">
                 {item.intent}
               </span>
             </div>
             {item.result ? (
-              <p className="mt-2 line-clamp-3 text-xs leading-relaxed text-zinc-400">
+              <p className="mt-2 line-clamp-3 text-xs leading-relaxed text-onboard-muted">
                 {item.result}
               </p>
             ) : null}
-            <p className="mt-2 text-[10px] text-zinc-600">
+            <p className="mt-2 text-[10px] text-onboard-subtle">
               {new Date(item.created_at).toLocaleString()}
               {item.action_source ? ` · ${item.action_source}` : ""}
             </p>
@@ -115,25 +111,23 @@ export function HistoryPage({ onBack }: Props) {
 
       {total > items.length ? (
         <div className="mt-6 flex justify-center gap-2">
-          <button
-            type="button"
+          <SecondaryButton
             disabled={page <= 1 || loading}
             onClick={() => void fetch(page - 1)}
-            className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm disabled:opacity-40"
+            className="px-3 py-1.5"
           >
             Previous
-          </button>
-          <span className="px-2 py-1.5 text-sm text-zinc-500">
+          </SecondaryButton>
+          <span className="px-2 py-1.5 text-sm text-onboard-muted">
             Page {page}
           </span>
-          <button
-            type="button"
+          <SecondaryButton
             disabled={page * limit >= total || loading}
             onClick={() => void fetch(page + 1)}
-            className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm disabled:opacity-40"
+            className="px-3 py-1.5"
           >
             Next
-          </button>
+          </SecondaryButton>
         </div>
       ) : null}
     </div>

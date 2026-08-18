@@ -1,6 +1,10 @@
 import { useEffect, useState } from "react";
 import { getRippleApi } from "../lib/rippleApi";
 import { LANGUAGES } from "../lib/languages";
+import { Card, PageHeader, PrimaryButton, TextInput, ToggleSwitch } from "../components/theme/ui";
+import { CheckIcon } from "../components/theme/icons";
+import { MicDeviceSettings } from "../components/MicDeviceSettings";
+import { CleanupPipelineSettings } from "../components/CleanupPipelineSettings";
 
 interface Props {
   onBack: () => void;
@@ -88,35 +92,25 @@ export function LanguagePage({ onBack }: Props) {
   const known = LANGUAGES.some((l) => l.code === current);
 
   return (
-    <div className="min-h-full bg-zinc-950 text-zinc-100">
-      <header className="flex items-center justify-between border-b border-zinc-800 px-8 py-6">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Language</h1>
-          <p className="mt-1 text-sm text-zinc-400">
-            The language Ripple expects when transcribing your dictation.
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={onBack}
-          className="rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-300 transition hover:border-zinc-500 hover:bg-zinc-900"
-        >
-          Back
-        </button>
-      </header>
+    <div className="min-h-full bg-onboard-bg">
+      <PageHeader
+        title="Language"
+        subtitle="The language Ripple expects when transcribing your dictation."
+        onBack={onBack}
+      />
 
       <main className="mx-auto max-w-2xl p-8">
-        <section className="rounded-2xl border border-zinc-800 bg-zinc-900/50 p-6">
-          <h3 className="text-sm font-medium uppercase tracking-wide text-zinc-400">
+        <Card>
+          <h3 className="text-sm font-medium uppercase tracking-wide text-onboard-subtle">
             Dictation language
           </h3>
-          <p className="mt-1 text-xs text-zinc-500">
+          <p className="mt-1 text-xs text-onboard-muted">
             Auto-detect works well for Hinglish and code-switching. Pick a
             specific language if Whisper keeps mis-detecting yours.
           </p>
-          {error ? <p className="mt-3 text-xs text-red-400">{error}</p> : null}
+          {error ? <p className="mt-3 text-xs text-red-600">{error}</p> : null}
           {loading ? (
-            <p className="mt-4 text-sm text-zinc-500">Loading…</p>
+            <p className="mt-4 text-sm text-onboard-muted">Loading…</p>
           ) : (
             <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
               {LANGUAGES.map((lang) => {
@@ -129,36 +123,40 @@ export function LanguagePage({ onBack }: Props) {
                     onClick={() => void selectLanguage(lang.code)}
                     className={`rounded-lg border px-3 py-2 text-left text-sm transition disabled:opacity-50 ${
                       active
-                        ? "border-violet-500 bg-violet-950/40 text-white"
-                        : "border-zinc-800 bg-zinc-950/60 text-zinc-300 hover:border-zinc-600"
+                        ? "border-onboard-accent bg-onboard-accent/10 text-onboard-ink"
+                        : "border-onboard-border bg-onboard-surface text-onboard-ink hover:border-onboard-accent/40"
                     }`}
                   >
                     {lang.label}
                     {active ? (
-                      <span className="ml-1.5 text-xs text-violet-400">✓</span>
+                      <CheckIcon
+                        width={12}
+                        height={12}
+                        className="ml-1.5 inline text-onboard-accent-hover"
+                      />
                     ) : null}
                   </button>
                 );
               })}
             </div>
           )}
-        </section>
+        </Card>
 
-        <section className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900/50 p-6">
-          <h3 className="text-sm font-medium uppercase tracking-wide text-zinc-400">
+        <Card className="mt-6">
+          <h3 className="text-sm font-medium uppercase tracking-wide text-onboard-subtle">
             Other language
           </h3>
-          <p className="mt-1 text-xs text-zinc-500">
+          <p className="mt-1 text-xs text-onboard-muted">
             Whisper supports many more languages than are listed above — enter
             an ISO 639-1 code (e.g. "it" for Italian, "nl" for Dutch).
             {!known && !loading ? (
-              <span className="mt-1 block text-violet-400">
+              <span className="mt-1 block text-onboard-accent-hover">
                 Currently set to a custom code: "{current}"
               </span>
             ) : null}
           </p>
           <div className="mt-3 flex gap-2">
-            <input
+            <TextInput
               type="text"
               value={customCode}
               onChange={(e) => setCustomCode(e.target.value)}
@@ -167,53 +165,49 @@ export function LanguagePage({ onBack }: Props) {
               }}
               placeholder="e.g. it"
               maxLength={8}
-              className="min-w-0 flex-1 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:border-violet-500 focus:outline-none"
+              className="flex-1"
             />
-            <button
-              type="button"
+            <PrimaryButton
               disabled={busy || !customCode.trim()}
               onClick={() => void selectLanguage(customCode.trim().toLowerCase())}
-              className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-violet-500 disabled:opacity-50"
             >
               Set
-            </button>
+            </PrimaryButton>
           </div>
-        </section>
+        </Card>
 
-        <section className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900/50 p-6">
+        <Card className="mt-6">
+          <CleanupPipelineSettings />
+        </Card>
+
+        <Card className="mt-6">
+          <MicDeviceSettings />
+        </Card>
+
+        <Card className="mt-6">
           <div className="flex items-center justify-between gap-4">
             <div>
-              <h3 className="text-sm font-medium uppercase tracking-wide text-zinc-400">
+              <h3 className="text-sm font-medium uppercase tracking-wide text-onboard-subtle">
                 Quiet / whisper mode
               </h3>
-              <p className="mt-1 text-xs text-zinc-500">
+              <p className="mt-1 text-xs text-onboard-muted">
                 Boosts soft or whispered speech before it's sent for
                 transcription, and turns off noise suppression, which
                 otherwise tends to treat quiet speech as background noise.
                 Leave off for normal-volume speaking.
               </p>
             </div>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={quietMode}
+            <ToggleSwitch
+              checked={quietMode}
+              onChange={() => void toggleQuietMode()}
+              label="Quiet / whisper mode"
               disabled={quietBusy || quietLoading}
-              onClick={() => void toggleQuietMode()}
-              className={`relative h-7 w-12 shrink-0 rounded-full transition disabled:opacity-50 ${
-                quietMode ? "bg-violet-600" : "bg-zinc-700"
-              }`}
-            >
-              <span
-                className={`absolute top-1 h-5 w-5 rounded-full bg-white transition-transform ${
-                  quietMode ? "translate-x-6" : "translate-x-1"
-                }`}
-              />
-            </button>
+            />
           </div>
           {quietError ? (
-            <p className="mt-3 text-xs text-red-400">{quietError}</p>
+            <p className="mt-3 text-xs text-red-600">{quietError}</p>
           ) : null}
-        </section>
+        </Card>
       </main>
     </div>
   );

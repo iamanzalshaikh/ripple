@@ -3,6 +3,7 @@ import { useVoiceCapture } from "../hooks/useVoiceCapture";
 import { getRippleApi } from "../lib/rippleApi";
 import { LANGUAGES } from "../lib/languages";
 import { FlowBar, type FlowBarMode, type FlowBarPhase } from "../components/FlowBar";
+import { inferCleanupTags, type CleanupTag } from "../lib/cleanupTags";
 
 type OverlayPhase =
   | "idle"
@@ -84,6 +85,7 @@ export function OverlayPage() {
   } | null>(null);
   const [detectedLanguage, setDetectedLanguage] = useState<string | null>(null);
   const [bootMessage, setBootMessage] = useState<string | null>(null);
+  const [cleanupTags, setCleanupTags] = useState<CleanupTag[]>([]);
 
   // P10.2 — Meeting Notetaker.
   const meetingActiveRef = useRef(false);
@@ -287,20 +289,33 @@ export function OverlayPage() {
             ? "Couldn't reach the target window — click the field and try again"
             : raw;
         setError(friendly);
+        setCleanupTags([]);
         setPhase("error");
         return;
       }
       if (res.transform) {
-        console.info(
-          "[ripple-overlay] transform applied:",
-          res.originalText,
-          "→",
-          res.finalText,
-        );
+        if (import.meta.env.DEV) {
+          console.info(
+            "[ripple-overlay] transform applied:",
+            res.originalText,
+            "→",
+            res.finalText,
+          );
+        }
+        setCleanupTags([]);
       } else {
-        console.info(
-          `[ripple-overlay] dictation final (${res.correctionKind}):`,
-          res.finalText,
+        if (import.meta.env.DEV) {
+          console.info(
+            `[ripple-overlay] dictation final (${res.correctionKind}):`,
+            res.finalText,
+          );
+        }
+        setCleanupTags(
+          inferCleanupTags({
+            original: text,
+            final: res.finalText,
+            correctionKind: res.correctionKind,
+          }),
         );
       }
       setPhase("result");
@@ -323,6 +338,7 @@ export function OverlayPage() {
     }
     await getRippleApi().streaming.clear().catch(() => undefined);
     await getRippleApi().setOverlayVoiceActive(false);
+    setCleanupTags([]);
     setPhase("idle");
     setError(null);
   }, [voice]);
@@ -404,7 +420,9 @@ export function OverlayPage() {
       const detectedLanguage = endData?.language;
       setDetectedLanguage(detectedLanguage ?? null);
 
-      console.info("[ripple-overlay] transcript raw:", text);
+      if (import.meta.env.DEV) {
+        console.info("[ripple-overlay] transcript raw:", text);
+      }
       // Transforms reuses the dictation IPC/pipeline end to end — the main
       // process routes to the rewrite path via the stashed selection, not
       // anything decided here.
@@ -434,6 +452,7 @@ export function OverlayPage() {
     recordingRef.current = true;
 
     await getRippleApi().setOverlayVoiceActive(true);
+    setCleanupTags([]);
     setPhase("listening");
 
     // P7.8 PAUSED — no live chunk upload / flush / progressive insert.
@@ -447,12 +466,19 @@ export function OverlayPage() {
         quietMode: undefined,
       }));
       const quietOn = quietRes.ok ? quietRes.quietMode === true : false;
+      const micRes = await getRippleApi().micDevice.get().catch(() => ({
+        ok: false as const,
+        deviceId: undefined,
+      }));
+      const micDeviceId =
+        micRes.ok && micRes.deviceId ? micRes.deviceId : undefined;
       console.info(
-        `[ripple-overlay] mic capture quietMode=${quietOn ? "ON" : "OFF"} streaming=OFF`,
+        `[ripple-overlay] mic capture quietMode=${quietOn ? "ON" : "OFF"} deviceId=${micDeviceId ?? "default"} streaming=OFF`,
       );
 
       await voice.start({
         quiet: quietOn,
+        deviceId: micDeviceId,
       });
     } catch (e: unknown) {
       recordingRef.current = false;
@@ -747,8 +773,10 @@ export function OverlayPage() {
       : isMeetingMode && meetingUi
         ? meetingLabel
         : error && phase === "error"
-          ? error.slice(0, 40)
-          : LABELS[phase];
+          ? error.slice(0, 120)
+          : phase === "processing" && voiceMode === "dictation"
+            ? "Cleaning up…"
+            : LABELS[phase];
   const sessionBadge =
     voiceMode === "dictation" && sessionInfo
       ? `${sessionInfo.utteranceCount} · ${Math.max(1, Math.ceil(sessionInfo.remainingMs / 60_000))}m left`
@@ -761,9 +789,7 @@ export function OverlayPage() {
     ? "Ctrl+Shift+M — stop · Esc cancels voice only"
     : voiceMode === "transform"
       ? "F9 — stop · Esc — cancel"
-      : voiceMode === "dictation"
-        ? "Shift+Space — stop · Esc — cancel"
-        : "Ctrl+Space — stop · Esc — cancel";
+      : "Shift+Space — stop · Esc — cancel";
   const flowBarMode: FlowBarMode = isMeetingMode ? "meeting" : voiceMode;
   const pickClarify = useCallback(async (path: string) => {
     await getRippleApi().pickDisambiguation?.(path);
@@ -1035,6 +1061,7 @@ export function OverlayPage() {
       sessionBadge={sessionBadge}
       detectedLanguageBadge={languageBadge}
       meetingSnippet={meetingUi?.lastTranscriptSnippet ?? null}
+      cleanupTags={phase === "result" ? cleanupTags : []}
     />
   );
 }

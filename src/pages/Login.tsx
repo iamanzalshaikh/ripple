@@ -1,6 +1,8 @@
 import { FormEvent, useEffect, useState } from "react";
 import { getRippleApi } from "../lib/rippleApi";
 import { useAuthStore } from "../store/authStore";
+import { LogoMarkIcon, MailIcon, PersonIcon } from "../components/theme/icons";
+import { Card, Field, PrimaryButton, TextInput } from "../components/theme/ui";
 
 type AuthMode = "login" | "signup";
 
@@ -95,140 +97,147 @@ export function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-full items-center justify-center bg-zinc-950 p-6">
-      <div className="w-full max-w-md rounded-2xl border border-zinc-800 bg-zinc-900/80 p-8 shadow-xl shadow-black/40">
-        <h1 className="text-2xl font-semibold tracking-tight text-white">
-          Ripple
-        </h1>
-        <p className="mt-1 text-sm text-zinc-400">
-          {mode === "login"
-            ? "Desktop AI assistant — sign in to continue"
-            : "Create your Ripple account"}
-        </p>
-
-        <div className="mt-4 rounded-lg border border-zinc-800 bg-zinc-950/80 px-3 py-2.5 text-xs">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex min-w-0 items-center gap-2">
-              <span
-                className={`h-2 w-2 shrink-0 rounded-full ${
-                  health.status === "checking"
-                    ? "animate-pulse bg-amber-400"
-                    : health.status === "ok"
-                      ? "bg-emerald-400"
-                      : "bg-red-400"
-                }`}
-              />
-              <span className="truncate text-zinc-400">
-                {health.status === "checking"
-                  ? "Checking API…"
-                  : health.message}
-              </span>
-            </div>
-            <button
-              type="button"
-              onClick={() => void runHealthCheck()}
-              className="shrink-0 text-violet-400 hover:text-violet-300"
-            >
-              Retry
-            </button>
-          </div>
-          {health.status !== "checking" ? (
-            <p className="mt-1 truncate font-mono text-[10px] text-zinc-600">
-              {health.url}
-              {health.status === "ok" && health.latencyMs != null
-                ? ` · ${health.latencyMs}ms`
-                : null}
-            </p>
-          ) : null}
-        </div>
-
-        <div
-          className="mt-6 grid grid-cols-2 gap-1 rounded-xl border border-zinc-800 bg-zinc-950 p-1"
-          role="tablist"
-        >
-          {(["login", "signup"] as const).map((tab) => (
-            <button
-              key={tab}
-              type="button"
-              role="tab"
-              aria-selected={mode === tab}
-              onClick={() => switchMode(tab)}
-              className={`rounded-lg px-3 py-2 text-sm font-medium transition ${
-                mode === tab
-                  ? "bg-zinc-800 text-white shadow-sm"
-                  : "text-zinc-400 hover:text-zinc-200"
-              }`}
-            >
-              {tab === "login" ? "Sign in" : "Sign up"}
-            </button>
-          ))}
-        </div>
-
-        <form onSubmit={onSubmit} className="mt-6 flex flex-col gap-4">
-          {mode === "signup" ? (
-            <label className="flex flex-col gap-1.5 text-sm text-zinc-400">
-              Name
-              <input
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Your name"
-                autoComplete="name"
-                className="rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2.5 text-white outline-none ring-violet-500/0 transition focus:border-violet-500 focus:ring-2 focus:ring-violet-500/30"
-              />
-            </label>
-          ) : null}
-          <label className="flex flex-col gap-1.5 text-sm text-zinc-400">
-            Email
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@example.com"
-              required
-              autoComplete="email"
-              autoFocus
-              className="rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2.5 text-white outline-none transition focus:border-violet-500 focus:ring-2 focus:ring-violet-500/30"
-            />
-          </label>
-          <label className="flex flex-col gap-1.5 text-sm text-zinc-400">
-            Password
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
-              required
-              autoComplete={
-                mode === "login" ? "current-password" : "new-password"
-              }
-              className="rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2.5 text-white outline-none transition focus:border-violet-500 focus:ring-2 focus:ring-violet-500/30"
-            />
-          </label>
-          {mode === "signup" ? (
-            <p className="-mt-1 text-xs text-zinc-500">
-              Password: 8+ chars, uppercase, lowercase, and a number.
-            </p>
-          ) : null}
-          {error ? (
-            <p className="text-sm text-red-400" role="alert">
-              {error}
-            </p>
-          ) : null}
-          <button
-            type="submit"
-            disabled={loading}
-            className="mt-1 rounded-lg bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-60"
+    <div className="flex min-h-full items-center justify-center bg-onboard-bg p-6">
+      <div className="w-full max-w-md">
+        <div className="mb-6 flex items-center justify-center gap-2 text-onboard-ink">
+          <LogoMarkIcon />
+          <span
+            className="text-2xl italic"
+            style={{ fontFamily: "var(--font-onboard-serif)" }}
           >
-            {loading
-              ? mode === "login"
-                ? "Signing in…"
-                : "Creating account…"
-              : mode === "login"
-                ? "Sign in"
-                : "Create account"}
-          </button>
-        </form>
+            Ripple
+          </span>
+        </div>
+
+        <Card>
+          <p className="text-center text-sm text-onboard-muted">
+            {mode === "login"
+              ? "Voice typing for Windows — sign in to continue"
+              : "Create your Ripple account"}
+          </p>
+
+          <div className="mt-4 rounded-xl border border-onboard-border bg-onboard-surface px-3 py-2.5 text-xs">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex min-w-0 items-center gap-2">
+                <span
+                  className={`h-2 w-2 shrink-0 rounded-full ${
+                    health.status === "checking"
+                      ? "animate-pulse bg-amber-500"
+                      : health.status === "ok"
+                        ? "bg-onboard-success"
+                        : "bg-red-500"
+                  }`}
+                />
+                <span className="truncate text-onboard-muted">
+                  {health.status === "checking"
+                    ? "Connecting…"
+                    : health.status === "ok"
+                      ? "Ready to sign in"
+                      : "Can't reach Ripple. Check your connection."}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => void runHealthCheck()}
+                className="shrink-0 text-onboard-accent-hover hover:underline"
+              >
+                Retry
+              </button>
+            </div>
+            {import.meta.env.DEV && health.status !== "checking" ? (
+              <p className="mt-1 truncate font-mono text-[10px] text-onboard-subtle">
+                {health.url}
+                {health.status === "ok" && health.latencyMs != null
+                  ? ` · ${health.latencyMs}ms`
+                  : null}
+              </p>
+            ) : null}
+          </div>
+
+          <div
+            className="mt-6 grid grid-cols-2 gap-1 rounded-xl border border-onboard-border bg-onboard-surface p-1"
+            role="tablist"
+          >
+            {(["login", "signup"] as const).map((tab) => (
+              <button
+                key={tab}
+                type="button"
+                role="tab"
+                aria-selected={mode === tab}
+                onClick={() => switchMode(tab)}
+                className={`rounded-lg px-3 py-2 text-sm font-medium transition ${
+                  mode === tab
+                    ? "bg-onboard-accent text-white shadow-sm"
+                    : "text-onboard-muted hover:text-onboard-ink"
+                }`}
+              >
+                {tab === "login" ? "Sign in" : "Sign up"}
+              </button>
+            ))}
+          </div>
+
+          <form onSubmit={onSubmit} className="mt-6 flex flex-col gap-4">
+            {mode === "signup" ? (
+              <Field label="Name">
+                <TextInput
+                  icon={<PersonIcon />}
+                  type="text"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Your name"
+                  autoComplete="name"
+                />
+              </Field>
+            ) : null}
+            <Field label="Email">
+              <TextInput
+                icon={<MailIcon />}
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@example.com"
+                required
+                autoComplete="email"
+                autoFocus
+              />
+            </Field>
+            <Field label="Password">
+              <TextInput
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                required
+                autoComplete={
+                  mode === "login" ? "current-password" : "new-password"
+                }
+              />
+            </Field>
+            {mode === "signup" ? (
+              <p className="-mt-1 text-xs text-onboard-subtle">
+                Password: 8+ chars, uppercase, lowercase, and a number.
+              </p>
+            ) : null}
+            {error ? (
+              <p className="text-sm text-red-500" role="alert">
+                {error}
+              </p>
+            ) : null}
+            <PrimaryButton
+              type="submit"
+              disabled={loading}
+              className="mt-1 w-full py-3"
+            >
+              {loading
+                ? mode === "login"
+                  ? "Signing in…"
+                  : "Creating account…"
+                : mode === "login"
+                  ? "Sign in"
+                  : "Create account"}
+            </PrimaryButton>
+          </form>
+        </Card>
       </div>
     </div>
   );

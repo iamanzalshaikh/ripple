@@ -1,4 +1,12 @@
 import { app, ipcMain } from "electron";
+// Crash visibility first — must be installed before any other module can throw.
+import {
+  crashBreadcrumb,
+  getCrashLogDir,
+  installMainCrashHandlers,
+  writeCrashLog,
+} from "../diagnostics/crashLog.js";
+installMainCrashHandlers();
 import { loadDesktopEnv, getSocketUrl } from "../config/env.js";
 import { logPhaseBBootLine } from "../agent/planner/phaseBConfig.js";
 import { logPlannerV2BootLine } from "../agent/planner/v2/plannerV2Config.js";
@@ -44,6 +52,7 @@ import {
   isInsertFailureHintActive,
 } from "../windows/overlay.js";
 import { initMain as initAudioLoopback } from "electron-audio-loopback";
+import { isJarvisEnabled } from "../config/featureFlags.js";
 
 loadDesktopEnv();
 logPhaseBBootLine();
@@ -125,7 +134,7 @@ if (!gotSingleInstanceLock) {
   app.quit();
 } else {
   app.on("second-instance", () => {
-    showMainWindow();
+    showMainWindow({ userInitiated: true });
   });
 }
 
@@ -276,6 +285,17 @@ async function completeAuth(data: AuthPayload): Promise<{
 }
 
 function registerIpc(): void {
+  // Renderer crash reports (installed in preload for every renderer window).
+  ipcMain.on("diag:renderer-crash", (_e, payload: Record<string, unknown>) => {
+    const kind =
+      typeof payload?.kind === "string" ? payload.kind : "renderer.unknown";
+    const message =
+      typeof payload?.message === "string" ? payload.message : "renderer error";
+    const err = new Error(message);
+    if (typeof payload?.stack === "string") err.stack = payload.stack;
+    writeCrashLog(kind, err, payload);
+  });
+
   registerDisambiguationPickIpc();
   registerCodeRepairPanelIpc();
   setCodeRepairApplyHandler(async () => {
@@ -667,6 +687,87 @@ function registerIpc(): void {
     }
   });
 
+  ipcMain.handle("micDevice:get", async () => {
+    const { getUserPreferences } = await import("../storage/userPreferences.js");
+    try {
+      const prefs = getUserPreferences();
+      return { ok: true, deviceId: prefs.micDeviceId ?? "" };
+    } catch (e: unknown) {
+      return {
+        ok: false,
+        message: e instanceof Error ? e.message : "mic_device_get_failed",
+      };
+    }
+  });
+
+  ipcMain.handle("micDevice:set", async (_e, args) => {
+    const { updateUserPreference } = await import("../storage/userPreferences.js");
+    const deviceId = typeof args?.deviceId === "string" ? args.deviceId.trim() : "";
+    try {
+      const prefs = updateUserPreference("mic_device_id", deviceId);
+      const { pushSyncItemAsync } = await import("../sync/syncClient.js");
+      pushSyncItemAsync("preference", "mic_device_id", { value: prefs.micDeviceId });
+      return { ok: true, deviceId: prefs.micDeviceId ?? "" };
+    } catch (e: unknown) {
+      return {
+        ok: false,
+        message: e instanceof Error ? e.message : "mic_device_set_failed",
+      };
+    }
+  });
+
+  ipcMain.handle("pipeline:get", async () => {
+    try {
+      const { getUserPreferences } = await import("../storage/userPreferences.js");
+      const { parsePipelineLayers, cleanupLevelForLayers } = await import(
+        "../agent/dictation/pipelineLayers.js"
+      );
+      const layers = parsePipelineLayers(getUserPreferences().pipelineLayers);
+      return { ok: true, layers, level: cleanupLevelForLayers(layers) };
+    } catch (e: unknown) {
+      return {
+        ok: false,
+        message: e instanceof Error ? e.message : "pipeline_get_failed",
+      };
+    }
+  });
+
+  ipcMain.handle("pipeline:set", async (_e, args) => {
+    try {
+      const { updateUserPreference } = await import("../storage/userPreferences.js");
+      const {
+        layersForCleanupLevel,
+        parseCleanupLevel,
+        serializePipelineLayers,
+        cleanupLevelForLayers,
+      } = await import("../agent/dictation/pipelineLayers.js");
+
+      const layers =
+        typeof args?.level === "string"
+          ? layersForCleanupLevel(parseCleanupLevel(args.level))
+          : {
+              transcribe: true as const,
+              cleanup: args?.cleanup === true,
+              format: args?.format === true,
+              context: args?.context === true,
+            };
+      const prefs = updateUserPreference(
+        "pipeline_layers",
+        serializePipelineLayers(layers),
+      );
+      const { pushSyncItemAsync } = await import("../sync/syncClient.js");
+      pushSyncItemAsync("preference", "pipeline_layers", {
+        value: prefs.pipelineLayers,
+      });
+      return { ok: true, layers, level: cleanupLevelForLayers(layers) };
+    } catch (e: unknown) {
+      return {
+        ok: false,
+        message: e instanceof Error ? e.message : "pipeline_set_failed",
+      };
+    }
+  });
+
   // Phase 7.4 — Dictionary UI (personal spoken -> canonical corrections).
   ipcMain.handle("dictionary:list", async () => {
     const { listCorrections } = await import(
@@ -803,13 +904,14 @@ function registerIpc(): void {
     const processName =
       typeof args?.processName === "string" ? args.processName.trim() : "";
     const tone = typeof args?.tone === "string" ? args.tone : "";
-    if (!processName || !["professional", "casual", "neutral"].includes(tone)) {
+    const { isStyleTone } = await import("../storage/styleTone.js");
+    if (!processName || !isStyleTone(tone)) {
       return { ok: false, message: "processName and a valid tone are required" };
     }
     try {
       const entry = setStyleProfile({
         processName,
-        tone: tone as "professional" | "casual" | "neutral",
+        tone,
       });
       const { pushSyncItemAsync } = await import("../sync/syncClient.js");
       // setStyleProfile deletes the row for "neutral" (no override) — sync
@@ -923,6 +1025,12 @@ function registerIpc(): void {
   });
 
   ipcMain.handle("command:execute", (_e, args) => {
+    if (!isJarvisEnabled()) {
+      return Promise.resolve({
+        ok: false,
+        message: "Command mode is off. Use Shift+Space to dictate.",
+      });
+    }
     const snapshot = processTranscriptFromStt(args.command ?? "");
     const cmd = commandTextFromTranscript(snapshot);
 
@@ -1493,6 +1601,8 @@ app.whenReady().then(async () => {
   );
   console.info(`[ripple-desktop] API base: ${API_BASE}`);
   console.info(`[ripple-desktop] Socket URL: ${getSocketUrl()}`);
+  console.info(`[ripple-crash] crash logs → ${getCrashLogDir()}`);
+  crashBreadcrumb("boot_complete", `pid=${process.pid}`);
   registerIpc();
   if (process.env.RIPPLE_OS_TEST === "1") {
     setConfirmHandlerForTests(async () => true);
@@ -1654,21 +1764,104 @@ app.whenReady().then(async () => {
   });
 
   if (!loggedIn) {
-    showMainWindow();
+    mainWin.once("ready-to-show", () => {
+      showMainWindow({ userInitiated: true });
+    });
+  } else if (process.env.ELECTRON_RENDERER_URL) {
+    // Dev: you're logged in — still pop Home once so you don't hunt the tray icon.
+    mainWin.once("ready-to-show", () => {
+      showMainWindow({ userInitiated: true });
+    });
   }
 
   app.on("activate", () => {
-    showMainWindow();
+    showMainWindow({ userInitiated: true });
   });
 });
 }
 
+// --- crash / lifecycle visibility (desktop.md) ---------------------------
+// These only observe + log. They never change quit behavior.
+/**
+ * Renderer crash auto-recovery.
+ *
+ * Captured live (crash-2026-08-18T18-07-43): the renderer died with
+ * reason="crashed" exitCode=-1 at the same instant as the Chromium
+ * "Audio Service" utility process — i.e. the first dictation opened the mic
+ * and took the audio service (and the renderer with it) down. Electron does
+ * NOT rebuild a crashed renderer, so the window went blank/dead and the app
+ * looked closed with no way back. Reloading restores the UI and re-acquires
+ * the mic. Bounded so a crash-loop cannot spin forever.
+ */
+const RENDERER_RELOAD_WINDOW_MS = 5 * 60 * 1000;
+const RENDERER_RELOAD_MAX = 3;
+let rendererReloads: number[] = [];
+
+app.on("render-process-gone", (_e, wc, details) => {
+  writeCrashLog("renderer.process_gone", new Error(`renderer gone: ${details.reason}`), {
+    reason: details.reason,
+    exitCode: details.exitCode,
+  });
+  if (isQuitting || details.reason === "clean-exit") return;
+
+  const now = Date.now();
+  rendererReloads = rendererReloads.filter((t) => now - t < RENDERER_RELOAD_WINDOW_MS);
+  if (rendererReloads.length >= RENDERER_RELOAD_MAX) {
+    crashBreadcrumb(
+      "renderer_reload_giveup",
+      `${rendererReloads.length} reloads within ${RENDERER_RELOAD_WINDOW_MS}ms`,
+    );
+    return;
+  }
+  rendererReloads.push(now);
+
+  setTimeout(() => {
+    try {
+      if (wc.isDestroyed()) return;
+      wc.reload();
+      crashBreadcrumb("renderer_reloaded", `attempt=${rendererReloads.length}`);
+      console.warn(
+        `[ripple-crash] renderer crashed (${details.reason}) — reloaded (attempt ${rendererReloads.length}/${RENDERER_RELOAD_MAX})`,
+      );
+    } catch (e: unknown) {
+      crashBreadcrumb(
+        "renderer_reload_failed",
+        e instanceof Error ? e.message : String(e),
+      );
+    }
+  }, 400);
+});
+
+app.on("child-process-gone", (_e, details) => {
+  writeCrashLog("electron.child_process_gone", new Error(`child gone: ${details.type}`), {
+    type: details.type,
+    reason: details.reason,
+    exitCode: details.exitCode,
+    name: details.name,
+    serviceName: details.serviceName,
+  });
+  // Chromium respawns utility processes on demand, but a dead Audio Service
+  // leaves any in-flight mic capture broken. Surface it loudly; the renderer
+  // handler above restores capture if the renderer went down with it.
+  if (details.serviceName === "audio.mojom.AudioService" && !isQuitting) {
+    console.warn(
+      `[ripple-crash] Audio Service ${details.reason} (exit=${details.exitCode}) — mic capture must be restarted`,
+    );
+  }
+});
+
+app.on("quit", (_e, exitCode) => {
+  crashBreadcrumb("app_quit", `exitCode=${exitCode}`);
+});
+
 app.on("before-quit", () => {
+  crashBreadcrumb("app_before_quit", `isQuitting=${isQuitting}`);
   isQuitting = true;
   void endActiveSession();
 });
 
 app.on("will-quit", () => {
+  crashBreadcrumb("app_will_quit");
   shutdownNativeHost();
   stopWhatsAppExtensionBridge();
   unregisterGlobalShortcuts();
@@ -1678,4 +1871,5 @@ app.on("will-quit", () => {
 
 app.on("window-all-closed", () => {
   // Stay in tray — do not quit when all windows are hidden
+  crashBreadcrumb("window_all_closed", "staying in tray");
 });

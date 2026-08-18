@@ -6,12 +6,15 @@ const sendKeyChord = vi.fn();
 const selectAll = vi.fn();
 const ensureBrowserComposerFocus = vi.fn();
 const getFocusedA11yElement = vi.fn();
+const getForegroundWindow = vi.fn();
 const readText = vi.fn();
 const writeText = vi.fn();
 
 vi.mock("../../../focus/focusContext.js", () => ({
   restoreFocusContext: (...args: unknown[]) => restoreFocusContext(...args),
   resolveTypingFocusTarget: (...args: unknown[]) => resolveTypingFocusTarget(...args),
+  isDesktopShellForeground: (ctx: { processName?: string; windowTitle?: string }) =>
+    (ctx.processName ?? "").toLowerCase() === "explorer",
 }));
 
 vi.mock("../../../automation/delay.js", () => ({
@@ -25,6 +28,7 @@ vi.mock("../../../automation/keyboard.js", () => ({
 
 vi.mock("../../../native/win32Bridge.js", () => ({
   getFocusedA11yElement: (...args: unknown[]) => getFocusedA11yElement(...args),
+  getForegroundWindow: (...args: unknown[]) => getForegroundWindow(...args),
 }));
 
 vi.mock("../../editorFocus.js", () => ({
@@ -50,6 +54,7 @@ describe("readSelectedText", () => {
     selectAll.mockReset();
     ensureBrowserComposerFocus.mockReset();
     getFocusedA11yElement.mockReset();
+    getForegroundWindow.mockReset();
     readText.mockReset();
     writeText.mockReset();
 
@@ -66,14 +71,42 @@ describe("readSelectedText", () => {
       controlType: "ControlType.Edit",
       name: "Type a message",
     });
+    getForegroundWindow.mockResolvedValue({
+      hwnd: 1,
+      processName: "chrome",
+      windowTitle: "WhatsApp",
+    });
     readText.mockReturnValue("");
   });
 
   it("does not Ctrl+C when focus restore failed (explorer FG)", async () => {
     restoreFocusContext.mockResolvedValue(false);
+    getForegroundWindow.mockResolvedValue({
+      hwnd: 9,
+      processName: "explorer",
+      windowTitle: "",
+    });
     const got = await readSelectedText();
     expect(got).toBeNull();
     expect(sendKeyChord).not.toHaveBeenCalled();
+  });
+
+  it("captures highlighted text from live FG when pin restore misses", async () => {
+    restoreFocusContext.mockResolvedValue(false);
+    getForegroundWindow.mockResolvedValue({
+      hwnd: 133330,
+      processName: "Cursor",
+      windowTitle: "FlowBar.tsx - projectRipple - Cursor",
+    });
+    let n = 0;
+    readText.mockImplementation(() => {
+      n += 1;
+      if (n === 1) return "saved-clip";
+      return "Don't worry, everything will be okay.";
+    });
+    const got = await readSelectedText();
+    expect(got).toBe("Don't worry, everything will be okay.");
+    expect(sendKeyChord).toHaveBeenCalledWith("^c");
   });
 
   it("captures a highlighted selection on first Ctrl+C", async () => {

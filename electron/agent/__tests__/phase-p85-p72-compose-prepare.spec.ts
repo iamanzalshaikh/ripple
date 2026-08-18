@@ -12,6 +12,7 @@ vi.mock("../../focus/focusContext.js", () => ({
   isGmailComposeFocused: (...args: unknown[]) =>
     isGmailComposeFocused(...args),
   isWhatsAppTabActive: () => false,
+  maintainPinnedTargetDuringRewrite: async () => undefined,
 }));
 
 vi.mock("../dictation/aiRewriteDictation.js", () => ({

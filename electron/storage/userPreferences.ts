@@ -9,6 +9,13 @@ export type UserPreferences = {
   language: string | null;
   /** P9.6 — "1" when quiet/whisper dictation mode is enabled, else null/"0". */
   quietMode: string | null;
+  /** MediaDevices audioinput deviceId chosen in onboarding / Language settings. */
+  micDeviceId: string | null;
+  /**
+   * JSON `{cleanup,format,context}` for the 4-layer pipeline.
+   * Empty/null = High (all on).
+   */
+  pipelineLayers: string | null;
   /**
    * P10.2b — "1" when the user accepted the Meeting Notetaker disclosure
    * (audio is recorded and sent to Ripple/OpenAI for transcription).
@@ -25,6 +32,8 @@ const EMPTY: UserPreferences = {
   confirmStrictness: null,
   language: null,
   quietMode: null,
+  micDeviceId: null,
+  pipelineLayers: null,
   meetingConsent: null,
   updatedAt: null,
 };
@@ -37,6 +46,8 @@ export type PreferenceKey =
   | "confirm_strictness"
   | "language"
   | "quiet_mode"
+  | "mic_device_id"
+  | "pipeline_layers"
   | "meeting_consent";
 
 const KEY_TO_COLUMN: Record<PreferenceKey, keyof UserPreferences> = {
@@ -47,6 +58,8 @@ const KEY_TO_COLUMN: Record<PreferenceKey, keyof UserPreferences> = {
   confirm_strictness: "confirmStrictness",
   language: "language",
   quiet_mode: "quietMode",
+  mic_device_id: "micDeviceId",
+  pipeline_layers: "pipelineLayers",
   meeting_consent: "meetingConsent",
 };
 
@@ -56,7 +69,7 @@ export function getUserPreferences(): UserPreferences {
     .prepare(
       `SELECT preferred_ide, preferred_terminal, preferred_browser,
               default_projects_root, confirm_strictness, language, quiet_mode,
-              meeting_consent, updated_at
+              mic_device_id, pipeline_layers, meeting_consent, updated_at
        FROM user_preferences WHERE id = 1`,
     )
     .get() as
@@ -68,6 +81,8 @@ export function getUserPreferences(): UserPreferences {
         confirm_strictness: string | null;
         language: string | null;
         quiet_mode: string | null;
+        mic_device_id: string | null;
+        pipeline_layers: string | null;
         meeting_consent: string | null;
         updated_at: string;
       }
@@ -83,6 +98,8 @@ export function getUserPreferences(): UserPreferences {
     confirmStrictness: row.confirm_strictness,
     language: row.language,
     quietMode: row.quiet_mode,
+    micDeviceId: row.mic_device_id,
+    pipelineLayers: row.pipeline_layers,
     meetingConsent: row.meeting_consent,
     updatedAt: row.updated_at,
   };
@@ -108,8 +125,8 @@ export function updateUserPreference(
     `INSERT INTO user_preferences (
        id, preferred_ide, preferred_terminal, preferred_browser,
        default_projects_root, confirm_strictness, language, quiet_mode,
-       meeting_consent, updated_at
-     ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       mic_device_id, pipeline_layers, meeting_consent, updated_at
+     ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        preferred_ide = excluded.preferred_ide,
        preferred_terminal = excluded.preferred_terminal,
@@ -118,6 +135,8 @@ export function updateUserPreference(
        confirm_strictness = excluded.confirm_strictness,
        language = excluded.language,
        quiet_mode = excluded.quiet_mode,
+       mic_device_id = excluded.mic_device_id,
+       pipeline_layers = excluded.pipeline_layers,
        meeting_consent = excluded.meeting_consent,
        updated_at = excluded.updated_at`,
   ).run(
@@ -128,6 +147,8 @@ export function updateUserPreference(
     next.confirmStrictness,
     next.language,
     next.quietMode,
+    next.micDeviceId,
+    next.pipelineLayers,
     next.meetingConsent,
     now,
   );

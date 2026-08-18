@@ -66,6 +66,7 @@ function applyTestEnv() {
   process.env.RIPPLE_P85_TOOL_EXECUTOR = "1";
   process.env.RIPPLE_USE_CDP = "0";
   process.env.RIPPLE_OS_TEST = "1";
+  process.env.RIPPLE_JARVIS = "1";
   delete process.env.RIPPLE_OS_TEST_PLAN_ONLY;
 }
 
@@ -137,7 +138,11 @@ async function findRipplePage(browser) {
         .evaluate(() => document.body?.innerText ?? "")
         .catch(() => "");
       if (text.includes("Loading Ripple")) break;
-      if (/type command/i.test(text) || /sign in/i.test(text)) {
+      if (
+        /dictate anywhere/i.test(text) ||
+        /type command/i.test(text) ||
+        /sign in/i.test(text)
+      ) {
         console.log(`[test56-ui] Home page: ${url}`);
         return page;
       }
@@ -148,28 +153,42 @@ async function findRipplePage(browser) {
   throw new Error("Ripple Home page not found (CDP)");
 }
 
+async function enableDebugHome(page) {
+  await page.evaluate(() => {
+    localStorage.setItem("ripple:debug", "1");
+  });
+  await page.reload({ waitUntil: "domcontentloaded" });
+}
+
 async function ensureLoggedIn(page) {
   await page.waitForFunction(
     () =>
+      /dictate anywhere/i.test(document.body.innerText) ||
       document.querySelector('[data-testid="ripple-command-input"]') ||
       /sign in/i.test(document.body.innerText),
     { timeout: 90_000 },
   );
-  const hasHome = await page.evaluate(
-    () => !!document.querySelector('[data-testid="ripple-command-input"]'),
+  const needsLogin = await page.evaluate(
+    () => /sign in/i.test(document.body.innerText) &&
+      !/dictate anywhere/i.test(document.body.innerText),
   );
-  if (hasHome) return;
-
-  const email = process.env.RIPPLE_TEST_EMAIL?.trim();
-  const password = process.env.RIPPLE_TEST_PASSWORD?.trim();
-  if (!email || !password) {
-    throw new Error(
-      "Not logged in — set RIPPLE_TEST_EMAIL and RIPPLE_TEST_PASSWORD in ripple-desktop/.env",
+  if (needsLogin) {
+    const email = process.env.RIPPLE_TEST_EMAIL?.trim();
+    const password = process.env.RIPPLE_TEST_PASSWORD?.trim();
+    if (!email || !password) {
+      throw new Error(
+        "Not logged in — set RIPPLE_TEST_EMAIL and RIPPLE_TEST_PASSWORD in ripple-desktop/.env",
+      );
+    }
+    await page.type('input[type="email"]', email, { delay: 12 });
+    await page.type('input[type="password"]', password, { delay: 12 });
+    await page.click('button[type="submit"]');
+    await page.waitForFunction(
+      () => /dictate anywhere/i.test(document.body.innerText),
+      { timeout: 60_000 },
     );
   }
-  await page.type('input[type="email"]', email, { delay: 12 });
-  await page.type('input[type="password"]', password, { delay: 12 });
-  await page.click('button[type="submit"]');
+  await enableDebugHome(page);
   await page.waitForSelector('[data-testid="ripple-command-input"]', {
     timeout: 60_000,
   });
@@ -194,7 +213,9 @@ async function readUiSnapshot(page) {
     const actionLines = actSec
       ? [...actSec.querySelectorAll("li")].map((li) => li.innerText.trim())
       : [];
-    const voiceSec = sections.find((s) => /last voice command/i.test(s.innerText));
+    const voiceSec = sections.find((s) =>
+      /last dictation|last voice command/i.test(s.innerText),
+    );
     const voiceText = voiceSec?.innerText?.slice(0, 200) ?? "";
     return { busy, result, actionLines, voiceText };
   });

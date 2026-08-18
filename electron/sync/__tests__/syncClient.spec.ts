@@ -110,6 +110,21 @@ describe("P9.1 syncClient.applyPulledItem — routes pulled items to local stora
     expect(updateUserPreference).toHaveBeenCalledWith("language", "hi");
   });
 
+  it("preference: applies pipeline_layers", async () => {
+    const { applyPulledItem } = await import("../syncClient.js");
+    applyPulledItem({
+      kind: "preference",
+      key: "pipeline_layers",
+      payload: { value: '{"cleanup":false,"format":false,"context":false}' },
+      deleted: false,
+      updatedAt: "2026-01-01T00:00:00Z",
+    });
+    expect(updateUserPreference).toHaveBeenCalledWith(
+      "pipeline_layers",
+      '{"cleanup":false,"format":false,"context":false}',
+    );
+  });
+
   it("preference: ignores unknown preference keys (no crash, no local storage call)", async () => {
     const { applyPulledItem } = await import("../syncClient.js");
     applyPulledItem({

@@ -2,7 +2,9 @@
 
 **Status:** FINAL / ONLY PLAN — use this single file for all development until full parity  
 **File:** `docs/WISPR-FLOW-FINAL-PLAN.md`  
-**Last updated:** 2026-07-29  
+**Last updated:** 2026-08-18  
+
+**Gap status (code-verified):** [WISPR-FLOW-GAP-ANALYSIS.md](./WISPR-FLOW-GAP-ANALYSIS.md) — filled Wispr checklist, production-ready vs remaining. Do not use §1–§2 scores below without that file.
 
 **How to use:** Follow phases in order. Do **Phase 0–6 first** (Windows MVP). Then 7→13. Do not open other Wispr plans for day-to-day work.
 
@@ -22,8 +24,8 @@ Measure real velocity after Phase 0–6, then convert S/M/L/XL → days.
 
 ## 0. Product definition
 
-**MVP claim (ships first — Phase 0–6):**Learn that Noor is Noor.
-> Hold **Alt+Space**, speak → corrected text appears in the focused field.  
+**MVP claim (ships first — Phase 0–6):**
+> Hold **Shift+Space**, speak → corrected text appears in the focused field.  
 > Windows voice typing in **WhatsApp, Gmail, Notepad, Cursor**.
 
 **Full-parity claim (end state — through Phase 13):**
@@ -38,61 +40,59 @@ Ctrl+Space = agent only. Never merge into dictation.
 
 | Measuring | % today | Notes |
 |-----------|---------|-------|
-| Full Wispr Flow product | **~42%** | Windows nearly Wispr-class; Mac/iOS/Android + enterprise + billing still 0 |
-| Core Windows Wispr feel | **~85%** | System-wide dictation into most focused fields (Claude, Google Chat, WA, Gmail, Notepad, Cursor, etc.) + snippets/styles/dictionary + notes + meeting + transforms + Flow Bar |
+| Full Wispr Flow product | **~35–40%** | Windows extras landed; Mac/iOS/Android + enterprise + billing still 0 |
+| Core Windows Wispr feel | **~55–60%** | Insert + snippets + notes + F9 are real. Cleanup levels, undo, dictation clipboard, Auto Flow, language reliability, meeting system-audio are **not** Wispr-parity |
 
-**Do not claim full Wispr parity** (other OSes / enterprise / billing remain). Re-measured 2026-07-29 with live field coverage confirmed.
+**Do not claim full Wispr parity.** 2026-07-29 “~85% Windows” was **overstated** vs a 25-item Wispr checklist. Re-scored **2026-08-18 from source code** — see [WISPR-FLOW-GAP-ANALYSIS.md](./WISPR-FLOW-GAP-ANALYSIS.md).
 
-## 2. Current state — Ripple P7 (baseline)
+## 2. Current state — re-verified 2026-08-18 (code)
 
-### Working todayLearn Noor means Noor.
+Stale P7 “missing snippets/notes/styles” list removed. **Source of truth:** [WISPR-FLOW-GAP-ANALYSIS.md](./WISPR-FLOW-GAP-ANALYSIS.md).
+
+### Working (Windows dictation track — Jarvis off)
+
 | Area | Evidence |
 |------|----------|
-| Whisper/STT | Live |
-| Dual hotkeys | Alt+Space dictation, Ctrl+Space agent |Learn Noor means Noor.Learn Noor means Noor.Learn Noor means Noor.
-| Overlay mode banner | Command vs Dictation |
-| Dictation skips planner | `executeDictation` |
-| Revision buffer | `dictationSession` |
-| Correction analyze/generate | P7.2 / `wispr.md` |Learn Noor means Noor.
-| Fail-open to literal | Present |
-| OS insert ladder | Code landed |
-| WhatsApp / Gmail compose | Live green (**re-verify**) |
-| Native hands | `P7-FEATURES.md` |Learn that Dr. Fatima means Tatheer.
-| P6 corrections in rewrite | Wired; live name demo open |
+| Whisper/STT | Live (`voiceStreaming.service.ts`); quality often wrong (welsh/nynorsk) |
+| Hotkeys | **Shift+Space** dictation; **F9** Transforms; Ctrl+Space **skipped** (`isJarvisEnabled`) |
+| Overlay / Flow Bar | `FlowBar.tsx` — listening, chips, language badge |
+| Dictation skips planner | `executeDictation.ts` |
+| Local cleanup + AI rewrite | `localCleanup.ts` + `dictationRewrite.ts` (not user-level None/Light/Medium/High) |
+| Insert ladder + paste-fail clipboard | `inputStrategy.ts` / `executeDictation.ts` `clipboard.writeText` |
+| Snippets / Styles / Dictionary UI | Pages + SQLite + `syncClient.ts` |
+| Flow Notes | `Notes.tsx` + sync |
+| 20-min session grouping | `dictationSessionWindow.ts` |
+| Quiet / whisper mode + language picker | `Language.tsx` |
 
-### Partial
-| Area | Gap |Learn that Noor means light.
+### Partial / not production-ready
+
+| Area | Gap |
 |------|-----|
-| Any text field | Only 2 apps proven |
-| Filler/punct/lists | Weaker than Wispr |
-| Context-aware names | Live `nor→Noor` open |Learn Tathir means Tathir.
-| Notepad / Cursor | Not proven live |
-| Overlay | ≠ polished Flow Bar |
-| “Command mode” | Agent Ctrl+Space ≠ Wispr rewrite-selection |
-Learn Tathir means Tathir.Learn Tathir means Tathir.
-### Missing (desktop + later)
-| Area | Notes |
-|------|-------|Learn Tathir means Tathir.
-| 100+ languages + bar language picker | Missing |
-| Quiet / whisper mode | Missing |
-| Mac / iOS / Android + sync | Missing |
-| 20-min sessions as product | Missing |Learn Tathir means Tathir.
-| Snippets / Styles | Missing |
-| Dictionary UX | Hooks only |
-| Flow Notes / Meeting Notetaker | Missing |
-| iOS widgets / Siri / Action Button / Flow Bubble | Missing |Learn Tathir means Tathir.
-| SSO / HIPAA / MDM | Missing on Ripple; Wispr SSO confirmed; **SCIM unverified** on Wispr |
-| Billing / referral / self-serve deletion | Missing |
+| Language auto-detect | Whisper mis-tags English (live: welsh, nynorsk) |
+| Cleanup levels / Undo AI | No user control; no raw-transcript revert |
+| Dictation clipboard history | Home History = **command** logs, not every dictation |
+| Auto Flow | No pause-based send in chat apps |
+| Meeting Notetaker | Mic-only; system audio OFF (`includeSystemAudio: false`) |
+| Screen-name bias | Local UIA+OCR code; not live-QA’d as Wispr-class |
+| Cross-device | Windows account sync only |
 
-### Apps — MVP gate
+### Missing / not this launch
+
+| Area | Notes |
+|------|-------|
+| Mac / iOS / Android | Frozen until Windows beta |
+| iOS widgets / Siri / Action Button | Frozen |
+| Privacy Mode / HIPAA / SOC 2 | Phase 12 |
+| Billing / Teams shared snippets | Phase 13 |
+| File tagging / code-case Dev Mode | Not in repo |
+
+### Apps — observed 2026-08-18
+
 | App | Status |
 |-----|--------|
-| WhatsApp | live green (re-verify) |
-| Gmail | live green (re-verify) |
-| Notepad | **not proven** |
-| Cursor | **not proven** |
-
-**Honest count today: 2 of 4.**
+| WhatsApp (Chrome) | Insert succeeded (`clipboard_paste` ok) **and** failed when pin drifted |
+| Cursor | Insert succeeded in editor; failed when target hwnd `visible=0` |
+| Gmail / Notepad | Not re-proven this session |
 
 ---
 
@@ -236,7 +236,7 @@ Ship when Phase 1–5 + §6 matrix are all green.
 | 7.2a | Snippet store | S | — |
 | 7.2b | Voice-trigger for snippets | M | 7.2a |
 | 7.2c | Snippet insert via ladder | S | 7.2b |
-| 7.3a | Per-app tone profiles | S | — |
+| 7.3a | Per-app tone profiles | S | **DONE** — Very Casual → Formal |
 | 7.3b | Tone in rewrite layers | M | 7.3a |
 | 7.4a | Dictionary UI | M | backend |
 | 7.4b | Manual dictionary CRUD | S | 7.4a |
@@ -249,7 +249,7 @@ Ship when Phase 1–5 + §6 matrix are all green.
 | 7.9c | Auto-correction prompt ("Did you mean X?") | M | 7.7, overlay UX |
 
 **Ship gate:** Snippets + Styles usable E2E; dictionary UI shipped; ≥3 new apps proven live.  
-**Note:** Wispr Styles = English + desktop first — match that before expanding.  
+**Note:** Wispr Styles = English + desktop first — Very Casual → Casual → Neutral → Professional → Formal per process name.  
 **Follow-ups:** 7.7 landed (`screenNameBias.ts`); **7.8 PAUSED** (default OFF — was damaging focused editors; set `RIPPLE_P85_STREAMING_INSERT=1` only after real streaming STT).  
 **7.1 alt-intent (shipped, production soft-guard):** Competing alternatives in one breath (TOD greetings, clock times, repeated “can we…”) relax `cleanupWithinBounds` so existing `dictation_clean` AI can keep final intent. Soft `altCollapseIsPlausible` rejects only still-jammed output (does not force last-only). Layer-1 `double_no` / directives unchanged. Eval: `phase-p85-alt-intent-eval.spec.ts`.
 
@@ -378,9 +378,14 @@ Microphone
   → Whisper STT (+ initial_prompt bias from contacts/history [7.9a/b])
   → Dictation gate (Shift+Space only)
   → Revision buffer (dictationSession)
-  → P7.7 screen name bias (UIA/OCR nearby text)
-  → Layer 1 signal detector (local)
-  → Layer 2A analyze (ambiguous) / 2B generate (tone only)
+  → 4-layer pipeline (toggleable; default High)
+       transcribe (Whisper)
+       cleanup (fillers / self-corrections) — off at None
+       format (punct / lists) — Light off, Medium+ on
+       context (screen-name bias + Styles tone) — High only
+  → P7.7 screen name bias (context layer)
+  → Layer 1 signal detector (local; always)
+  → Layer 2A/2B (cleanup layer)
   → Layer 3 safe rewrite (fail-open literal)
   → P6 voice corrections (spoken → canonical; seeded by contacts [7.9a] + history [7.9b])
   → P7.9c auto-correction prompt (novel proper noun → one-tap confirm → learnCorrection)
@@ -504,11 +509,14 @@ Then start Phase 7.
 | 2026-08-12 | **Post-AI focus + composer click:** `prepareDictationInsertFocus` after rewrite; `clickUiaComposerEdit` targets web chat Edit (not window center); verify accepts `foreground_changed` only when `after` matches pinned target; rejects `wrong_insert_target` (Cursor paste while Chat pinned). |
 | 2026-08-12 | **Real-user hardening:** `maintainPinnedTargetDuringRewrite` during AI cleanup; P8 watcher skips repinning during `voiceSessionFrozen`; Flow Bar shows hint on insert failure (`showDictationInsertFailure`). |
 | 2026-08-13 | **Chrome multi-window pin lock:** stop unconditional `recoverDictationFocusTarget("pre_insert")` (was re-pinning to mouse Chrome); keep hotkey hwnd; `matchesPinnedInsertTarget` rejects WhatsApp≠Google Chat≠Docs (badge churn still OK). |
+| 2026-08-18 | **Wispr 25-item gap analysis (code-verified).** New [WISPR-FLOW-GAP-ANALYSIS.md](./WISPR-FLOW-GAP-ANALYSIS.md). Core Windows feel re-scored **~55–60%** (was ~85%). |
+| 2026-08-18 | **4-layer pipeline + cleanup levels.** Transcribe always on; cleanup / format / context independently toggleable (`pipelineLayers.ts`). Presets None/Light/Medium/High in Language settings. Default High preserves prior behavior. Insert + focus untouched. |
 
 ---
 
 ## 20. Related (engineering reference only — not alternate plans)
 
+- [WISPR-FLOW-GAP-ANALYSIS.md](./WISPR-FLOW-GAP-ANALYSIS.md) — **2026-08-18 code-verified** Wispr checklist (have / partial / missing)  
 - [P8.5-P6-P7-IMPLEMENTATION-PLAN.md](./P8.5-P6-P7-IMPLEMENTATION-PLAN.md) — P7 engineering detail  
 - [wispr.md](./wispr.md) — correction layer design  
 - [P7-FEATURES.md](./P7-FEATURES.md) — native hands  

@@ -118,6 +118,7 @@ export function createMainWindow(): BrowserWindow {
     height: 640,
     minWidth: 800,
     minHeight: 520,
+    title: "Ripple",
     show: false,
     autoHideMenuBar: true,
     webPreferences: {
@@ -179,36 +180,66 @@ export function createMainWindow(): BrowserWindow {
   return mainWindow;
 }
 
-export function showMainWindow(): void {
+export function showMainWindow(options?: { userInitiated?: boolean }): void {
+  void presentMainWindow(options);
+}
+
+async function presentMainWindow(options?: { userInitiated?: boolean }): Promise<void> {
+  const userInitiated = options?.userInitiated ?? false;
+
+  const bringToFront = async (win: BrowserWindow): Promise<void> => {
+    if (win.isDestroyed()) return;
+    if (win.isMinimized()) win.restore();
+    win.setFocusable(true);
+
+    if (mainNativeNoActivateApplied) {
+      mainNativeNoActivateApplied = false;
+      const hwnd = mainNativeHwnd(win);
+      if (hwnd) {
+        const { setWindowNoActivateNative } = await import("../native/win32Bridge.js");
+        await setWindowNoActivateNative(hwnd, false).catch(() => undefined);
+      }
+    }
+
+    win.setAlwaysOnTop(true, "screen-saver");
+    win.show();
+    win.focus();
+    win.moveTop();
+    win.setAlwaysOnTop(false);
+
+    console.info(
+      `[ripple-desktop] main window open userInitiated=${userInitiated} visible=${typeof win.isVisible === "function" ? win.isVisible() : "?"} focused=${typeof win.isFocused === "function" ? win.isFocused() : "?"}`,
+    );
+  };
+
+  if (userInitiated) {
+    mainActivationSuppressed = false;
+  }
+
   if (!mainWindow) {
     const win = createMainWindow();
-    // New window still hidden until ready; show once load finishes.
     win.once("ready-to-show", () => {
-      if (!mainWindow || mainWindow.isDestroyed()) return;
-      if (mainActivationSuppressed) {
-        // setFocusable(false) BEFORE show — safe while hidden; after show it
-        // would deactivate the user's FG window (Widget::Deactivate).
+      void (async () => {
+        if (!mainWindow || mainWindow.isDestroyed()) return;
+        if (userInitiated || !mainActivationSuppressed) {
+          await bringToFront(mainWindow);
+          return;
+        }
         mainWindow.setFocusable(false);
         mainWindow.showInactive();
-        return;
-      }
-      mainWindow.show();
-      mainWindow.focus();
+      })();
     });
     return;
   }
-  if (mainActivationSuppressed) {
-    // Never activate during dictation (e.g. accidental tray click).
-    // Drop focusable while still hidden (safe); once visible, the show
-    // handler applies the native no-activate path instead.
-    if (typeof mainWindow.isVisible !== "function" || !mainWindow.isVisible()) {
-      mainWindow.setFocusable(false);
-    }
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    mainWindow.showInactive();
+
+  if (userInitiated || !mainActivationSuppressed) {
+    await bringToFront(mainWindow);
     return;
   }
+
+  if (typeof mainWindow.isVisible !== "function" || !mainWindow.isVisible()) {
+    mainWindow.setFocusable(false);
+  }
   if (mainWindow.isMinimized()) mainWindow.restore();
-  mainWindow.show();
-  mainWindow.focus();
+  mainWindow.showInactive();
 }

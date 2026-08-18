@@ -1,11 +1,17 @@
 import { useEffect, useState } from "react";
 import { getRippleApi } from "../lib/rippleApi";
+import { Card, PageHeader, PrimaryButton, TextInput } from "../components/theme/ui";
 
 interface Props {
   onBack: () => void;
 }
 
-type Tone = "professional" | "casual" | "neutral";
+type Tone =
+  | "very_casual"
+  | "casual"
+  | "neutral"
+  | "professional"
+  | "formal";
 
 type Entry = {
   processName: string;
@@ -13,12 +19,25 @@ type Entry = {
   updatedAt: string;
 };
 
-const TONES: Tone[] = ["neutral", "professional", "casual"];
+const TONE_SCALE: Array<{ id: Tone; label: string; hint: string }> = [
+  { id: "very_casual", label: "Very Casual", hint: "Hey / gotta" },
+  { id: "casual", label: "Casual", hint: "Friendly" },
+  { id: "neutral", label: "Neutral", hint: "As spoken" },
+  { id: "professional", label: "Professional", hint: "Polished" },
+  { id: "formal", label: "Formal", hint: "Email / docs" },
+];
+
+const TONE_LABEL: Record<Tone, string> = {
+  very_casual: "Very Casual",
+  casual: "Casual",
+  neutral: "Neutral",
+  professional: "Professional",
+  formal: "Formal",
+};
 
 /**
  * Wispr-Flow plan Phase 7.3 — per-app ambient dictation tone.
- * English + desktop first, per the plan's own note — this is process-name
- * based (Notepad, Cursor, chrome, …), not per-website.
+ * Very Casual → Formal scale, keyed by process name (notepad, cursor, chrome).
  */
 export function StylesPage({ onBack }: Props) {
   const [items, setItems] = useState<Entry[]>([]);
@@ -78,73 +97,82 @@ export function StylesPage({ onBack }: Props) {
   }
 
   return (
-    <div className="min-h-full bg-zinc-950 text-zinc-100">
-      <header className="flex items-center justify-between border-b border-zinc-800 px-8 py-6">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Styles</h1>
-          <p className="mt-1 text-sm text-zinc-400">
-            Set a default dictation tone per app — applies automatically,
-            without saying "make it professional" each time.
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={onBack}
-          className="rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-300 transition hover:border-zinc-500 hover:bg-zinc-900"
-        >
-          Back
-        </button>
-      </header>
+    <div className="min-h-full bg-onboard-bg">
+      <PageHeader
+        title="Styles"
+        subtitle="Default dictation tone per app — Very Casual through Formal. Applies automatically; no need to say “make it professional” each time."
+        onBack={onBack}
+      />
 
       <main className="mx-auto max-w-2xl p-8">
-        <section className="rounded-2xl border border-violet-500/30 bg-violet-950/20 p-6">
-          <h3 className="text-sm font-medium uppercase tracking-wide text-violet-300">
+        <Card className="border-onboard-accent/30 bg-onboard-accent/5">
+          <h3 className="text-sm font-medium uppercase tracking-wide text-onboard-accent-hover">
             Set a tone
           </h3>
-          <p className="mt-1 text-xs text-zinc-400">
+          <p className="mt-1 text-xs text-onboard-muted">
             App/process name as it appears in the taskbar, e.g. "notepad",
-            "cursor", "chrome".
+            "cursor", "chrome". Neutral means as-spoken (no override).
           </p>
-          <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-            <input
+          <div className="mt-3 flex flex-col gap-3">
+            <TextInput
               type="text"
               value={processName}
               onChange={(e) => setProcessName(e.target.value)}
               placeholder="Process name (e.g. cursor)"
-              className="min-w-0 flex-1 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:border-violet-500 focus:outline-none"
             />
-            <select
-              value={tone}
-              onChange={(e) => setTone(e.target.value as Tone)}
-              className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 focus:border-violet-500 focus:outline-none"
+            <div
+              className="grid grid-cols-5 gap-1 rounded-xl border border-onboard-border bg-onboard-surface p-1"
+              role="radiogroup"
+              aria-label="Tone scale"
             >
-              {TONES.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
+              {TONE_SCALE.map((step) => {
+                const selected = tone === step.id;
+                return (
+                  <button
+                    key={step.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={selected}
+                    onClick={() => setTone(step.id)}
+                    className={`rounded-lg px-1 py-2 text-center transition ${
+                      selected
+                        ? "bg-onboard-accent text-white shadow-sm"
+                        : "text-onboard-muted hover:bg-onboard-card-soft hover:text-onboard-ink"
+                    }`}
+                  >
+                    <span className="block text-[11px] font-medium leading-tight">
+                      {step.label}
+                    </span>
+                    <span
+                      className={`mt-0.5 block text-[9px] leading-tight ${
+                        selected ? "text-white/80" : "text-onboard-subtle"
+                      }`}
+                    >
+                      {step.hint}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            <PrimaryButton
               disabled={busy || !processName.trim()}
               onClick={() => void saveEntry()}
-              className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-violet-500 disabled:opacity-50"
             >
               Save
-            </button>
+            </PrimaryButton>
           </div>
-          {error ? <p className="mt-3 text-xs text-red-400">{error}</p> : null}
-        </section>
+          {error ? <p className="mt-3 text-xs text-red-600">{error}</p> : null}
+        </Card>
 
-        <section className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900/50 p-6">
-          <h3 className="text-sm font-medium uppercase tracking-wide text-zinc-400">
+        <Card className="mt-6">
+          <h3 className="text-sm font-medium uppercase tracking-wide text-onboard-subtle">
             App tones ({items.length})
           </h3>
           {loading ? (
-            <p className="mt-4 text-sm text-zinc-500">Loading…</p>
+            <p className="mt-4 text-sm text-onboard-muted">Loading…</p>
           ) : items.length === 0 ? (
-            <p className="mt-4 text-sm text-zinc-500">
-              No app tones set — everything uses neutral (as-spoken) by
+            <p className="mt-4 text-sm text-onboard-muted">
+              No app tones set — everything uses Neutral (as-spoken) by
               default.
             </p>
           ) : (
@@ -152,18 +180,20 @@ export function StylesPage({ onBack }: Props) {
               {items.map((item) => (
                 <li
                   key={item.processName}
-                  className="flex items-center justify-between gap-3 rounded-lg border border-zinc-800 bg-zinc-950/60 px-4 py-2.5"
+                  className="flex items-center justify-between gap-3 rounded-lg border border-onboard-border bg-onboard-surface px-4 py-2.5"
                 >
-                  <span className="text-sm text-zinc-200">
+                  <span className="text-sm text-onboard-ink">
                     <span className="font-medium">{item.processName}</span>
-                    <span className="mx-2 text-zinc-600">→</span>
-                    <span className="text-zinc-400">{item.tone}</span>
+                    <span className="mx-2 text-onboard-subtle">→</span>
+                    <span className="text-onboard-muted">
+                      {TONE_LABEL[item.tone] ?? item.tone}
+                    </span>
                   </span>
                   <button
                     type="button"
                     disabled={busy}
                     onClick={() => void removeEntry(item.processName)}
-                    className="text-xs text-zinc-500 transition hover:text-red-400 disabled:opacity-50"
+                    className="text-xs text-onboard-subtle transition hover:text-red-600 disabled:opacity-50"
                   >
                     Remove
                   </button>
@@ -171,7 +201,7 @@ export function StylesPage({ onBack }: Props) {
               ))}
             </ul>
           )}
-        </section>
+        </Card>
       </main>
     </div>
   );

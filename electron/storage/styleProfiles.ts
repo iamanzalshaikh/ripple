@@ -1,6 +1,17 @@
 import { getRippleDb } from "./rippleDb.js";
+import {
+  isStyleTone,
+  parseStyleTone,
+  type StyleTone,
+} from "./styleTone.js";
 
-export type StyleTone = "professional" | "casual" | "neutral";
+export type { StyleTone } from "./styleTone.js";
+export {
+  STYLE_TONE_LABELS,
+  STYLE_TONE_SCALE,
+  isStyleTone,
+  parseStyleTone,
+} from "./styleTone.js";
 
 export type StyleProfile = {
   processName: string;
@@ -12,8 +23,6 @@ function normalizeProcessName(value: string): string {
   return value.trim().toLowerCase();
 }
 
-const VALID_TONES = new Set<StyleTone>(["professional", "casual", "neutral"]);
-
 export function setStyleProfile(input: {
   processName: string;
   tone: StyleTone;
@@ -22,12 +31,13 @@ export function setStyleProfile(input: {
   if (!processName) {
     throw new Error("style_profile_requires_process_name");
   }
-  if (!VALID_TONES.has(input.tone)) {
+  if (!isStyleTone(input.tone)) {
     throw new Error(`invalid_tone:${input.tone}`);
   }
+  const tone = input.tone;
   const updatedAt = new Date().toISOString();
 
-  if (input.tone === "neutral") {
+  if (tone === "neutral") {
     // Neutral = no override; storing a row for it is pointless churn.
     getRippleDb()
       .prepare(`DELETE FROM style_profiles WHERE process_name = ?`)
@@ -43,9 +53,9 @@ export function setStyleProfile(input: {
          tone = excluded.tone,
          updated_at = excluded.updated_at`,
     )
-    .run(processName, input.tone, updatedAt);
+    .run(processName, tone, updatedAt);
 
-  return { processName, tone: input.tone, updatedAt };
+  return { processName, tone, updatedAt };
 }
 
 export function removeStyleProfile(processName: string): boolean {
@@ -66,17 +76,17 @@ export function listStyleProfiles(): StyleProfile[] {
 
   return rows.map((r) => ({
     processName: r.process_name,
-    tone: r.tone as StyleTone,
+    tone: parseStyleTone(r.tone),
     updatedAt: r.updated_at,
   }));
 }
 
-/** Wispr Styles = English + desktop first (per plan) — one tone per foreground process. */
+/** Wispr Styles = English + desktop first — one tone per foreground process. */
 export function getStyleProfileForProcess(processName?: string | null): StyleTone {
   const key = normalizeProcessName(processName ?? "");
   if (!key) return "neutral";
   const row = getRippleDb()
     .prepare(`SELECT tone FROM style_profiles WHERE process_name = ?`)
     .get(key) as { tone: string } | undefined;
-  return (row?.tone as StyleTone | undefined) ?? "neutral";
+  return parseStyleTone(row?.tone);
 }

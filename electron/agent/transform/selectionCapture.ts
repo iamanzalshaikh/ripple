@@ -1,8 +1,15 @@
 import { clipboard } from "electron";
-import { restoreFocusContext, resolveTypingFocusTarget } from "../../focus/focusContext.js";
+import {
+  restoreFocusContext,
+  resolveTypingFocusTarget,
+  isDesktopShellForeground,
+} from "../../focus/focusContext.js";
 import { delay } from "../../automation/delay.js";
 import { selectAll, sendKeyChord } from "../../automation/keyboard.js";
-import { getFocusedA11yElement } from "../../native/win32Bridge.js";
+import {
+  getFocusedA11yElement,
+  getForegroundWindow,
+} from "../../native/win32Bridge.js";
 import { ensureBrowserComposerFocus, isBrowserProcess } from "../editorFocus.js";
 
 const SENTINEL_RE = /^__ripple_no_selection_\d+__$/;
@@ -37,10 +44,28 @@ export async function readSelectedText(): Promise<string | null> {
   try {
     const restored = await restoreFocusContext();
     if (restored === false) {
-      console.warn(
-        "[ripple-desktop] Transforms capture skipped — could not restore target window",
+      // Stale pin (last dictation was Chrome) must not abort when the user
+      // highlighted text in the window that actually has FG (Cursor, Notepad).
+      // Explorer / empty FG still skip — Ctrl+C there copies nothing useful.
+      const fg = await getForegroundWindow();
+      const proc = (fg?.processName ?? "").toLowerCase();
+      const title = fg?.windowTitle ?? "";
+      const unusable =
+        !fg?.hwnd ||
+        isDesktopShellForeground({
+          processName: fg.processName,
+          windowTitle: title,
+        }) ||
+        (proc === "electron" && /ripple/i.test(title));
+      if (unusable) {
+        console.warn(
+          "[ripple-desktop] Transforms capture skipped — could not restore target window",
+        );
+        return null;
+      }
+      console.info(
+        `[ripple-desktop] Transforms capture using live FG ${proc} — pin restore missed`,
       );
-      return null;
     }
     await delay(150);
     clipboard.writeText(sentinel);

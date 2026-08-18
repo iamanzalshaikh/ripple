@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { BackLink, SecondaryButton } from "../components/theme/ui";
 
 type Summary = NonNullable<
   Awaited<ReturnType<RippleApi["getTelemetrySummary"]>>["summary"]
@@ -109,94 +110,88 @@ export function TelemetryPage({ onBack }: Props) {
     <div className="mx-auto max-w-4xl p-8">
       <div className="mb-6 flex items-center justify-between">
         <div>
-          <button
-            type="button"
-            onClick={onBack}
-            className="text-sm text-violet-400 hover:text-violet-300"
-          >
-            ← Dashboard
-          </button>
-          <h2 className="mt-2 text-xl font-semibold">Observability</h2>
-          <p className="text-sm text-zinc-500">
+          <BackLink onClick={onBack}>Dashboard</BackLink>
+          <h2 className="mt-2 text-xl font-semibold text-onboard-ink">
+            Observability
+          </h2>
+          <p className="text-sm text-onboard-subtle">
             P6 telemetry — last {summary?.total ?? 0} events
             {summary?.avgLatencyMs ? ` · avg ${summary.avgLatencyMs}ms` : ""}
           </p>
         </div>
         <div className="flex gap-2">
-          <button
-            type="button"
+          <SecondaryButton
             onClick={() => {
               void load();
               void loadGate();
               void loadP85();
             }}
             disabled={loading || gateLoading || p85Loading}
-            className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-900 disabled:opacity-50"
+            className="px-3 py-1.5"
           >
             Refresh
-          </button>
-          <button
-            type="button"
+          </SecondaryButton>
+          <SecondaryButton
             onClick={() => void handleExport()}
-            className="rounded-lg border border-violet-600/50 px-3 py-1.5 text-sm text-violet-300 hover:bg-violet-950/40"
+            className="border-onboard-accent/40 px-3 py-1.5 text-onboard-accent-hover"
           >
             Export CSV
-          </button>
+          </SecondaryButton>
         </div>
       </div>
 
       {error ? (
-        <p className="mb-4 text-sm text-red-400">{error}</p>
+        <p className="mb-4 text-sm text-red-600">{error}</p>
       ) : null}
 
       {ciGate ? (
-        <section className="mb-6 rounded-2xl border border-zinc-800 bg-zinc-900/50 p-5">
+        <section className="mb-6 rounded-2xl border border-onboard-border bg-onboard-card p-5">
           <div className="flex items-center justify-between">
             <div>
-              <h3 className="text-sm font-medium text-zinc-300">CI gate (P6)</h3>
-              <p className="mt-1 text-xs text-zinc-500">
+              <h3 className="text-sm font-medium text-onboard-ink">CI gate (P6)</h3>
+              <p className="mt-1 text-xs text-onboard-subtle">
                 Production matrix — threshold {ciGate.thresholdPercent}%
               </p>
             </div>
             <p
-              className={`text-2xl font-semibold ${ciGate.meetsGate ? "text-emerald-400" : "text-red-400"}`}
+              className={`text-2xl font-semibold ${ciGate.meetsGate ? "text-emerald-600" : "text-red-600"}`}
             >
               {ciGate.passRatePercent}%
             </p>
           </div>
-          <p className="mt-2 text-sm text-zinc-400">
+          <p className="mt-2 text-sm text-onboard-muted">
             {ciGate.passed}/{ciGate.total} cases pass
             {gateLoading ? " · rechecking…" : ""}
           </p>
         </section>
       ) : gateLoading ? (
-        <p className="mb-4 text-sm text-zinc-500">Running CI gate check…</p>
+        <p className="mb-4 text-sm text-onboard-muted">Running CI gate check…</p>
       ) : null}
 
-      <section className="mb-6 rounded-2xl border border-violet-800/40 bg-violet-950/20 p-5">
+      <section className="mb-6 rounded-2xl border border-onboard-accent/30 bg-onboard-accent/5 p-5">
         <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h3 className="text-sm font-medium text-violet-200">
+            <h3 className="text-sm font-medium text-onboard-accent-hover">
               P8.5 Universal Planner
             </h3>
-            <p className="mt-1 text-xs text-zinc-500">
+            <p className="mt-1 text-xs text-onboard-subtle">
               Session + SQLite shadow · router parity for legacy deprecation
             </p>
           </div>
           <div className="flex items-center gap-2">
             {p85?.routerParity.readyForDeprecation ? (
-              <span className="rounded-full bg-emerald-500/20 px-2.5 py-0.5 text-xs font-medium text-emerald-400">
+              <span className="rounded-full bg-emerald-500/15 px-2.5 py-0.5 text-xs font-medium text-emerald-700">
                 Ready to deprecate legacy routers
               </span>
             ) : (
-              <span className="rounded-full bg-amber-500/20 px-2.5 py-0.5 text-xs font-medium text-amber-400">
+              <span className="rounded-full bg-amber-500/15 px-2.5 py-0.5 text-xs font-medium text-amber-700">
                 Shadow mode — collecting parity data
               </span>
             )}
             <button
               type="button"
               onClick={() => void handleExportP85()}
-              className="rounded-lg border border-violet-600/50 px-3 py-1.5 text-xs text-violet-300 hover:bg-violet-950/40"
+              className="rounded-lg border border-onboard-accent/40 px-3 py-1.5 text-xs text-onboard-accent-hover transition hover:bg-onboard-accent/10"
             >
               Export P8.5 CSV
             </button>
@@ -204,47 +199,47 @@ export function TelemetryPage({ onBack }: Props) {
         </div>
 
         {p85Loading && !p85 ? (
-          <p className="text-sm text-zinc-500">Loading P8.5 metrics…</p>
+          <p className="text-sm text-onboard-muted">Loading P8.5 metrics…</p>
         ) : p85 ? (
           <div className="grid gap-4 md:grid-cols-3">
-            <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/40 p-4">
-              <p className="text-xs text-zinc-500">L0 hit rate (persisted)</p>
-              <p className="mt-1 text-2xl font-semibold text-cyan-400">
+            <div className="rounded-xl border border-onboard-border bg-onboard-surface p-4">
+              <p className="text-xs text-onboard-subtle">L0 hit rate (persisted)</p>
+              <p className="mt-1 text-2xl font-semibold text-sky-600">
                 {p85.persisted.l0HitRatePct}%
               </p>
-              <p className="mt-1 text-xs text-zinc-500">
+              <p className="mt-1 text-xs text-onboard-subtle">
                 {p85.persisted.l0Hits}/{p85.persisted.execute} executes
               </p>
             </div>
-            <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/40 p-4">
-              <p className="text-xs text-zinc-500">GPT fallback</p>
-              <p className="mt-1 text-2xl font-semibold text-violet-400">
+            <div className="rounded-xl border border-onboard-border bg-onboard-surface p-4">
+              <p className="text-xs text-onboard-subtle">GPT fallback</p>
+              <p className="mt-1 text-2xl font-semibold text-onboard-accent-hover">
                 {p85.persisted.gptFallbackPct}%
               </p>
-              <p className="mt-1 text-xs text-zinc-500">
+              <p className="mt-1 text-xs text-onboard-subtle">
                 cache entries: {p85.cacheEntries}
               </p>
             </div>
-            <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/40 p-4">
-              <p className="text-xs text-zinc-500">Router mismatches</p>
-              <p className="mt-1 text-2xl font-semibold text-amber-400">
+            <div className="rounded-xl border border-onboard-border bg-onboard-surface p-4">
+              <p className="text-xs text-onboard-subtle">Router mismatches</p>
+              <p className="mt-1 text-2xl font-semibold text-amber-600">
                 {p85.routerParity.mismatchTotal}
               </p>
-              <p className="mt-1 text-xs text-zinc-500">
+              <p className="mt-1 text-xs text-onboard-subtle">
                 {p85.routerParity.p85Executes} P8.5 executes this session
               </p>
             </div>
 
-            <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/40 p-4 md:col-span-2">
-              <p className="text-xs font-medium text-zinc-400">Session planner mix</p>
-              <ul className="mt-2 grid grid-cols-2 gap-x-6 gap-y-1 text-sm text-zinc-300">
+            <div className="rounded-xl border border-onboard-border bg-onboard-surface p-4 md:col-span-2">
+              <p className="text-xs font-medium text-onboard-muted">Session planner mix</p>
+              <ul className="mt-2 grid grid-cols-2 gap-x-6 gap-y-1 text-sm text-onboard-ink">
                 <li className="flex justify-between">
                   <span>Total</span>
                   <span>{p85.session.total}</span>
                 </li>
                 <li className="flex justify-between">
                   <span>Execute</span>
-                  <span className="text-emerald-400">{p85.session.execute}</span>
+                  <span className="text-emerald-600">{p85.session.execute}</span>
                 </li>
                 <li className="flex justify-between">
                   <span>Defer</span>
@@ -252,7 +247,7 @@ export function TelemetryPage({ onBack }: Props) {
                 </li>
                 <li className="flex justify-between">
                   <span>Clarify</span>
-                  <span className="text-amber-400">{p85.session.clarify}</span>
+                  <span className="text-amber-600">{p85.session.clarify}</span>
                 </li>
                 <li className="flex justify-between">
                   <span>Avg latency</span>
@@ -265,16 +260,16 @@ export function TelemetryPage({ onBack }: Props) {
               </ul>
             </div>
 
-            <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/40 p-4">
-              <p className="text-xs font-medium text-zinc-400">Top tools</p>
+            <div className="rounded-xl border border-onboard-border bg-onboard-surface p-4">
+              <p className="text-xs font-medium text-onboard-muted">Top tools</p>
               {p85.persisted.topTools.length === 0 ? (
-                <p className="mt-2 text-xs text-zinc-500">No executes yet</p>
+                <p className="mt-2 text-xs text-onboard-subtle">No executes yet</p>
               ) : (
-                <ul className="mt-2 space-y-1 text-xs text-zinc-300">
+                <ul className="mt-2 space-y-1 text-xs text-onboard-ink">
                   {p85.persisted.topTools.slice(0, 6).map((t) => (
                     <li key={t.tool} className="flex justify-between">
                       <span className="truncate pr-2">{t.tool}</span>
-                      <span className="text-violet-400">{t.count}×</span>
+                      <span className="text-onboard-accent-hover">{t.count}×</span>
                     </li>
                   ))}
                 </ul>
@@ -282,16 +277,16 @@ export function TelemetryPage({ onBack }: Props) {
             </div>
 
             {p85.persisted.topDeferReasons.length > 0 ? (
-              <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/40 p-4 md:col-span-3">
-                <p className="text-xs font-medium text-zinc-400">Top defer reasons</p>
+              <div className="rounded-xl border border-onboard-border bg-onboard-surface p-4 md:col-span-3">
+                <p className="text-xs font-medium text-onboard-muted">Top defer reasons</p>
                 <ul className="mt-2 flex flex-wrap gap-2">
                   {p85.persisted.topDeferReasons.map((r) => (
                     <li
                       key={r.reason}
-                      className="rounded-lg border border-zinc-700/80 px-2 py-1 text-xs text-zinc-300"
+                      className="rounded-lg border border-onboard-border px-2 py-1 text-xs text-onboard-ink"
                     >
                       {r.reason}{" "}
-                      <span className="text-orange-400">{r.count}×</span>
+                      <span className="text-orange-600">{r.count}×</span>
                     </li>
                   ))}
                 </ul>
@@ -299,18 +294,18 @@ export function TelemetryPage({ onBack }: Props) {
             ) : null}
 
             {p85.routerParity.recentMismatches.length > 0 ? (
-              <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/40 p-4 md:col-span-3">
-                <p className="text-xs font-medium text-zinc-400">
+              <div className="rounded-xl border border-onboard-border bg-onboard-surface p-4 md:col-span-3">
+                <p className="text-xs font-medium text-onboard-muted">
                   Recent legacy router mismatches
                 </p>
                 <ul className="mt-2 space-y-2">
                   {p85.routerParity.recentMismatches.map((m, i) => (
                     <li
                       key={`${m.at}-${i}`}
-                      className="rounded-lg border border-zinc-800/80 px-3 py-2 text-xs"
+                      className="rounded-lg border border-onboard-border px-3 py-2 text-xs"
                     >
-                      <p className="truncate text-zinc-200">"{m.command}"</p>
-                      <p className="mt-1 text-zinc-500">
+                      <p className="truncate text-onboard-ink">"{m.command}"</p>
+                      <p className="mt-1 text-onboard-subtle">
                         {m.legacyRouter} · P8.5 would {m.p85Reason}
                       </p>
                     </li>
@@ -320,26 +315,26 @@ export function TelemetryPage({ onBack }: Props) {
             ) : null}
 
             {p85.recentObservations && p85.recentObservations.length > 0 ? (
-              <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/40 p-4 md:col-span-3">
-                <p className="text-xs font-medium text-zinc-400">
+              <div className="rounded-xl border border-onboard-border bg-onboard-surface p-4 md:col-span-3">
+                <p className="text-xs font-medium text-onboard-muted">
                   P9 execution observations (session)
                 </p>
                 <ul className="mt-2 space-y-2">
                   {p85.recentObservations.map((o, i) => (
                     <li
                       key={`${o.at}-${i}`}
-                      className="flex items-start justify-between gap-3 rounded-lg border border-zinc-800/80 px-3 py-2 text-xs"
+                      className="flex items-start justify-between gap-3 rounded-lg border border-onboard-border px-3 py-2 text-xs"
                     >
                       <div className="min-w-0">
-                        <p className="truncate text-zinc-200">"{o.command}"</p>
-                        <p className="mt-1 text-zinc-500">
+                        <p className="truncate text-onboard-ink">"{o.command}"</p>
+                        <p className="mt-1 text-onboard-subtle">
                           {o.planSource} · {o.tools.join(", ")}
                           {o.recovered ? " · recovered" : ""}
                         </p>
                       </div>
                       <span
                         className={
-                          o.succeeded ? "text-emerald-400" : "text-red-400"
+                          o.succeeded ? "text-emerald-600" : "text-red-600"
                         }
                       >
                         {o.succeeded ? "ok" : "fail"}
@@ -351,35 +346,35 @@ export function TelemetryPage({ onBack }: Props) {
             ) : null}
           </div>
         ) : (
-          <p className="text-sm text-zinc-500">P8.5 metrics unavailable</p>
+          <p className="text-sm text-onboard-muted">P8.5 metrics unavailable</p>
         )}
       </section>
 
       {loading && !summary ? (
-        <p className="text-sm text-zinc-500">Loading…</p>
+        <p className="text-sm text-onboard-muted">Loading…</p>
       ) : summary ? (
         <div className="grid gap-6 md:grid-cols-2">
-          <section className="rounded-2xl border border-zinc-800 bg-zinc-900/50 p-5">
-            <h3 className="text-sm font-medium text-zinc-300">Success rate</h3>
-            <p className="mt-2 text-3xl font-semibold text-emerald-400">
+          <section className="rounded-2xl border border-onboard-border bg-onboard-card p-5">
+            <h3 className="text-sm font-medium text-onboard-ink">Success rate</h3>
+            <p className="mt-2 text-3xl font-semibold text-emerald-600">
               {summary.successRatePercent}%
             </p>
-            <p className="mt-1 text-xs text-zinc-500">
+            <p className="mt-1 text-xs text-onboard-subtle">
               7-day rolling: {summary.rolling7DaySuccessRate}%
             </p>
-            <ul className="mt-4 space-y-1 text-xs text-zinc-400">
+            <ul className="mt-4 space-y-1 text-xs text-onboard-muted">
               {Object.entries(summary.byOutcome).map(([k, v]) => (
                 <li key={k} className="flex justify-between">
                   <span>{k}</span>
-                  <span className="text-zinc-200">{v}</span>
+                  <span className="text-onboard-ink">{v}</span>
                 </li>
               ))}
             </ul>
           </section>
 
-          <section className="rounded-2xl border border-zinc-800 bg-zinc-900/50 p-5">
-            <h3 className="text-sm font-medium text-zinc-300">Planner mix</h3>
-            <ul className="mt-3 space-y-2 text-sm text-zinc-300">
+          <section className="rounded-2xl border border-onboard-border bg-onboard-card p-5">
+            <h3 className="text-sm font-medium text-onboard-ink">Planner mix</h3>
+            <ul className="mt-3 space-y-2 text-sm text-onboard-ink">
               <li className="flex justify-between">
                 <span>Fast path</span>
                 <span>{mixPercent(summary.plannerMix.fast)}</span>
@@ -397,66 +392,66 @@ export function TelemetryPage({ onBack }: Props) {
                 <span>{mixPercent(summary.plannerMix.gpt)}</span>
               </li>
             </ul>
-            <p className="mt-4 text-xs text-zinc-500">
+            <p className="mt-4 text-xs text-onboard-subtle">
               Permission blocks:{" "}
-              <span className="text-red-400">{summary.blockedPermissionCount}</span>
+              <span className="text-red-600">{summary.blockedPermissionCount}</span>
             </p>
           </section>
 
-          <section className="rounded-2xl border border-zinc-800 bg-zinc-900/50 p-5">
-            <h3 className="text-sm font-medium text-zinc-300">Top workflows</h3>
+          <section className="rounded-2xl border border-onboard-border bg-onboard-card p-5">
+            <h3 className="text-sm font-medium text-onboard-ink">Top workflows</h3>
             {summary.topWorkflows.length === 0 ? (
-              <p className="mt-2 text-sm text-zinc-500">No workflow runs yet</p>
+              <p className="mt-2 text-sm text-onboard-muted">No workflow runs yet</p>
             ) : (
               <ul className="mt-3 space-y-2">
                 {summary.topWorkflows.map((w) => (
                   <li
                     key={w.name}
-                    className="flex justify-between text-sm text-zinc-300"
+                    className="flex justify-between text-sm text-onboard-ink"
                   >
                     <span>
                       {w.name}{" "}
-                      <span className="text-zinc-500">v{w.version}</span>
+                      <span className="text-onboard-subtle">v{w.version}</span>
                     </span>
-                    <span className="text-violet-400">{w.runCount}×</span>
+                    <span className="text-onboard-accent-hover">{w.runCount}×</span>
                   </li>
                 ))}
               </ul>
             )}
           </section>
 
-          <section className="rounded-2xl border border-zinc-800 bg-zinc-900/50 p-5">
-            <h3 className="text-sm font-medium text-zinc-300">Top apps</h3>
+          <section className="rounded-2xl border border-onboard-border bg-onboard-card p-5">
+            <h3 className="text-sm font-medium text-onboard-ink">Top apps</h3>
             {summary.topApps.length === 0 ? (
-              <p className="mt-2 text-sm text-zinc-500">No app launches tracked</p>
+              <p className="mt-2 text-sm text-onboard-muted">No app launches tracked</p>
             ) : (
               <ul className="mt-3 space-y-2">
                 {summary.topApps.map((a) => (
                   <li
                     key={a.appId}
-                    className="flex justify-between text-sm text-zinc-300"
+                    className="flex justify-between text-sm text-onboard-ink"
                   >
                     <span>{a.appId}</span>
-                    <span className="text-cyan-400">{a.openCount}×</span>
+                    <span className="text-sky-600">{a.openCount}×</span>
                   </li>
                 ))}
               </ul>
             )}
           </section>
 
-          <section className="rounded-2xl border border-zinc-800 bg-zinc-900/50 p-5 md:col-span-2">
-            <h3 className="text-sm font-medium text-zinc-300">Recent failures</h3>
+          <section className="rounded-2xl border border-onboard-border bg-onboard-card p-5 md:col-span-2">
+            <h3 className="text-sm font-medium text-onboard-ink">Recent failures</h3>
             {summary.recentFailures.length === 0 ? (
-              <p className="mt-2 text-sm text-zinc-500">No recent failures</p>
+              <p className="mt-2 text-sm text-onboard-muted">No recent failures</p>
             ) : (
               <ul className="mt-3 space-y-2">
                 {summary.recentFailures.map((row, i) => (
                   <li
                     key={`${row.command}-${row.at}-${i}`}
-                    className="rounded-lg border border-zinc-800/80 px-3 py-2 text-sm"
+                    className="rounded-lg border border-onboard-border px-3 py-2 text-sm"
                   >
-                    <p className="truncate text-zinc-200">"{row.command}"</p>
-                    <p className="mt-1 text-xs text-zinc-500">
+                    <p className="truncate text-onboard-ink">"{row.command}"</p>
+                    <p className="mt-1 text-xs text-onboard-subtle">
                       {row.outcome ?? "unknown"}
                       {row.planner_source ? ` · ${row.planner_source}` : ""}
                       {row.detail ? ` · ${row.detail}` : ""}
@@ -467,63 +462,63 @@ export function TelemetryPage({ onBack }: Props) {
             )}
           </section>
 
-          <section className="rounded-2xl border border-zinc-800 bg-zinc-900/50 p-5 md:col-span-2">
-            <h3 className="text-sm font-medium text-zinc-300">
+          <section className="rounded-2xl border border-onboard-border bg-onboard-card p-5 md:col-span-2">
+            <h3 className="text-sm font-medium text-onboard-ink">
               Top failed commands
             </h3>
             {summary.topFailedCommands.length === 0 ? (
-              <p className="mt-2 text-sm text-zinc-500">No failures recorded</p>
+              <p className="mt-2 text-sm text-onboard-muted">No failures recorded</p>
             ) : (
               <ul className="mt-3 space-y-2">
                 {summary.topFailedCommands.map((row) => (
                   <li
                     key={row.command}
-                    className="flex justify-between text-sm text-zinc-300"
+                    className="flex justify-between text-sm text-onboard-ink"
                   >
                     <span className="truncate pr-4">"{row.command}"</span>
-                    <span className="shrink-0 text-red-400">{row.count}×</span>
+                    <span className="shrink-0 text-red-600">{row.count}×</span>
                   </li>
                 ))}
               </ul>
             )}
           </section>
 
-          <section className="rounded-2xl border border-zinc-800 bg-zinc-900/50 p-5">
-            <h3 className="text-sm font-medium text-zinc-300">
+          <section className="rounded-2xl border border-onboard-border bg-onboard-card p-5">
+            <h3 className="text-sm font-medium text-onboard-ink">
               Top clarifications
             </h3>
             {summary.topClarifications.length === 0 ? (
-              <p className="mt-2 text-sm text-zinc-500">No clarifications yet</p>
+              <p className="mt-2 text-sm text-onboard-muted">No clarifications yet</p>
             ) : (
               <ul className="mt-3 space-y-2">
                 {summary.topClarifications.map((row) => (
                   <li
                     key={row.command}
-                    className="flex justify-between text-sm text-zinc-300"
+                    className="flex justify-between text-sm text-onboard-ink"
                   >
                     <span className="truncate pr-4">"{row.command}"</span>
-                    <span className="shrink-0 text-amber-400">{row.count}×</span>
+                    <span className="shrink-0 text-amber-600">{row.count}×</span>
                   </li>
                 ))}
               </ul>
             )}
           </section>
 
-          <section className="rounded-2xl border border-zinc-800 bg-zinc-900/50 p-5">
-            <h3 className="text-sm font-medium text-zinc-300">
+          <section className="rounded-2xl border border-onboard-border bg-onboard-card p-5">
+            <h3 className="text-sm font-medium text-onboard-ink">
               Top search misses
             </h3>
             {summary.topSearchMisses.length === 0 ? (
-              <p className="mt-2 text-sm text-zinc-500">No retriever misses</p>
+              <p className="mt-2 text-sm text-onboard-muted">No retriever misses</p>
             ) : (
               <ul className="mt-3 space-y-2">
                 {summary.topSearchMisses.map((row) => (
                   <li
                     key={row.command}
-                    className="flex justify-between text-sm text-zinc-300"
+                    className="flex justify-between text-sm text-onboard-ink"
                   >
                     <span className="truncate pr-4">"{row.command}"</span>
-                    <span className="shrink-0 text-orange-400">{row.count}×</span>
+                    <span className="shrink-0 text-orange-600">{row.count}×</span>
                   </li>
                 ))}
               </ul>

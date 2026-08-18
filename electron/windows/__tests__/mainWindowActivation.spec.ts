@@ -15,9 +15,12 @@ vi.mock("electron", () => ({
     this.blur = blur;
     this.setFocusable = setFocusable;
     this.isFocused = isFocused;
+    this.isVisible = vi.fn(() => true);
     this.isDestroyed = isDestroyed;
     this.isMinimized = vi.fn(() => false);
     this.restore = vi.fn();
+    this.setAlwaysOnTop = vi.fn();
+    this.moveTop = vi.fn();
     this.loadURL = vi.fn();
     this.loadFile = vi.fn();
     this.webContents = {
@@ -60,5 +63,21 @@ describe("mainWindow activation suppression", () => {
     expect(win.showInactive).toHaveBeenCalled();
     expect(win.focus).not.toHaveBeenCalled();
     expect(win.show).not.toHaveBeenCalled();
+  });
+
+  it("showMainWindow userInitiated forces show and focus", async () => {
+    const mod = await import("../../windows/mainWindow.js");
+    const win = mod.createMainWindow() as unknown as {
+      show: ReturnType<typeof vi.fn>;
+      showInactive: ReturnType<typeof vi.fn>;
+      focus: ReturnType<typeof vi.fn>;
+      setFocusable: ReturnType<typeof vi.fn>;
+    };
+    mod.setMainActivationSuppressed(true);
+    mod.showMainWindow({ userInitiated: true });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(win.show).toHaveBeenCalled();
+    expect(win.focus).toHaveBeenCalled();
+    expect(mod.isMainActivationSuppressed()).toBe(false);
   });
 });

@@ -345,11 +345,15 @@ export async function snapshotPreVoiceTarget(): Promise<FocusContext | null> {
   try {
     // Hotkey path: never let titled Ripple main steal FG during pin+overlay.
     yieldRippleForeground();
-    try {
-      await allowSetForegroundNative();
-    } catch {
-      /* sidecar may be down at hotkey — restore still retries */
-    }
+    // NOTE: allowSetForegroundNative() is deliberately NOT called here.
+    // The sidecar's grant_foreground_permission() ends in synthetic_alt_tap(),
+    // i.e. a real Alt keydown/up injected into whatever window is focused.
+    // Alt is the menu-activation key in Win32/Electron apps: in Notepad and
+    // Cursor that armed the menu bar and pulled keyboard focus out of the text
+    // area on hotkey press ("I focus Notepad, press the hotkey, focus is
+    // lost"). Chrome ignores a bare Alt, which is why only desktop apps broke.
+    // Foreground rights are only needed when we actually have to CHANGE the
+    // foreground, so the call now lives in the fg-mismatch branch below.
     // Live GetForegroundWindow at hotkey-press; retry once on an RPC hiccup
     // so a transient null doesn't dump us onto cached memory.
     let raw = await getForegroundWindow();

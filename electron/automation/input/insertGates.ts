@@ -79,13 +79,22 @@ export async function assertPreSendGates(strategy: string): Promise<void> {
     );
   }
 
-  if (pinned?.hwnd && (!current.visible || current.iconic)) {
+  // A window that IS the foreground is reachable by definition, whatever
+  // IsWindowVisible says. Windows 11 Notepad (WinUI tabbed shell) reports
+  // visible=0 for its own foreground window — verified live — so keying the
+  // gate on visibility alone refused every legitimate Notepad insert.
+  // Refuse only when the target is minimized, or hidden AND not foreground.
+  const unreachable = (s: PreSendState): boolean =>
+    s.iconic ||
+    (!s.visible && Number(s.fgHwnd) !== Number(pinned?.hwnd ?? 0));
+
+  if (pinned?.hwnd && unreachable(current)) {
     const deadline = Date.now() + TARGET_RESTORE_WAIT_MS;
-    while ((!current.visible || current.iconic) && Date.now() < deadline) {
+    while (unreachable(current) && Date.now() < deadline) {
       await delay(GATE_POLL_MS);
       current = (await probePreSendState(pinned.hwnd)) ?? current;
     }
-    if (!current.visible || current.iconic) {
+    if (unreachable(current)) {
       console.warn(
         `[ripple-insert] target_gate strategy=${strategy} hwnd=${pinned.hwnd}` +
           ` visible=${b(current.visible)} iconic=${b(current.iconic)}` +
