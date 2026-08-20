@@ -1,7 +1,8 @@
 # Wispr Flow — Ripple gap analysis (code-verified)
 
-**Date:** 2026-08-18  
+**Date:** 2026-08-18 (latency row + plan link updated **2026-08-20**)  
 **Canonical plan:** [WISPR-FLOW-FINAL-PLAN.md](./WISPR-FLOW-FINAL-PLAN.md)  
+**Latency program:** [DICTATION-LATENCY-PLAN.md](./DICTATION-LATENCY-PLAN.md)  
 **Wispr inventory source:** official site/help/changelog + 2026 third-party reviews (see the user-compiled feature reference).  
 **This file answers:** what Ripple actually has in *this repo*, not what the old plan claimed.
 
@@ -24,7 +25,7 @@ We did **not** re-open Wispr’s product to re-confirm their features. Wispr col
 | Measuring | Old score (2026-07-29) | **Re-score 2026-08-18** | Why |
 |-----------|------------------------|-------------------------|-----|
 | Full Wispr product (all OS + enterprise) | ~42% | **~35–40%** | Windows extras landed; Mac/iOS/Android/HIPAA/billing still 0. Language/cleanup UX gaps pulled Windows down. |
-| Core Windows Wispr *feel* (dictation product) | ~85% | **~55–60%** | Insert + snippets + notes + F9 are real. Cleanup levels, undo, dictation clipboard, Auto Flow, language reliability, meeting system-audio are not production-parity. |
+| Core Windows Wispr *feel* (dictation product) | ~85% | **~55–60%** | Insert + snippets + notes + F9 are real. Cleanup levels, undo, dictation clipboard, Auto Flow, language reliability, **stop→paste latency** (Wispr claims &lt;700 ms p99; Ripple often ~1.5–3 s), meeting system-audio are not production-parity. |
 
 Do **not** market Wispr parity.
 
@@ -55,12 +56,13 @@ Legend: ✅ have it · ⚠️ partial · ❌ missing · 🚫 not this launch
 | 17 | iOS widget / Siri / Spotlight / Action Button | 🚫 | N/A | Repo scope | No iOS project. Launch checklist: do not start until Windows beta is green. |
 | 18 | 20-minute sessions | ✅ | **Yes** (grouping) | Code-read | `dictationSessionWindow.ts` `SESSION_WINDOW_MS = 20 * 60 * 1000`. Groups utterances; not a hard “max recording length” UI. |
 | 19 | Auto-growing dictionary from corrections | ⚠️ | Manual UI only | Code-read | Dictionary UI: `Dictionary.tsx` → `learnCorrection(..., source: "dictionary_ui")`. Voice auto-learn is Jarvis tool `memoryIntelligenceTools.ts` — **gated off** with Jarvis. |
-| 20 | Context-aware spelling (nearby on-screen text) | ⚠️ | Code yes, unproven | Code-read | `screenNameBias.ts` + `prepareComposeText.ts` — **local** UIA + OCR, fail-open. Not cloud screenshots. Daily quality **not** live-QA’d today. |
+| 20 | Context-aware spelling (nearby on-screen text) | ✅ | **Yes** (WhatsApp Web verified live) | Live WhatsApp + 25 unit | `screenNameBias.ts` — always-on (fail-open), UIA→OCR, active-chat header via repeated-name detection, whole-phrase fix, relaxed fuzzy (silent-H/double-letter) for header names, sidebar-noise suppression. Live: `fixes=Umar Mishal→Ummer Mishal`, `Humar→Ummer`; `Kumar Mishra` correctly untouched. Evidence: [`cursor/SCREEN-BIAS-REPORT.md`](../cursor/SCREEN-BIAS-REPORT.md). |
 | 21 | Clipboard fallback on paste failure | ✅ | **Yes** | Code-read | `notifyDictationInsertFailure` in `executeDictation.ts` → `clipboard.writeText` + overlay hint. |
 | 22 | Privacy Mode / Zero Data Retention | ❌ | No | Code-read | No privacy-mode pref. STT is always cloud OpenAI (`voiceStreaming.service.ts`). |
 | 23 | HIPAA BAA in-app | 🚫 | Later | Plan | Phase 12 in FINAL plan — not implemented. |
 | 24 | SOC 2 / ISO 27001 | 🚫 | Later | Plan | External certs — not in repo. |
 | 25 | Local (not cloud-screenshot) context | ⚠️ | Local path exists | Code-read | Same as #20. Trust differentiator is real in architecture; not a Settings → Privacy toggle yet. |
+| 26 | Stop→paste latency (Wispr ASR+LLM &lt;700 ms p99) | ⚠️ | **No** — **not Wispr-class** | Live evening 2026-08-20 | **Code Phases 0–3 done; &lt;700 ms NOT hit.** Live: `backend_pipeline` stt+llm **~1.8–3.1 s**; `post_stt_total` often **~5–8 s**. Shipped: latency logs, mid-speech upload-only, AI fastpath/1.2s fail-open, server STT+clean on `voice:end`, skip 2nd rewrite when `cleaned=1`, insert-diag default OFF. Insert/focus unchanged. Phase 4–5 + faster STT still open. **Phase 4 partial (later 2026-08-20):** screen bias moved off the critical path (measured **p50 246 ms / p90 310 ms** removed; OCR itself only ~87 ms), `cleaned=1` Layer2a gap fixed (was still paying ~0.8–1.5 s), temporal `single_no` resolved locally, diag confirmed OFF. **Still not &lt;700 ms — `stt_ms` alone (~1.0–2.2 s) exceeds the whole budget, so this is blocked on a faster STT path (Phase 3b, backend), not on desktop work.** Detail: [DICTATION-LATENCY-PLAN.md](./DICTATION-LATENCY-PLAN.md) · [DICTATION-LATENCY-REPORT.md](../cursor/DICTATION-LATENCY-REPORT.md). |
 
 ---
 
@@ -77,18 +79,19 @@ These are **in code and intended to ship** on the dictation track (`RIPPLE_JARVI
 7. 20-minute session grouping  
 8. Account login + cloud STT  
 
-**Not** production-ready even though some code exists: language auto-detect quality, meeting system audio, undo, dictation clipboard history, Auto Flow, usage streaks, Privacy Mode, Jarvis.
+**Not** production-ready even though some code exists: language auto-detect quality, **Wispr-class stop→paste latency**, meeting system audio edge cases, undo, dictation clipboard history, Auto Flow, usage streaks, Privacy Mode, Jarvis.
 
 ---
 
 ## Highest-priority remaining (Windows only)
 
 1. Mic device selection + language reliability (English hint) — STT hearing the wrong source / wrong language  
-2. Undo AI / show raw transcript  
-3. Dictation clipboard history (every utterance)  
-4. Auto Flow (optional send in WhatsApp/Slack)  
-5. Dictionary auto-learn without Jarvis  
-6. Meeting system-audio only after DXGI is reliable  
+2. **Dictation latency (row 26)** — Phases **0–3 code done**; **&lt;700 ms not achieved**. Next: Phase 4 OCR/UX budgets + **faster STT** (see [DICTATION-LATENCY-PLAN.md](./DICTATION-LATENCY-PLAN.md))  
+3. Undo AI / show raw transcript  
+4. Dictation clipboard history (every utterance)  
+5. Auto Flow (optional send in WhatsApp/Slack)  
+6. Dictionary auto-learn without Jarvis  
+7. Meeting system-audio reliability (DXGI / loopback edge cases)  
 
 Do **not** start Mac/iOS/HIPAA until the Windows beta checklist in `PRODUCTION-LAUNCH-CHECKLIST.md` is green.
 

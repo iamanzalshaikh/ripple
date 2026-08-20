@@ -232,7 +232,8 @@ export function useVoiceCapture() {
     );
     recorderRef.current = recorder;
     partsRef.current = [];
-    streamedChunksRef.current = false;
+    // Do NOT clear streamedChunksRef here — continuous flush restarts call
+    // attachRecorder and must keep alreadyStreamed=true for stopAndGetBuffer.
 
     recorder.ondataavailable = (ev) => {
       if (ev.data.size > 0) {
@@ -279,7 +280,9 @@ export function useVoiceCapture() {
     const mimeType = mimeTypeRef.current || recorder.mimeType || "audio/webm";
     const blob = new Blob(partsRef.current, { type: mimeType });
     partsRef.current = [];
-    streamedChunksRef.current = false;
+    // Continuous flush uploads this slice — mark streamed so stop path
+    // knows chunks already hit the backend (do not reset to false).
+    streamedChunksRef.current = true;
 
     if (!blob.size) {
       throw new Error("No audio captured");

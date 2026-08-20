@@ -23,6 +23,8 @@ type MeetingUiState = {
 };
 
 const MEETING_FLUSH_MS = 10_000;
+/** Dictation: upload audio mid-speech (no progressive insert into the field). */
+const DICTATION_UPLOAD_FLUSH_MS = 2_500;
 
 type CodeRepairPanel = {
   file: string;
@@ -73,6 +75,10 @@ export function OverlayPage() {
   const busyRef = useRef(false);
   /** P7.8 — periodic voice:flush while dictation is listening. */
   const flushTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  /** True once at least one mid-speech audio chunk was uploaded for this utterance. */
+  const dictationUploadedRef = useRef(false);
+  /** Wall clock when user stopped speaking (for [ripple-latency] logs). */
+  const stopAtRef = useRef<number | null>(null);
   const voiceModeRef = useRef<"command" | "dictation" | "transform" | "meeting">(
     "command",
   );
@@ -268,14 +274,27 @@ export function OverlayPage() {
   const runDictation = useCallback(
     async (
       text: string,
-      langOpts?: { requestedLanguage?: string; detectedLanguage?: string },
+      langOpts?: {
+        requestedLanguage?: string;
+        detectedLanguage?: string;
+        backendCleaned?: boolean;
+      },
     ) => {
+      const composeStarted = Date.now();
       const res = await getRippleApi().executeDictation({
         text,
         insert: true,
         requestedLanguage: langOpts?.requestedLanguage,
         detectedLanguage: langOpts?.detectedLanguage,
+        backendCleaned: langOpts?.backendCleaned === true,
       });
+      const stopAt = stopAtRef.current;
+      if (stopAt != null) {
+        console.info(
+          `[ripple-latency] stop→done=${Date.now() - stopAt}ms compose+insert=${Date.now() - composeStarted}ms (insert/focus unchanged)`,
+        );
+        stopAtRef.current = null;
+      }
       if (res.session) {
         setSessionInfo({
           utteranceCount: res.session.utteranceCount,
@@ -351,11 +370,14 @@ export function OverlayPage() {
       clearInterval(flushTimerRef.current);
       flushTimerRef.current = null;
     }
+    stopAtRef.current = Date.now();
     setPhase("processing");
 
     try {
       const { buffer, mimeType, filename, alreadyStreamed } =
         await voice.stopAndGetBuffer();
+      const streamed = alreadyStreamed || dictationUploadedRef.current;
+      dictationUploadedRef.current = false;
 
       // P9.5 — read the language picker fresh each time (cheap local read) so
       // a change takes effect on the very next utterance, no cross-window
@@ -369,9 +391,10 @@ export function OverlayPage() {
           ? languageRes.language
           : undefined;
 
-      // P7.8 — if chunks were streamed during recording, don't re-upload the
-      // full blob (would double the server buffer). Only upload when batch.
-      if (!alreadyStreamed) {
+      // Mid-speech uploads already pushed chunks — only append the final slice.
+      // Do NOT call flushVoice here: that runs an extra Whisper pass + partial
+      // handler. endVoice does one STT on the full buffered stream.
+      if (!streamed) {
         const chunkRes = await getRippleApi().sendVoiceChunk({
           streamId: streamIdRef.current,
           sessionId: sessionIdRef.current,
@@ -384,13 +407,14 @@ export function OverlayPage() {
           setPhase("error");
           return;
         }
-      } else {
-        // Final tiny flush so trailing audio is transcribed before voice:end.
+      } else if (buffer.byteLength > 0) {
         await getRippleApi()
-          .flushVoice({
+          .sendVoiceChunk({
             streamId: streamIdRef.current,
             sessionId: sessionIdRef.current,
-            language: languageHint,
+            chunk: new Uint8Array(buffer),
+            mimeType,
+            filename,
           })
           .catch(() => undefined);
       }
@@ -399,6 +423,9 @@ export function OverlayPage() {
         streamId: streamIdRef.current,
         sessionId: sessionIdRef.current,
         language: languageHint,
+        dictationClean:
+          voiceModeRef.current === "dictation" ||
+          voiceModeRef.current === "transform",
       });
 
       if (!endRes.ok) {
@@ -407,8 +434,20 @@ export function OverlayPage() {
         return;
       }
 
-      const endData = endRes.data as { text?: string; language?: string } | undefined;
+      const endData = endRes.data as {
+        text?: string;
+        language?: string;
+        cleaned?: boolean;
+        timings?: { stt_ms: number; llm_ms: number; total_ms: number };
+      } | undefined;
       const text = endData?.text?.trim();
+      const sttDoneAt = Date.now();
+      const stopAt = stopAtRef.current;
+      if (stopAt != null) {
+        console.info(
+          `[ripple-latency] stop→stt=${sttDoneAt - stopAt}ms streamed=${streamed ? 1 : 0} cleaned=${endData?.cleaned ? 1 : 0} chars=${text?.length ?? 0}`,
+        );
+      }
       if (!text) {
         setError("No speech detected");
         setPhase("error");
@@ -430,13 +469,16 @@ export function OverlayPage() {
         await runDictation(text, {
           requestedLanguage: languageHint ?? "auto",
           detectedLanguage,
+          backendCleaned: endData?.cleaned === true,
         });
       } else {
         await runCommand(text);
+        stopAtRef.current = null;
       }
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Command failed");
       setPhase("error");
+      stopAtRef.current = null;
     } finally {
       busyRef.current = false;
       await getRippleApi().setOverlayVoiceActive(false);
@@ -455,8 +497,9 @@ export function OverlayPage() {
     setCleanupTags([]);
     setPhase("listening");
 
-    // P7.8 PAUSED — no live chunk upload / flush / progressive insert.
-    // Batch path: upload once on stop → voice:end → insert (pre-7.8 behavior).
+    // Latency Phase 1: upload complete WebM slices mid-speech (meeting-style
+    // continuous flush). Does NOT enable progressive insert into the field
+    // (7.8 stays paused — no streaming.begin, no flushVoice mid-utterance).
     try {
       // P9.6 — read fresh each time, same reasoning as the language pref:
       // cheap local read, always reflects the latest toggle with no
@@ -472,16 +515,45 @@ export function OverlayPage() {
       }));
       const micDeviceId =
         micRes.ok && micRes.deviceId ? micRes.deviceId : undefined;
+      dictationUploadedRef.current = false;
+      const wantUploadOverlap =
+        voiceModeRef.current === "dictation" ||
+        voiceModeRef.current === "transform";
       console.info(
-        `[ripple-overlay] mic capture quietMode=${quietOn ? "ON" : "OFF"} deviceId=${micDeviceId ?? "default"} streaming=OFF`,
+        `[ripple-overlay] mic capture quietMode=${quietOn ? "ON" : "OFF"} deviceId=${micDeviceId ?? "default"} ` +
+          `uploadOverlap=${wantUploadOverlap ? `ON/${DICTATION_UPLOAD_FLUSH_MS}ms` : "OFF"} insertStream=OFF`,
       );
 
       await voice.start({
         quiet: quietOn,
         deviceId: micDeviceId,
+        continuous: wantUploadOverlap,
+        flushInterval: wantUploadOverlap ? DICTATION_UPLOAD_FLUSH_MS : undefined,
+        onFlush: wantUploadOverlap
+          ? (result) => {
+              void getRippleApi()
+                .sendVoiceChunk({
+                  streamId: streamIdRef.current,
+                  sessionId: sessionIdRef.current,
+                  chunk: new Uint8Array(result.buffer),
+                  mimeType: result.mimeType,
+                  filename: result.filename,
+                })
+                .then((res) => {
+                  if (res.ok) {
+                    dictationUploadedRef.current = true;
+                    console.info(
+                      `[ripple-latency] mid_speech_upload bytes=${result.buffer.byteLength}`,
+                    );
+                  }
+                })
+                .catch(() => undefined);
+            }
+          : undefined,
       });
     } catch (e: unknown) {
       recordingRef.current = false;
+      dictationUploadedRef.current = false;
       if (flushTimerRef.current) {
         clearInterval(flushTimerRef.current);
         flushTimerRef.current = null;
@@ -542,16 +614,17 @@ export function OverlayPage() {
       }));
       const quietOn = quietRes.ok ? quietRes.quietMode === true : false;
       console.info(
-        `[ripple-overlay] meeting capture quietMode=${quietOn ? "ON" : "OFF"} flush=${MEETING_FLUSH_MS}ms systemAudio=OFF (DXGI unreliable)`,
+        `[ripple-overlay] meeting capture quietMode=${quietOn ? "ON" : "OFF"} flush=${MEETING_FLUSH_MS}ms systemAudio=TRY (fallback mic-only on DXGI/loopback failure)`,
       );
 
-      // Mic-only: getDisplayMedia/loopback hits DXGI Duplicationfailed on this
-      // machine and previously blocked the recorder entirely (0 transcript).
+      // Mic + optional system audio. If Windows DXGI loopback fails (common on
+      // some GPUs / headsets), use mic-only so the recorder still produces
+      // transcript chunks.
       await voiceRef.current.start({
         quiet: quietOn,
         continuous: true,
         flushInterval: MEETING_FLUSH_MS,
-        includeSystemAudio: false,
+        includeSystemAudio: true,
         onCaptureMode: (mode) => {
           setMeetingCaptureMode(mode);
           console.info(`[ripple-overlay] meeting capture ready mode=${mode}`);
@@ -843,8 +916,8 @@ export function OverlayPage() {
           </p>
           <p className="text-zinc-500">
             By continuing you consent to this processing. System-audio capture
-            (other participants) is temporarily off on Windows GPUs that fail
-            DXGI loopback — mic-only is used for reliability.
+            (other participants) will be attempted. If Windows DXGI/loopback
+            fails, Ripple falls back to mic-only so you still get a transcript.
           </p>
         </div>
         <div className="flex shrink-0 gap-1.5">

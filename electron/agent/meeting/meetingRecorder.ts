@@ -221,8 +221,86 @@ function clamp01(n: number): number {
   return Math.min(1, Math.max(0, n));
 }
 
+type TranscriptEvidenceLine = {
+  stamp: string;
+  speaker: string;
+  text: string;
+};
+
+function parseTranscriptEvidence(transcript: string): TranscriptEvidenceLine[] {
+  const lines = transcript
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  const out: TranscriptEvidenceLine[] = [];
+
+  // Lines look like:
+  // [00:25] Speaker B: Can we meet tomorrow at nine p m?
+  const re = /^\[(\d{2}:\d{2})\]\s+([^:]+):\s+(.*)$/;
+  for (const line of lines) {
+    const m = line.match(re);
+    if (!m) continue;
+    const [, stamp, speaker, text] = m;
+    out.push({ stamp, speaker: speaker.trim(), text: text.trim() });
+  }
+
+  return out;
+}
+
+function inferLikelyMicSpeaker(
+  evidence: TranscriptEvidenceLine[],
+): { micSpeaker: string | null; reason: string } {
+  // Heuristic: in many tests, the user’s mic contains “your script/pitch” phrases
+  // (ex: “Host Tracker”, “Scale automation”, “no-code workflows”).
+  const MIC_KEYWORDS = [
+    "host tracker",
+    "scale automation",
+    "no-code",
+    "workflows",
+    "concurrent execution",
+    "secure vps",
+    "vps",
+    "deploy in one click",
+  ];
+
+  const perSpeakerText = new Map<string, string>();
+  for (const e of evidence) {
+    const prev = perSpeakerText.get(e.speaker) ?? "";
+    perSpeakerText.set(e.speaker, prev + "\n" + e.text);
+  }
+
+  let bestSpeaker: string | null = null;
+  let bestScore = 0;
+
+  for (const [speaker, text] of perSpeakerText.entries()) {
+    const lt = text.toLowerCase();
+    let score = 0;
+    for (const kw of MIC_KEYWORDS) {
+      if (lt.includes(kw)) score += 1;
+    }
+    if (score > bestScore) {
+      bestScore = score;
+      bestSpeaker = speaker;
+    }
+  }
+
+  if (!bestSpeaker || bestScore < 2) {
+    return {
+      micSpeaker: null,
+      reason: "Not enough keyword signal to confidently assign mic vs system audio.",
+    };
+  }
+
+  const reason = `Detected user-script keywords in ${bestSpeaker} (score ${bestScore}).`;
+  return { micSpeaker: bestSpeaker, reason };
+}
+
 /** Exported for unit tests — builds the analysis markdown prepended to notes. */
-export function buildMeetingAnalysisBlock(analysis: MeetingAnalysis): string {
+export function buildMeetingAnalysisBlock(
+  analysis: MeetingAnalysis,
+  transcript?: string,
+): string {
   const parts: string[] = [];
 
   parts.push(`## Summary\n\n${analysis.summary.trim() || "_(empty)_"}\n`);
@@ -268,6 +346,67 @@ export function buildMeetingAnalysisBlock(analysis: MeetingAnalysis): string {
         : "_(none)_"
     }\n`,
   );
+
+  if (transcript?.trim()) {
+    const evidenceLines = parseTranscriptEvidence(transcript);
+    const { micSpeaker, reason } = inferLikelyMicSpeaker(evidenceLines);
+    const speakersInEvidence = Array.from(
+      new Set(evidenceLines.map((e) => e.speaker)),
+    );
+
+    if (speakersInEvidence.length > 0) {
+      if (micSpeaker && speakersInEvidence.length >= 2) {
+        const otherSpeakers = speakersInEvidence.filter((s) => s !== micSpeaker);
+        const likelySystemSpeaker = otherSpeakers[0] ?? null;
+
+        parts.push(
+          `## Speaker roles (heuristic)\n\n` +
+            `- **Mic-likely:** ${micSpeaker}\n` +
+            (likelySystemSpeaker
+              ? `- **System-audio-likely:** ${likelySystemSpeaker}\n`
+              : `- **System-audio-likely:** _(not inferred)_\n`) +
+            `- _${reason}_\n`,
+        );
+      } else {
+        // Keep this section honest when inference is weak.
+        parts.push(
+          `## Speaker roles (heuristic)\n\n` + `- ${reason}\n`,
+        );
+      }
+    }
+
+    if (evidenceLines.length > 0) {
+      const bySpeaker = new Map<string, TranscriptEvidenceLine[]>();
+      for (const line of evidenceLines) {
+        const prev = bySpeaker.get(line.speaker) ?? [];
+        if (prev.length < 3) prev.push(line);
+        bySpeaker.set(line.speaker, prev);
+      }
+
+      // Produce timestamped samples per speaker. This makes the summary “auditable”.
+      const rows = analysis.talkTime.length
+        ? analysis.talkTime
+            .map((t) => {
+              const sampleLines = bySpeaker.get(t.speaker) ?? [];
+              const sample = sampleLines
+                .map((l) => `\n  - [${l.stamp}] ${l.speaker}: ${l.text}`)
+                .join("");
+              return `- **${t.speaker}:** ${t.percent}%${sample}`;
+            })
+            .join("\n")
+        : speakersInEvidence
+            .map((s) => {
+              const sampleLines = bySpeaker.get(s) ?? [];
+              const sample = sampleLines
+                .map((l) => `\n  - [${l.stamp}] ${l.speaker}: ${l.text}`)
+                .join("");
+              return `- **${s}:** ${sample}`;
+            })
+            .join("\n");
+
+      parts.push(`## Evidence (from transcript)\n\n${rows}\n`);
+    }
+  }
 
   if (analysis.talkTime.length > 0) {
     const rows = analysis.talkTime
@@ -725,7 +864,7 @@ export async function stopMeetingRecording(options?: {
   if (transcript.trim()) {
     const result = await summarizeTranscript(transcript, talkTime);
     if (result) {
-      summaryBlock = buildMeetingAnalysisBlock(result);
+      summaryBlock = buildMeetingAnalysisBlock(result, transcript);
     } else if (talkTime.length > 0) {
       summaryBlock = buildMeetingAnalysisBlock({
         summary:
@@ -742,7 +881,7 @@ export async function stopMeetingRecording(options?: {
         keyFacts: [],
         actionItems: [],
         talkTime,
-      });
+      }, transcript);
     } else {
       summaryBlock = `## Summary\n\n_(Summary unavailable — check connection and try again later.)_\n\n`;
     }

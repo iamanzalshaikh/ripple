@@ -244,6 +244,7 @@ Ship when Phase 1–5 + §6 matrix are all green.
 | 7.6 | More apps: Notion, Word, Docs, Discord, Slack | L | Phase 1 |
 | 7.7 | Nearby on-screen text → bias name/term spelling | L | MVP insert + UIA |
 | 7.8 | Streaming / live type-as-you-speak | XL | STT partials + progressive insert |
+| 7.8b | **Dictation stop→paste latency (Wispr &lt;700 ms program)** | L | See [DICTATION-LATENCY-PLAN.md](./DICTATION-LATENCY-PLAN.md) — measure → chunk-during-speech → smart AI skip/cap → **backend** STT+LLM pipeline. Do **before** re-enabling 7.8 default. |
 | 7.9a | Contact import → auto-seed bias list | M | Google/Outlook OAuth or local address book |
 | 7.9b | Conversation history mining → auto-harvest proper nouns | M | WhatsApp/email DB read access |
 | 7.9c | Auto-correction prompt ("Did you mean X?") | M | 7.7, overlay UX |
@@ -251,6 +252,8 @@ Ship when Phase 1–5 + §6 matrix are all green.
 **Ship gate:** Snippets + Styles usable E2E; dictionary UI shipped; ≥3 new apps proven live.  
 **Note:** Wispr Styles = English + desktop first — Very Casual → Casual → Neutral → Professional → Formal per process name.  
 **Follow-ups:** 7.7 landed (`screenNameBias.ts`); **7.8 PAUSED** (default OFF — was damaging focused editors; set `RIPPLE_P85_STREAMING_INSERT=1` only after real streaming STT).  
+**7.8b (2026-08-20 evening):** Phases **0–3 code complete** (measure, upload-only flush, cleanup budgets, server STT+clean). Live: backend pipeline **~1.8–3.1 s**, E2E still multi-second — **do not claim Wispr &lt;700 ms**. Plan + scorecard: [DICTATION-LATENCY-PLAN.md](./DICTATION-LATENCY-PLAN.md). Gap row **26** stays ⚠️.  
+**7.8b (2026-08-20, later pass — Phase 4 partial):** Screen bias moved off the critical path (prewarm at `voice:end`; measured **p50 246 ms / p90 310 ms** removed, quality-guarded by inline retry), `cleaned=1` **Layer2a gap fixed** (Phase 3's skip missed it — still paid ~0.8–1.5 s), temporal `single_no` resolved locally (kills the `"…No, 10pm"` failure mode), diag tax confirmed OFF live. **&lt;700 ms still NOT achieved and now provably blocked on STT infra** — `stt_ms` ~1.0–2.2 s alone exceeds the budget. Next real lever is **Phase 3b faster STT (backend)**, not desktop. Report: [DICTATION-LATENCY-REPORT.md](../cursor/DICTATION-LATENCY-REPORT.md).  
 **7.1 alt-intent (shipped, production soft-guard):** Competing alternatives in one breath (TOD greetings, clock times, repeated “can we…”) relax `cleanupWithinBounds` so existing `dictation_clean` AI can keep final intent. Soft `altCollapseIsPlausible` rejects only still-jammed output (does not force last-only). Layer-1 `double_no` / directives unchanged. Eval: `phase-p85-alt-intent-eval.spec.ts`.
 
 ### Phase 7.9 — Automatic Name Harvesting (production-grade name accuracy)
@@ -511,12 +514,14 @@ Then start Phase 7.
 | 2026-08-13 | **Chrome multi-window pin lock:** stop unconditional `recoverDictationFocusTarget("pre_insert")` (was re-pinning to mouse Chrome); keep hotkey hwnd; `matchesPinnedInsertTarget` rejects WhatsApp≠Google Chat≠Docs (badge churn still OK). |
 | 2026-08-18 | **Wispr 25-item gap analysis (code-verified).** New [WISPR-FLOW-GAP-ANALYSIS.md](./WISPR-FLOW-GAP-ANALYSIS.md). Core Windows feel re-scored **~55–60%** (was ~85%). |
 | 2026-08-18 | **4-layer pipeline + cleanup levels.** Transcribe always on; cleanup / format / context independently toggleable (`pipelineLayers.ts`). Presets None/Light/Medium/High in Language settings. Default High preserves prior behavior. Insert + focus untouched. |
+| 2026-08-20 | **7.8b Dictation latency program.** Phases 0–3 **code done**; live `backend_pipeline` ~1.8–3.1 s — **&lt;700 ms not achieved**. Plan scorecard updated in [DICTATION-LATENCY-PLAN.md](./DICTATION-LATENCY-PLAN.md). Gap row **26** remains ⚠️. |
 
 ---
 
 ## 20. Related (engineering reference only — not alternate plans)
 
-- [WISPR-FLOW-GAP-ANALYSIS.md](./WISPR-FLOW-GAP-ANALYSIS.md) — **2026-08-18 code-verified** Wispr checklist (have / partial / missing)  
+- [WISPR-FLOW-GAP-ANALYSIS.md](./WISPR-FLOW-GAP-ANALYSIS.md) — **2026-08-18 code-verified** Wispr checklist (have / partial / missing); row 26 latency **2026-08-20**  
+- [DICTATION-LATENCY-PLAN.md](./DICTATION-LATENCY-PLAN.md) — stop→paste latency vs Wispr &lt;700 ms (desktop + backend)  
 - [P8.5-P6-P7-IMPLEMENTATION-PLAN.md](./P8.5-P6-P7-IMPLEMENTATION-PLAN.md) — P7 engineering detail  
 - [wispr.md](./wispr.md) — correction layer design  
 - [P7-FEATURES.md](./P7-FEATURES.md) — native hands  

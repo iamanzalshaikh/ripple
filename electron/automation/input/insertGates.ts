@@ -39,8 +39,13 @@ async function probePreSendState(
 
 export async function assertPreSendGates(strategy: string): Promise<void> {
   if (process.platform !== "win32") return;
+  const gateStarted = Date.now();
   const pinned = resolveTypingFocusTarget();
   const state = await probePreSendState(pinned?.hwnd);
+  const probeMs = Date.now() - gateStarted;
+  if (probeMs >= 100) {
+    console.info(`[ripple-latency] insert_phase presend_probe=${probeMs}ms`);
+  }
   if (!state) {
     // Native probe unavailable (non-win32 test env / PowerShell failure) —
     // log and continue; the gates are defense-in-depth, not the only check.

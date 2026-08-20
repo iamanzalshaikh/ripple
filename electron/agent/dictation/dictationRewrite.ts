@@ -19,6 +19,7 @@ import {
   formatSpokenList,
   formatTranscript,
   localCleanup,
+  shouldPreferLocalCleanupOnly,
   stripFillersAndStutters,
 } from "./localCleanup.js";
 import type {
@@ -46,6 +47,8 @@ export type DictationRewriteInput = {
    * (default High = current always-on cleanup + format + context).
    */
   layers?: PipelineLayers;
+  /** Phase 3 — server already ran dictation_clean; skip desktop AI rewrite. */
+  backendCleaned?: boolean;
 };
 
 export type DictationRewriteResult = ProductionDictationRewriteResult;
@@ -243,7 +246,7 @@ export async function rewriteDictationBuffer(
   let generation = null;
   let modelUsed = "local-signal-v1";
 
-  if (layers.cleanup && signal.requiresLLM) {
+  if (layers.cleanup && signal.requiresLLM && !input.backendCleaned) {
     layer2aCalled = true;
     const analyzed = await analyzeDictationCorrection({
       committedBuffer,
@@ -252,6 +255,14 @@ export async function rewriteDictationBuffer(
     });
     decision = analyzed?.decision ?? null;
     modelUsed = analyzed?.model ?? "none_fallback";
+  } else if (layers.cleanup && signal.requiresLLM && input.backendCleaned) {
+    // Phase 3 — the server already ran STT + dictation_clean, which resolves
+    // self-corrections. The skip below only covered the cleanup branch, so a
+    // `cleaned=1` utterance carrying a correction signal still paid a full
+    // Layer2a LLM round trip (~0.8–1.5 s) on the critical path.
+    console.info(
+      `[ripple-latency] layer2a skipped backend_pipeline signal=${signal.signal}`,
+    );
   }
 
   if (
@@ -302,7 +313,37 @@ export async function rewriteDictationBuffer(
       cleanupApplied = true;
       cleanupReason = "list_format";
       modelUsed = "local-list-format";
+    } else if (input.backendCleaned) {
+      // Phase 3 — STT+clean already ran on voice:end. Do not call /voice/rewrite again.
+      finalText = currentUtterance;
+      cleanupApplied = true;
+      cleanupReason = "backend_dictation_clean";
+      modelUsed = "backend-dictation_clean";
+      console.info(
+        `[ripple-latency] ai_rewrite skipped backend_pipeline`,
+      );
     } else if (layers.cleanup && layers.format && layers.context) {
+      // Phase 2 latency: short clean utterances → local only (skip ~0.8–1.4s LLM).
+      if (shouldPreferLocalCleanupOnly(currentUtterance)) {
+        const local = localCleanup(currentUtterance);
+        if (local && local !== currentUtterance) {
+          finalText = local;
+          cleanupApplied = true;
+          cleanupReason = "local_cleanup_fastpath";
+          modelUsed = "local-cleanup-fast";
+          console.info(
+            `[ripple-latency] ai_rewrite skipped fastpath words=${currentUtterance.trim().split(/\s+/).length}`,
+          );
+        } else {
+          finalText = currentUtterance;
+          cleanupApplied = false;
+          cleanupReason = "fastpath_noop";
+          modelUsed = "local-cleanup-fast";
+          console.info(
+            `[ripple-latency] ai_rewrite skipped fastpath words=${currentUtterance.trim().split(/\s+/).length}`,
+          );
+        }
+      } else {
       const cleaned = await aiRewriteDictation(currentUtterance, {
         surface: "dictation",
         previousText: committedBuffer || undefined,
@@ -345,6 +386,7 @@ export async function rewriteDictationBuffer(
           cleanupReason = "local_cleanup";
           modelUsed = "local-cleanup-v1";
         }
+      }
       }
     } else if (layers.cleanup && layers.format) {
       const local = localCleanup(currentUtterance);

@@ -1,0 +1,164 @@
+HEC# Ripple — Production Readiness Edge Case Test Matrix
+
+Compiled from every bug class found across this project's debugging history. Organized by system. Each row = one test to actually run, not a theoretical concern.
+
+---
+
+## 1. FOCUS / WINDOW TARGETING (highest-risk area — most bugs found here)
+
+| # | Edge case | Why it matters | Expected behavior |
+|---|---|---|---|
+| 1.1 | Dictate immediately on fresh app launch (cold start), before boot-ready | Root cause of multiple bugs this project | Hotkey inert until sidecar+backend health confirmed; no partial state |
+| 1.2 | Dictate, then switch to a DIFFERENT window before insert completes | Caused the WhatsApp→EGC Shopping Club misfire | Aborts with `target_window_changed`, clipboard fallback, toast — never yanks |
+| 1.3 | Dictate with 2+ windows of the SAME app open (5+ Chrome windows) | Target resolution grabbed wrong window | Correct window (by hwnd, not just process name) stays targeted |
+| 1.4 | Dictate, then minimize the target window mid-speech | New failure class, untested | Should detect `iconic=1` via `target_state` gate, abort before paste, not paste into nothing |
+| 1.5 | Dictate on a monitor that is NOT the Windows "main display" | Root cause of the multi-week shell-steal saga | Overlay follows target's monitor (`MonitorFromWindow`), zero shell steals regardless of main-display setting |
+| 1.6 | Unplug/replug external monitor WHILE app is running (not just at launch) | Never tested — display config can change mid-session | App should re-resolve monitor topology, not crash or misplace overlay |
+| 1.7 | Dictate while target window is behind other windows (not minimized, just occluded) | Untested | Should still work — occlusion ≠ not-foreground |
+| 1.8 | Rapid-fire: press hotkey, release, press again within <500ms | Untested — possible double-session bug | Second press should either queue cleanly or be debounced, never corrupt state |
+| 1.9 | Press hotkey while a PREVIOUS dictation insert is still in-flight | Untested | Must not race — either block, queue, or cleanly cancel the first |
+| 1.10 | Dictate with Windows Snap Layouts / Fancy Zones active (tiled windows) | Untested — common power-user setup | Target resolution and overlay placement should be unaffected |
+| 1.11 | Dictate immediately after Windows lock/unlock (Win+L then unlock) | Untested — foreground state is unusual right after unlock | No false shell-steal, no crash |
+| 1.12 | Dictate right after a Windows notification toast appears/dismisses | Untested — another transient shell surface | Should not be misidentified as a real target change |
+| 1.13 | Dictate with Alt+Tab switcher UI open/closing at the same moment | Untested — another shell overlay surface | No false abort, no yank |
+
+---
+
+## 2. INSERT LADDER / TEXT LANDING
+
+| # | Edge case | Why it matters | Expected behavior |
+|---|---|---|---|
+| 2.1 | Paste into a field that already has existing text (cursor mid-sentence) | Untested — all tests so far used empty fields | Text inserts at cursor position, doesn't overwrite/select-all by accident |
+| 2.2 | Paste into a field with text SELECTED (highlighted) | Untested | Confirm intended behavior — replace selection or insert-and-deselect? Must be deliberate, not accidental |
+| 2.3 | Very long dictation (500+ chars) into a slow-rendering web app | Root cause of the mid-send foreground-change bug | Chunked send with checkpoint verification holds up at this length |
+| 2.4 | Very short dictation (1-2 words) | Untested | No overhead/lag disproportionate to input length |
+| 2.5 | Dictate into a read-only or disabled field | Untested | Should detect non-editable and abort cleanly, not silently fail |
+| 2.6 | Dictate into a field that validates/rejects input live (e.g. numeric-only field, character limit) | Untested | Graceful abort or partial-accept, clear signal to user either way |
+| 2.7 | Dictate into an iframe-embedded editor (many web apps embed rich text in iframes) | Untested — accessibility tree traversal often breaks across iframe boundaries | Confirm works or fails loud, not silently |
+| 2.8 | Every insert strategy fails (native_text, sendkeys, clipboard, extension all fail) | Confirmed as a designed fallback, not yet stress-tested | Text guaranteed on clipboard + visible toast, zero data loss |
+| 2.9 | Clipboard already contains something important when paste-strategy fires | Untested — could silently overwrite user's existing clipboard content | Should restore original clipboard after paste, or warn user clipboard will be used |
+| 2.10 | Paste into WhatsApp/Chrome when a browser extension conflicts with clipboard access | Untested | Fails loud (abort+toast), not silent |
+| 2.11 | Dictate into a field, then IMMEDIATELY close that window before insert completes | Untested — target disappears entirely, not just loses focus | Must detect hwnd invalid (not just unfocused) and abort safely |
+| 2.12 | RTL language insert (Urdu/Arabic) into different app types | Explicitly flagged earlier as untested | Cursor placement, selection, and text direction all correct per app |
+| 2.13 | Font/script rendering check per target app (Devanagari, Arabic, CJK) | Explicitly flagged earlier as untested | No tofu-boxes; visual check per app, not just "text matched" check |
+
+---
+
+## 3. CORRECTION ENGINE / DICTIONARY
+
+| # | Edge case | Why it matters | Expected behavior |
+|---|---|---|---|
+| 3.1 | Multi-word phrase correction ("play show" → "Play Store") | Confirmed working (`applyCorrectionsToUtterance` matches phrases), but re-verify after any refactor | Longest-match-first phrase correction still applies |
+| 3.2 | Two corrections that overlap/conflict (e.g. "play show" and "show" both have rules) | Untested | Deterministic precedence, no silent double-application |
+| 3.3 | Correction dictionary at scale (100+ entries) — performance | Untested | No meaningful latency added to dictation with a large dictionary |
+| 3.4 | "no no" course-correction combined with a name correction in the same utterance | Untested combination of two working features | Both apply correctly, no interference |
+| 3.5 | User corrects a word, then says a DIFFERENT word that's phonetically similar | Untested | Correct word wins; system doesn't over-correct to the wrong dictionary entry |
+| 3.6 | Dictionary entry with special characters/unicode names (e.g. "Zoë", "Núñez") | Untested | Stored and matched correctly, no encoding corruption |
+
+---
+
+## 4. LANGUAGE / STT
+
+| # | Edge case | Why it matters | Expected behavior |
+|---|---|---|---|
+| 4.1 | Clear English speech — confirm NOT misdetected as Sindhi/Urdu/Malay/Nynorsk | Confirmed recurring bug, root cause never fixed at STT level, only guarded downstream | `detected=english` reliably, or guard silently corrects every time with zero visible impact |
+| 4.2 | Code-switched speech (English + Hindi in the same sentence) | Confirmed working in the meeting-notetaker diarization test — re-verify in plain dictation too | Correct mixed-script output |
+| 4.3 | Romanized Hindi/Marathi (Hinglish written in Latin script) | Already documented as a known, accepted limitation | Known-limit disclosure shown to user, not silently garbled with no explanation |
+| 4.4 | Background noise / multiple people talking near the mic | Untested | Reasonable degradation, not garbage output presented with false confidence |
+| 4.5 | Very quiet/whispered speech | Flagged as Phase 9.6, untested | Either works or clearly indicates low-confidence, not silent failure |
+| 4.6 | Language auto-detect when user has explicitly pinned a language (e.g. pinned "hi" but speaks English) | Untested | Pinned language should still produce reasonable output, not force-garble English into Hindi transliteration |
+
+---
+
+## 5. CRASH / PROCESS STABILITY
+
+| # | Edge case | Why it matters | Expected behavior |
+|---|---|---|---|
+| 5.1 | First dictation into Notepad/Cursor after a FULL process kill + relaunch | The exact unresolved bug from this session | App stays alive; if it doesn't, crash log captures full stack trace |
+| 5.2 | Native sidecar (ripple-native.exe) crashes independently while Electron main process stays alive | Untested — different crash domain, needs its own panic hook | Detected, logged, sidecar respawns, user sees a degraded-mode indicator rather than silent failure |
+| 5.3 | Backend server becomes unreachable mid-session (not just at boot) | Untested — only boot-time health check exists | Graceful degradation/retry, clear error state, not a hang |
+| 5.4 | Machine goes to sleep mid-dictation, wakes up later | Untested | No corrupted state on wake; hotkey works normally after resume |
+| 5.5 | Low memory / high CPU load on the machine during dictation | Untested | Either works or fails gracefully — no crash under resource pressure |
+| 5.6 | App update/restart while a dictation is in-flight | Relevant once auto-update ships | No data loss, no corrupted install |
+
+---
+
+## 6. MEETING NOTETAKER (Phase 10)
+
+| # | Edge case | Why it matters | Expected behavior |
+|---|---|---|---|
+| 6.1 | Meeting stopped before 30s flush interval | Confirmed: produces empty transcript correctly | Graceful "no speech captured" note, no crash |
+| 6.2 | Other audio playing (YouTube, music) during a meeting | CONFIRMED BUG — system audio loopback captures everything, not just the call | Must scope capture to the actual meeting app, or explicitly warn user to close other audio |
+| 6.3 | Leaked internal prompt text appearing in transcript output | CONFIRMED BUG (once) — "Preserve speaker content faithfully" leaked into output | Zero leakage across repeated runs; needs prompt/output separation audit |
+| 6.4 | Diarization with a REAL second speaker (not one person doing two voices) | Never actually validated — all tests so far used one person | Speaker A/B labels genuinely track two different voices |
+| 6.5 | Summary of a garbled/low-confidence transcript | CONFIRMED ISSUE — summarizer confidently fabricates coherent narrative from noise | Should flag "transcript unclear, summary may be inaccurate" rather than presenting false confidence |
+| 6.6 | Summary preserving specific concrete details (amounts, names) vs. over-generalizing | CONFIRMED ISSUE — "3000 rupees, documents missing" got flattened to "personal issues" | Concrete facts preserved, not smoothed away |
+| 6.7 | Meeting recording without explicit consent/disclosure UI | CONFIRMED GAP — no consent screen exists yet | Clear disclosure before recording starts, especially once it captures other people's voices |
+| 6.8 | Very long meeting (1hr+) — memory/storage/performance | Untested | No degradation, no unbounded memory growth |
+| 6.9 | Network drop mid-meeting | Untested | Local buffering, resume/retry, no silent data loss |
+
+---
+
+## 7. MULTI-DEVICE / SYNC (once Phase 9 ships)
+
+| # | Edge case | Why it matters | Expected behavior |
+|---|---|---|---|
+| 7.1 | Same account logged in on two devices simultaneously, both editing dictionary | Untested (not yet built) | Conflict resolution defined, not last-write-wins silently eating changes |
+| 7.2 | Sync during intermittent connectivity (partial sync, then reconnect) | Untested | No duplicate or lost entries |
+| 7.3 | Account deletion while a sync is in-flight | Untested | Clean, doesn't leave orphaned data |
+
+---
+
+## 8. DISTRIBUTION / INSTALL
+
+| # | Edge case | Why it matters | Expected behavior |
+|---|---|---|---|
+| 8.1 | Install on a machine with restrictive antivirus/SmartScreen | Real risk without code signing | Signed installer, no scary warning blocking install |
+| 8.2 | Install where a previous version already exists | Untested | Clean upgrade, no duplicate processes, no orphaned registry/startup entries |
+| 8.3 | Uninstall — confirm complete removal | Untested | No leftover startup entries, services, or native sidecar processes |
+| 8.4 | Install on a machine with multiple Windows user accounts | Untested | Per-user vs. system-wide install behaves correctly, no permission errors |
+| 8.5 | Auto-update mid-use | Once wired up (electron-updater) | No forced interruption of an active dictation, no silent failure |
+
+---
+
+## 9. PRIVACY / SECURITY
+
+| # | Edge case | Why it matters | Expected behavior |
+|---|---|---|---|
+| 9.1 | Sensitive data dictated (passwords, financial info) — where does it transit/log? | Never explicitly audited | Confirm what's logged locally vs. sent to backend vs. retained, and for how long |
+| 9.2 | `.env`/credentials accidentally exposed (already happened once this project — flagged and rotated) | CONFIRMED PAST INCIDENT | Regular secret-scanning in CI; confirm rotation actually happened and no old keys remain live |
+| 9.3 | Meeting audio sent to cloud for processing — is this disclosed clearly? | Related to 6.7 | Explicit user-facing privacy statement before first use, not buried in a settings page |
+| 9.4 | Local dictation history / clipboard fallback data — encrypted at rest? | Untested | Confirm storage location and protection level match what's promised to users |
+
+---
+
+## 10. ACCESSIBILITY / INPUT EDGE CASES
+
+| # | Edge case | Why it matters | Expected behavior |
+|---|---|---|---|
+| 10.1 | Hotkey conflicts with OTHER installed apps (not just Windows OS shortcuts) | Only Windows-level collisions tested so far (Ctrl+Shift, Alt+Shift) | Detect and warn on third-party app hotkey collisions too, if feasible |
+| 10.2 | User has a non-US keyboard layout | Untested | Hotkey registration and character insertion both work correctly |
+| 10.3 | Screen reader running simultaneously (NVDA/JAWS/Narrator) | Untested — accessibility tree is shared/contested resource | No conflict with the a11y diagnostics your own insert-verification relies on |
+| 10.4 | High-DPI / display scaling other than 100% | Untested — overlay positioning math could break | Overlay renders in the correct position at 125%/150%/200% scaling |
+
+---
+
+## Priority order for actually running these
+
+**Do first (highest real-world likelihood + highest damage if broken):**
+5.1, 1.2, 1.3, 1.5, 2.8, 2.9, 6.2, 6.5, 6.7, 9.2
+
+**Do second (common real usage patterns not yet tested):**
+1.4, 1.8, 1.9, 2.1, 2.2, 2.3, 4.1, 6.4, 6.6, 8.1
+
+**Do third (real but lower-frequency):**
+Everything else in sections 1, 3, 4, 10
+
+**Defer until the relevant phase actually ships:**
+Section 7 (sync — Phase 9 not built yet), 8.5 (auto-update — not wired up yet)
+
+---
+
+## How to use this with your Playwright/loop setup
+
+For each row, write one Playwright (or manual, where Playwright can't reach it — e.g. real audio, real multi-monitor unplug) test that reproduces the exact scenario and asserts the "expected behavior" column. Feed failures back into the same loop-prompt pattern you've been using: crash handler → real stack trace → targeted fix → re-verify 3x clean, never patch on a guess.

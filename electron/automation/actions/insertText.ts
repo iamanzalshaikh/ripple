@@ -48,6 +48,24 @@ import {
   paintCanvasMetrics,
 } from "../desktop/paintShapeDraw.js";
 
+/**
+ * Timing-only phase logger for the insert path. Emits one
+ * `[ripple-latency] insert_phase <name>=<ms>` line per stage so a slow
+ * compose→paste can be attributed instead of guessed at. No behaviour change.
+ */
+function makePhaseTimer(): (name: string) => void {
+  let last = Date.now();
+  return (name: string) => {
+    const now = Date.now();
+    const ms = now - last;
+    last = now;
+    // Only surface stages that actually cost something — keeps the log readable.
+    if (ms >= 5) {
+      console.info(`[ripple-latency] insert_phase ${name}=${ms}ms`);
+    }
+  };
+}
+
 export async function runInsertText(data?: Record<string, unknown>): Promise<string> {
   const text = typeof data?.text === "string" ? data.text : "";
   const keys = typeof data?.keys === "string" ? data.keys : "";
@@ -66,8 +84,13 @@ export async function runInsertText(data?: Record<string, unknown>): Promise<str
     sequenceSteps: sequence.length || undefined,
   });
 
+  // Timing only — compose→paste measured 4082 ms live while the work inside it
+  // was invisible. These markers attribute it to a phase; they change nothing.
+  const insertPhase = makePhaseTimer();
+
   // Claim pin then hide — never hide first (shell vacuum).
   await hideOverlayToPinnedTarget();
+  insertPhase("hide_overlay");
 
   let beforeObserve: Awaited<ReturnType<typeof captureObservation>> | undefined;
   if (hasKeyInput || mouseAction) {
@@ -342,12 +365,17 @@ export async function runInsertText(data?: Record<string, unknown>): Promise<str
       "insert_aborted:no_focus_target — click the target field and try again",
     );
   }
+  insertPhase("prepare_focus");
   beforeObserve = await captureObservation();
+  insertPhase("observe_before");
   const msg = await smartInsertText(text, data);
+  insertPhase("strategy_ladder");
   if (/^Gmail compose opened\b/i.test(msg)) {
     return msg;
   }
-  return finishTypingResult(msg, beforeObserve, text, true);
+  const finished = await finishTypingResult(msg, beforeObserve, text, true);
+  insertPhase("verify");
+  return finished;
 }
 
 async function finishTypingResult(

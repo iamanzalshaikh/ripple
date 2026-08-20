@@ -108,18 +108,77 @@ export function removeCorrection(spokenForm: string): boolean {
   return (result.changes ?? 0) > 0;
 }
 
+/**
+ * Max dictionary entries considered when correcting an utterance. The old
+ * hard-coded 100 silently dropped a user's least-recently-updated entries:
+ * they still showed in the dictionary UI but stopped firing.
+ */
+const MAX_APPLIED_CORRECTIONS = 2000;
+
+const REGEX_SPECIALS = /[.*+?^${}()|[\]\\]/g;
+
+/**
+ * Unicode-aware word boundary. JS `\b` is ASCII-only, so `\bjosé\b` never
+ * matched "josé" (é counts as a non-word char) — every non-ASCII dictionary
+ * entry was silently dead.
+ */
+function buildRuleRegex(spokenForm: string): RegExp {
+  const body = spokenForm.replace(REGEX_SPECIALS, "\\$&");
+  return new RegExp(`(?<![\\p{L}\\p{N}_])${body}(?![\\p{L}\\p{N}_])`, "giu");
+}
+
 /** Apply longest correction match inside an utterance. */
 export function applyCorrectionsToUtterance(text: string): string {
-  let out = text;
-  const rows = listCorrections(100).sort(
+  if (!text) return text;
+
+  const rows = listCorrections(MAX_APPLIED_CORRECTIONS).sort(
     (a, b) => b.spokenForm.length - a.spokenForm.length,
   );
+  if (!rows.length) return text;
+
+  // Match every rule against the ORIGINAL text and splice once at the end.
+  // Replacing sequentially let a later rule re-correct an earlier rule's
+  // output: "ana maria"→"Ana-María" then rule "ana" hit the "Ana" inside it
+  // and produced "Anna-María".
+  type Hit = { start: number; end: number; replacement: string };
+  const hits: Hit[] = [];
+  const claimed = new Array<boolean>(text.length).fill(false);
+
   for (const row of rows) {
-    const re = new RegExp(
-      `\\b${row.spokenForm.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`,
-      "gi",
-    );
-    out = out.replace(re, row.canonicalForm);
+    const re = buildRuleRegex(row.spokenForm);
+    let match: RegExpExecArray | null = re.exec(text);
+    while (match !== null) {
+      const start = match.index;
+      const end = start + match[0].length;
+      if (end === start) {
+        re.lastIndex = start + 1;
+        match = re.exec(text);
+        continue;
+      }
+      let overlaps = false;
+      for (let i = start; i < end; i += 1) {
+        if (claimed[i]) {
+          overlaps = true;
+          break;
+        }
+      }
+      // Longest rules run first, so an overlap means a better rule owns this span.
+      if (!overlaps) {
+        for (let i = start; i < end; i += 1) claimed[i] = true;
+        hits.push({ start, end, replacement: row.canonicalForm });
+      }
+      match = re.exec(text);
+    }
   }
-  return out;
+
+  if (!hits.length) return text;
+
+  hits.sort((a, b) => a.start - b.start);
+  let out = "";
+  let cursor = 0;
+  for (const hit of hits) {
+    out += text.slice(cursor, hit.start) + hit.replacement;
+    cursor = hit.end;
+  }
+  return out + text.slice(cursor);
 }

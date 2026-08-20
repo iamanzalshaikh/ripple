@@ -167,7 +167,19 @@ export function registerNativeHotkeys(
       );
     } else {
       failed.push(binding.accelerator);
-      console.warn(`[ripple-native] hotkey failed: ${binding.accelerator}`);
+      if (sidecar) {
+        // Expected: the sidecar's RegisterHotKey already owns this chord, so
+        // Electron's duplicate registration is refused. Logging it as "failed"
+        // made healthy boots look broken (Shift+Space / Ctrl+Shift+Space / Esc
+        // every run) and hid genuine third-party conflicts in the noise.
+        console.info(
+          `[ripple-native] hotkey owned by sidecar (Electron backup not needed): ${binding.accelerator} (${binding.label})`,
+        );
+      } else {
+        console.warn(
+          `[ripple-native] hotkey FAILED — likely taken by another app: ${binding.accelerator} (${binding.label})`,
+        );
+      }
     }
   }
 

@@ -68,7 +68,17 @@ export function preprocessForNlu(command?: string | null): NluPreprocessResult {
   const changed = nlu.toLowerCase() !== raw.toLowerCase();
 
   if (changed) {
-    console.info(`[ripple-desktop] NLU preprocess: "${raw}" → "${nlu}"`);
+    // Row 13.6 — never print what the user said in production builds.
+    // Checked inline rather than imported from transcriptPipeline: that module
+    // already imports this one, and closing the cycle risks a TDZ error at boot.
+    const showContent =
+      process.env.RIPPLE_TRANSCRIPT_DEBUG === "1" ||
+      process.env.NODE_ENV !== "production";
+    console.info(
+      showContent
+        ? `[ripple-desktop] NLU preprocess: "${raw}" → "${nlu}"`
+        : `[ripple-desktop] NLU preprocess: ${raw.length} → ${nlu.length} chars (script=${script})`,
+    );
   }
 
   const result = { raw, nlu, changed, script };

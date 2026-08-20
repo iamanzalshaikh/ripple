@@ -10,6 +10,11 @@ vi.mock("../../native/win32Bridge.js", () => ({
 
 vi.mock("../../focus/focusContext.js", () => ({
   isRippleApplicationWindow: () => false,
+  // observe.ts also imports these; an incomplete mock made both tests throw
+  // "No export is defined on the mock" rather than exercising the assertions.
+  isWeakFocusContext: () => false,
+  matchesPinnedInsertTarget: () => true,
+  resolveTypingFocusTarget: () => null,
 }));
 
 describe("verifyTypingObservation value preference (P7.3)", () => {

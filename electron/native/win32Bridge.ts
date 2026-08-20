@@ -482,11 +482,20 @@ export async function invokeWin32<T>(
 
   const jsonArgs = JSON.stringify(args);
   const script = buildWin32Script(action, jsonArgs);
+  // Timing only — each of these is a full PowerShell process spawn, which is
+  // expensive enough to dominate compose→paste when it lands on the hot path.
+  const started = Date.now();
   const { stdout, stderr } = await execFileAsync(
     "powershell",
     ["-NoProfile", "-STA", "-Command", script],
     { windowsHide: true, maxBuffer: 4 * 1024 * 1024 },
   );
+  const spawnMs = Date.now() - started;
+  if (spawnMs >= 150) {
+    console.info(
+      `[ripple-latency] powershell_spawn action=${action} ms=${spawnMs}`,
+    );
+  }
 
   if (stderr?.trim()) {
     console.warn(`[ripple-native] ${action} stderr:`, stderr.slice(0, 200));
@@ -594,10 +603,52 @@ export type PreSendState = {
   fgProc: string;
 };
 
+function normalizePreSendState(raw: {
+  win?: boolean;
+  ctrl?: boolean;
+  shift?: boolean;
+  alt?: boolean;
+  visible?: boolean;
+  iconic?: boolean;
+  fgHwnd?: number;
+  fgProc?: string;
+} | null): PreSendState {
+  return {
+    win: raw?.win === true,
+    ctrl: raw?.ctrl === true,
+    shift: raw?.shift === true,
+    alt: raw?.alt === true,
+    visible: raw?.visible === true,
+    iconic: raw?.iconic === true,
+    fgHwnd: Number(raw?.fgHwnd ?? 0),
+    fgProc: raw?.fgProc ?? "",
+  };
+}
+
 export async function getPreSendStateNative(
   hwnd?: number,
 ): Promise<PreSendState | null> {
   if (!isWin32NativeAvailable()) return null;
+
+  // Prefer the sidecar pipe. This probe runs before EVERY send, and on the
+  // PowerShell path it measured ~639 ms per insert — a full process spawn,
+  // making it the single largest remaining cost in compose→paste. Same fields,
+  // same gate decisions; only the transport changes. PowerShell stays as the
+  // fallback so behaviour is unchanged when the sidecar is unavailable.
+  if (isNativeClientAuthenticated()) {
+    try {
+      const row = (await callNativeRpc("pre_send_state", {
+        hwnd: hwnd ?? 0,
+      })) as Parameters<typeof normalizePreSendState>[0];
+      if (row && typeof row === "object") return normalizePreSendState(row);
+    } catch (e: unknown) {
+      console.warn(
+        "[ripple-native] pre_send_state RPC failed, falling back to PowerShell:",
+        e instanceof Error ? e.message : e,
+      );
+    }
+  }
+
   try {
     const raw = await invokeWin32<{
       win?: boolean;
@@ -609,16 +660,7 @@ export async function getPreSendStateNative(
       fgHwnd?: number;
       fgProc?: string;
     }>("preSendState", { hwnd: hwnd ?? 0 });
-    return {
-      win: raw?.win === true,
-      ctrl: raw?.ctrl === true,
-      shift: raw?.shift === true,
-      alt: raw?.alt === true,
-      visible: raw?.visible === true,
-      iconic: raw?.iconic === true,
-      fgHwnd: Number(raw?.fgHwnd ?? 0),
-      fgProc: raw?.fgProc ?? "",
-    };
+    return normalizePreSendState(raw);
   } catch (e: unknown) {
     console.warn(
       "[ripple-native] preSendState failed:",

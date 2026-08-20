@@ -295,6 +295,7 @@ class RippleSocketManager {
     streamId: string,
     sessionId?: string,
     language?: string,
+    dictationClean?: boolean,
   ): Promise<unknown> {
     const res = await this.emitWithAck<{ success: true; data: unknown }>(
       "voice:end",
@@ -303,6 +304,7 @@ class RippleSocketManager {
         session_id: sessionId,
         upload_audio: false,
         language,
+        dictation_clean: dictationClean === true,
       },
     );
     return res.data;

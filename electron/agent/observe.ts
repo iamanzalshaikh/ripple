@@ -39,10 +39,18 @@ function sameAppProcess(a: string, b: string): boolean {
 }
 
 export async function captureObservation(): Promise<ObservationSnapshot> {
+  // Timing only — these are UIA round trips and every insert path calls them,
+  // so they are prime suspects for the compose→paste time that live logs could
+  // not attribute. No behaviour change.
+  const started = Date.now();
   const [foreground, focusedA11y] = await Promise.all([
     getForegroundWindow(),
     getFocusedA11yElement(),
   ]);
+  const ms = Date.now() - started;
+  if (ms >= 50) {
+    console.info(`[ripple-latency] insert_phase observe=${ms}ms`);
+  }
   return {
     foreground,
     focusedA11y,
@@ -57,6 +65,26 @@ export async function verifyTypingObservation(args: {
   settleMs?: number;
   keysOnly?: boolean;
   /** Arrow/home/end — skip foreground_changed and editable-field checks. */
+  navigationOnly?: boolean;
+}): Promise<TypingObservationResult> {
+  // Timing only — the post-insert verify (settle sleep + UIA re-read) runs after
+  // the text has already landed, so every ms here is pure perceived latency.
+  const started = Date.now();
+  try {
+    return await verifyTypingObservationInner(args);
+  } finally {
+    const ms = Date.now() - started;
+    if (ms >= 50) {
+      console.info(`[ripple-latency] insert_phase verify=${ms}ms`);
+    }
+  }
+}
+
+async function verifyTypingObservationInner(args: {
+  before: ObservationSnapshot;
+  expectedText?: string;
+  settleMs?: number;
+  keysOnly?: boolean;
   navigationOnly?: boolean;
 }): Promise<TypingObservationResult> {
   const settleMs = args.settleMs ?? 200;

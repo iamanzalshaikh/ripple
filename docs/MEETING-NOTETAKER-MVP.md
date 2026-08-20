@@ -12,7 +12,7 @@
 |---------|--------|
 | Privacy consent before first record | Done |
 | Mic capture | Done (mic-only) |
-| System audio (Zoom/Teams speakers) | **Off** — DXGI loopback unreliable on this GPU |
+| System audio (Zoom/Teams speakers) | **Attempted** — on this test (YouTube playback) it mixed; falls back to mic-only if DXGI/loopback fails |
 | Live transcript into Flow Note (~10s chunks) | Done |
 | Live Notes UI refresh (`notes:bodyAppended`) | Done |
 | **Speaker diarization** (`gpt-4o-transcribe-diarize`, Whisper fallback) | **Done (shipped)** — not deferred |
@@ -72,7 +72,7 @@
 |---|------|---------|
 | 1 | **Real 2-person** conversation (not one person doing two voices) | Speaker A/B labels match who spoke |
 | 2 | Speak concrete facts: “₹3000 missing, documents gone, I’ll pay online” | Summary + **Key facts** keep ₹3000 / documents / repayment — not soft “personal issues” |
-| 3 | YouTube/music playing in another tab (mic-only) | Note stays mostly on *your* speech; flag if heavy bleed |
+| 3 | YouTube/music playing in another tab (system audio attempt) | Transcript includes YouTube narration as a separate speaker; summary should clearly reflect this is a system-audio test, not a real 2-person meeting |
 | 4 | Hinglish / Hindi + English mix | Diarize + analysis still usable |
 | 5 | Record ≥90s, stop, leave note open | UI updates live (Summary appears without re-open) |
 | 6 | Repeat #1–#2 twice more (n≥3) | Same quality — not a one-off |
@@ -120,5 +120,14 @@ Ctrl+Shift+M
 - Mic-only: remote Zoom/Teams audio only if loud enough for the room mic  
 - Speaker labels can drift across ~10s chunks  
 - Talk-time = summed speech segments (silence excluded) — may be &lt; wall-clock duration  
-- System audio / live type-as-you-speak still deferred  
+- System audio is attempted, but capture quality depends on DXGI/loopback stability (fallback = mic-only)  
 - Diarization quality needs multi-person verification (see hard retest #1)
+
+## Recent evidence (2026-08-20): YouTube playback test
+
+You didn’t have a second person available, so this run validated **system-audio mixing** by using a YouTube video as “Speaker B”.
+
+What to look for in the generated note:
+- **Transcript should contain YouTube narration** (not just your mic).
+- **Summary must not claim a real scheduling meeting** if the “other side” is actually the video.
+- Action items/open questions should prompt a later real 2-person hard retest.

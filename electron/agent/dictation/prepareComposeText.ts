@@ -15,28 +15,34 @@ export type PreparedComposeText = {
  */
 export async function prepareComposeDictationText(
   raw: string,
-  options?: { surface?: string; previousText?: string; processName?: string },
+  options?: {
+    surface?: string;
+    previousText?: string;
+    processName?: string;
+    /** Phase 3 — skip desktop AI rewrite when server already cleaned. */
+    backendCleaned?: boolean;
+  },
 ): Promise<PreparedComposeText> {
   let bufferText = raw.trim();
   const { resolvePipelineLayers } = await import("./pipelineLayers.js");
   const layers = await resolvePipelineLayers();
 
-  // P7.7 — context layer: bias STT tokens toward names/terms already visible.
-  if (layers.context) {
-    try {
-      const biased = await biasUtteranceFromScreen(bufferText);
-      if (biased.replacements.length > 0) {
-        console.info(
-          `[ripple-screen-bias] surface=${options?.surface ?? "dictation"} ` +
-            `terms=${biased.terms.length} fixes=${biased.replacements
-              .map((r) => `${r.from}→${r.to}`)
-              .join(", ")}`,
-        );
-        bufferText = biased.text;
-      }
-    } catch {
-      /* fail-open — leave bufferText unchanged */
+  // P7.7 — on-screen name spelling. Always on for dictation (fail-open), not
+  // gated by cleanup level — Medium users still get Ansal→Anzal from titles.
+  // Style tone stays on layers.context inside rewriteDictationBuffer.
+  try {
+    const biased = await biasUtteranceFromScreen(bufferText);
+    if (biased.replacements.length > 0) {
+      console.info(
+        `[ripple-screen-bias] surface=${options?.surface ?? "dictation"} ` +
+          `terms=${biased.terms.length} fixes=${biased.replacements
+            .map((r) => `${r.from}→${r.to}`)
+            .join(", ")}`,
+      );
+      bufferText = biased.text;
     }
+  } catch {
+    /* fail-open — leave bufferText unchanged */
   }
 
   const { maintainPinnedTargetDuringRewrite } = await import(
@@ -57,6 +63,7 @@ export async function prepareComposeDictationText(
     applyMemoryCorrections: true,
     processName: options?.processName,
     layers,
+    backendCleaned: options?.backendCleaned === true,
   });
 
   await maintainPinnedTargetDuringRewrite();

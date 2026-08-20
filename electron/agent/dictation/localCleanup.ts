@@ -133,3 +133,22 @@ export function formatSpokenList(list: SpokenList): string {
   });
   return list.intro ? `${finishingTouches(list.intro)}\n${lines.join("\n")}` : lines.join("\n");
 }
+
+/**
+ * Latency fast-path: short, clean utterances skip the LLM rewrite and use
+ * localCleanup only. Keeps AI for fillers / self-corrections / long speech.
+ */
+export function shouldPreferLocalCleanupOnly(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  const words = trimmed.split(/\s+/).filter(Boolean);
+  if (words.length === 0 || words.length > 14) return false;
+  if (
+    /\b(?:um+|uh+|erm+|uhh+|umm+|you know|i mean|sorry|oops|no no|wait no)\b/i.test(
+      trimmed,
+    )
+  ) {
+    return false;
+  }
+  return true;
+}

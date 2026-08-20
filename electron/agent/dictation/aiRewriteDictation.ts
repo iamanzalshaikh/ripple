@@ -116,7 +116,8 @@ export async function aiRewriteDictation(
 
   try {
     const ac = new AbortController();
-    const timer = setTimeout(() => ac.abort(), 8_000);
+    // Latency budget: fail-open to local cleanup rather than waiting 8s.
+    const timer = setTimeout(() => ac.abort(), 1_200);
     const res = await fetch(`${API_BASE}/voice/rewrite`, {
       method: "POST",
       headers: {

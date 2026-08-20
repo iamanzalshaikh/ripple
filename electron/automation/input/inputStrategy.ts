@@ -66,6 +66,54 @@ export type InsertFallbackOptions = {
 // shell/search flyout) is caught immediately.
 const CHECKPOINT_TEXT_THRESHOLD = 100;
 const CHECKPOINT_CHUNK_SIZE = 60;
+/** Settle time before handing the user's clipboard back after a paste. */
+const CLIPBOARD_RESTORE_DELAY_MS = 700;
+
+/**
+ * Deferred clipboard hand-back. Bumped on every paste-strategy insert so a
+ * restore scheduled by an earlier insert can never overwrite the clipboard a
+ * later one is still relying on.
+ */
+let clipboardRestoreGeneration = 0;
+let pendingClipboardRestore: ReturnType<typeof setTimeout> | null = null;
+let pendingClipboardRestoreRun: (() => void) | null = null;
+
+function scheduleClipboardRestore(original: string): void {
+  const generation = ++clipboardRestoreGeneration;
+  if (pendingClipboardRestore) clearTimeout(pendingClipboardRestore);
+
+  const run = (): void => {
+    pendingClipboardRestore = null;
+    pendingClipboardRestoreRun = null;
+    // A newer insert has claimed the clipboard since — leave it alone.
+    if (generation !== clipboardRestoreGeneration) {
+      console.info(
+        `[ripple-insert] clipboard_restore_superseded gen=${generation}`,
+      );
+      return;
+    }
+    try {
+      clipboard.writeText(original);
+      console.info(`[ripple-insert] clipboard_restored len=${original.length}`);
+    } catch {
+      /* best-effort — never fail an insert that already landed */
+    }
+  };
+
+  pendingClipboardRestoreRun = run;
+  pendingClipboardRestore = setTimeout(run, CLIPBOARD_RESTORE_DELAY_MS);
+  // Do not keep the event loop (or a quitting app) alive just for this.
+  pendingClipboardRestore.unref?.();
+}
+
+/** Test-only — run any pending clipboard restore now instead of waiting. */
+export function flushClipboardRestoreForTests(): void {
+  const run = pendingClipboardRestoreRun;
+  if (pendingClipboardRestore) clearTimeout(pendingClipboardRestore);
+  pendingClipboardRestore = null;
+  pendingClipboardRestoreRun = null;
+  run?.();
+}
 
 /** Split on whitespace where possible so a chunk boundary doesn't split a word. */
 function splitIntoCheckpointChunks(text: string, size: number): string[] {
@@ -115,6 +163,31 @@ async function tryNativeTextInsert(text: string): Promise<boolean> {
   let sentChars = 0;
   for (let i = 0; i < chunks.length; i += 1) {
     const chunk = chunks[i];
+
+    // Verify BEFORE sending each chunk, including the first.
+    //
+    // The check used to run only *between* chunks, so chunks 1 and 2 were
+    // always sent unverified — live 2026-08-20 that leaked 111 of 250
+    // characters into an Instagram message box before chunk 3 noticed
+    // ("native checkpoint chunk 3/5 failed; sentChars=111/250"). This is a
+    // read-only foreground comparison: it aborts earlier and never moves or
+    // claims focus.
+    const fgBeforeChunk = await getForegroundWindow();
+    if (
+      focus?.hwnd &&
+      fgBeforeChunk?.hwnd &&
+      Number(fgBeforeChunk.hwnd) !== Number(focus.hwnd)
+    ) {
+      console.warn(
+        `[ripple-insert] native checkpoint: foreground changed BEFORE chunk ` +
+          `${i + 1}/${chunks.length} hwnd ${focus.hwnd}→${fgBeforeChunk.hwnd} ` +
+          `proc=${fgBeforeChunk.processName ?? "?"} — sentChars=${sentChars}/${text.length}; aborting`,
+      );
+      throw new Error(
+        `insert_aborted:foreground_changed_mid_send:sentChars=${sentChars}:total=${text.length}`,
+      );
+    }
+
     const result = await runInputSequenceNative({
       hwnd: focus?.hwnd,
       titleHint: focus?.windowTitle,
@@ -173,6 +246,16 @@ async function tryClipboardPasteInsert(
     await delay(150);
     await assertInsertForeground();
   }
+  // Snapshot whatever the user had on the clipboard so we can hand it back.
+  // Dictation previously destroyed it on every paste-strategy insert.
+  let originalClipboard: string | null = null;
+  try {
+    originalClipboard =
+      typeof clipboard.readText === "function" ? clipboard.readText() : null;
+  } catch {
+    originalClipboard = null;
+  }
+
   clipboard.writeText(text);
   await delay(80);
   // Read-back before the paste keystroke — a clipboard set that silently
@@ -214,6 +297,16 @@ async function tryClipboardPasteInsert(
       `[ripple-insert] paste_send result=error error=${e instanceof Error ? e.message : e}`,
     );
     throw e;
+  }
+
+  // Hand the user's clipboard back. The settle delay still happens AFTER the
+  // paste (restoring earlier could race the target app still reading it), but
+  // it is no longer AWAITED: the text has already landed, so making dictation
+  // sit here spent 700 ms of the user's stop→paste time on housekeeping. Live
+  // 2026-08-20 showed the worst case — `clipboard_restored len=0`, i.e. 700 ms
+  // spent restoring an empty clipboard.
+  if (originalClipboard !== null && originalClipboard !== text) {
+    scheduleClipboardRestore(originalClipboard);
   }
   return true;
 }
@@ -320,7 +413,66 @@ async function focusedFieldAlreadyContains(text: string): Promise<boolean> {
  * P8.5-P5.2 insert ladder: native UIA text → SendKeys → clipboard paste → vision click+paste.
  * Optional verify loop retries the next strategy when typing observation fails.
  */
-export async function runInsertWithFallback(
+/**
+ * Row 1.9 — inserts must not overlap. A 300-char dictation is delivered in
+ * 60-char chunks over several hundred ms; if a second dictation began
+ * inserting inside that window the two character streams interleaved and both
+ * sentences arrived shredded into each other. Serializing costs nothing in the
+ * normal, non-overlapping case: the queue is already resolved.
+ *
+ * The wait is bounded, so a wedged predecessor can never permanently block
+ * dictation — past the cap we proceed anyway rather than dropping the user's
+ * text on the floor.
+ */
+const INSERT_QUEUE_MAX_WAIT_MS = 15_000;
+let insertQueueTail: Promise<unknown> = Promise.resolve();
+
+function enqueueInsert<T>(run: () => Promise<T>): Promise<T> {
+  const predecessor = insertQueueTail;
+  let release!: () => void;
+  // `slot` only ever resolves, so the tail can never reject.
+  insertQueueTail = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+
+  return (async () => {
+    const queueStarted = Date.now();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        predecessor.catch(() => undefined),
+        new Promise<void>((resolve) => {
+          timer = setTimeout(() => {
+            console.warn(
+              `[ripple-insert] insert_queue_wait_timeout after ${INSERT_QUEUE_MAX_WAIT_MS}ms — proceeding`,
+            );
+            resolve();
+          }, INSERT_QUEUE_MAX_WAIT_MS);
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+    const queuedMs = Date.now() - queueStarted;
+    if (queuedMs >= 100) {
+      console.info(`[ripple-latency] insert_phase queue_wait=${queuedMs}ms`);
+    }
+    try {
+      return await run();
+    } finally {
+      release();
+    }
+  })();
+}
+
+export function runInsertWithFallback(
+  text: string,
+  options?: InsertFallbackOptions,
+): Promise<{ detail: string; strategy: InsertStrategyName }> {
+  return enqueueInsert(() => runInsertWithFallbackInner(text, options));
+}
+
+async function runInsertWithFallbackInner(
   text: string,
   options?: InsertFallbackOptions,
 ): Promise<{ detail: string; strategy: InsertStrategyName }> {

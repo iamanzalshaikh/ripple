@@ -142,6 +142,20 @@ fn handle_rpc(
                 Err(e) => RpcResponse::err(id, format!("bad_params:{e}")),
             }
         }
+        "pre_send_state" => {
+            match serde_json::from_value::<crate::window_ops::PreSendStateParams>(
+                req.params.clone(),
+            ) {
+                Ok(params) => match crate::window_ops::get_pre_send_state(&params) {
+                    Ok(state) => {
+                        let value = serde_json::to_value(state).unwrap_or(Value::Null);
+                        RpcResponse::ok(id, value)
+                    }
+                    Err(e) => RpcResponse::err(id, e),
+                },
+                Err(e) => RpcResponse::err(id, format!("bad_params:{e}")),
+            }
+        }
         "get_focused_a11y" => match crate::uia::get_focused_a11y_element() {
             Ok(Some(el)) => {
                 let value = serde_json::to_value(el).unwrap_or(Value::Null);

@@ -153,6 +153,14 @@ const DEBUG =
   process.env.RIPPLE_TRANSCRIPT_DEBUG === "1" ||
   process.env.NODE_ENV !== "production";
 
+/**
+ * Row 13.6 — whether it is OK to print what the user actually said. False in
+ * production unless RIPPLE_TRANSCRIPT_DEBUG=1 is set deliberately.
+ */
+export function transcriptContentLoggingEnabled(): boolean {
+  return DEBUG;
+}
+
 export function logTranscriptStage(
   stage: string,
   snapshot: Partial<TranscriptSnapshot> & { text?: string },
@@ -167,9 +175,16 @@ export function logTranscriptStage(
     snapshot.wasMojibake ? "mojibake_repaired=yes" : null,
     snapshot.wasSttCorrected ? "stt_corrected=yes" : null,
     snapshot.hasDevanagari ? "devanagari=yes" : null,
-    text ? `text=${transcriptDebugLabel(text)}` : null,
+    // Row 13.6 — `stt_raw` and `command_execute` log even when DEBUG is off, so
+    // in production these two lines used to print everything the user dictated
+    // (messages, passwords, anything) verbatim. Keep the stage markers, which
+    // are what makes "did we hear anything at all?" diagnosable, but drop the
+    // content itself unless transcript debugging is explicitly turned on.
+    text ? (DEBUG ? `text=${transcriptDebugLabel(text)}` : `text_len=${text.length}`) : null,
     snapshot.nlu && snapshot.nlu !== text
-      ? `nlu=${transcriptDebugLabel(snapshot.nlu)}`
+      ? DEBUG
+        ? `nlu=${transcriptDebugLabel(snapshot.nlu)}`
+        : `nlu_len=${snapshot.nlu.length}`
       : null,
   ].filter(Boolean);
 

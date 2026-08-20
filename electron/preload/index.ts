@@ -95,8 +95,13 @@ const api = {
     sessionId?: string;
     language?: string;
   }) => ipcRenderer.invoke("voice:flush", args),
-  endVoice: (args: { streamId: string; sessionId?: string; language?: string }) =>
-    ipcRenderer.invoke("voice:end", args),
+  endVoice: (args: {
+    streamId: string;
+    sessionId?: string;
+    language?: string;
+    /** Phase 3 — server STT + dictation_clean in one RTT. */
+    dictationClean?: boolean;
+  }) => ipcRenderer.invoke("voice:end", args),
   cancelVoice: (streamId: string) =>
     ipcRenderer.invoke("voice:cancel", { streamId }),
   streaming: {
@@ -118,6 +123,8 @@ const api = {
     insert?: boolean;
     requestedLanguage?: string;
     detectedLanguage?: string;
+    /** Phase 3 — server already ran dictation_clean; skip desktop AI rewrite. */
+    backendCleaned?: boolean;
   }) =>
     ipcRenderer.invoke("dictation:execute", args) as Promise<{
       ok: boolean;

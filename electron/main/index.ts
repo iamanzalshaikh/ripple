@@ -506,15 +506,35 @@ function registerIpc(): void {
     "voice:end",
     async (
       _e,
-      args: { streamId: string; sessionId?: string; language?: string },
+      args: {
+        streamId: string;
+        sessionId?: string;
+        language?: string;
+        dictationClean?: boolean;
+      },
     ) => {
       try {
+        // Latency Phase 4 — start the screen gather NOW so its UIA+OCR wall
+        // time overlaps the STT round trip below instead of being added to
+        // stop→paste after it. Fire-and-forget; compose consumes the result if
+        // it is ready and falls back to gathering inline if it is not.
+        void import("../agent/dictation/screenNameBias.js")
+          .then((m) => m.prewarmScreenContext())
+          .catch(() => undefined);
+
         const data = await rippleSocket.endVoice(
           args.streamId,
           args.sessionId ?? sessionId ?? undefined,
           languageHintForStt(args.language),
+          args.dictationClean === true,
         );
-        const payload = (data ?? {}) as { text?: string; language?: string };
+        const payload = (data ?? {}) as {
+          text?: string;
+          raw_text?: string;
+          cleaned?: boolean;
+          language?: string;
+          timings?: { stt_ms: number; llm_ms: number; total_ms: number };
+        };
         const text = payload?.text;
         if (text) {
           payload.language = sanitizeWhisperLanguageTag(text, payload.language);
@@ -539,6 +559,11 @@ function registerIpc(): void {
           console.info(
             `[ripple-desktop] voice transcript: ${transcriptDebugLabel(text)}`,
           );
+          if (payload.timings) {
+            console.info(
+              `[ripple-latency] backend_pipeline stt=${payload.timings.stt_ms}ms llm=${payload.timings.llm_ms}ms total=${payload.timings.total_ms}ms cleaned=${payload.cleaned ? 1 : 0}`,
+            );
+          }
           if (snapshot.wasMojibake) {
             console.info(
               `[ripple-desktop] voice transcript repaired → ${transcriptDebugLabel(snapshot.normalized)}`,
@@ -617,6 +642,7 @@ function registerIpc(): void {
         typeof args?.requestedLanguage === "string" ? args.requestedLanguage : undefined,
       detectedLanguage:
         typeof args?.detectedLanguage === "string" ? args.detectedLanguage : undefined,
+      backendCleaned: args?.backendCleaned === true,
     });
   });
 
@@ -1768,9 +1794,18 @@ app.whenReady().then(async () => {
       showMainWindow({ userInitiated: true });
     });
   } else if (process.env.ELECTRON_RENDERER_URL) {
-    // Dev: you're logged in — still pop Home once so you don't hunt the tray icon.
+    // Dev: you're logged in — still surface Home once so you don't hunt the
+    // tray icon, but WITHOUT taking foreground.
+    //
+    // This used to call showMainWindow({ userInitiated: true }), which runs
+    // setAlwaysOnTop → show → focus → moveTop: a hard foreground grab that
+    // yanked the user's focused app (Cursor/Notepad/WhatsApp) on every dev
+    // launch. That is the "my window goes off on the first dictation" report,
+    // and it also caused the hotkey to pin Ripple's own window instead of the
+    // app the user was in. showInactive() displays it without stealing focus.
+    // Login (above) and tray/activate (below) intentionally still activate.
     mainWin.once("ready-to-show", () => {
-      showMainWindow({ userInitiated: true });
+      if (!mainWin.isDestroyed()) mainWin.showInactive();
     });
   }
 

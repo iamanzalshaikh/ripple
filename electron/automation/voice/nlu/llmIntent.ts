@@ -1,6 +1,9 @@
 import { API_BASE } from "../../../services/api.js";
 import type { DesktopIntentPlan } from "./intentFromLlm.js";
-import { transcriptDebugLabel } from "../transcriptPipeline.js";
+import {
+  transcriptContentLoggingEnabled,
+  transcriptDebugLabel,
+} from "../transcriptPipeline.js";
 
 export type DesktopIntentSession = {
   lastCommand?: string;
@@ -25,8 +28,12 @@ export async function fetchDesktopIntentFromLlm(
   intentHint?: string,
 ): Promise<DesktopIntentPlan | null> {
   const rawOnly = !nlu?.trim();
+  // Row 13.6 — don't print the spoken command in production builds.
+  const detail = transcriptContentLoggingEnabled()
+    ? `command=${transcriptDebugLabel(command.trim(), 60)}${nlu?.trim() ? ` | nlu=${transcriptDebugLabel(nlu.trim(), 60)}` : ""}`
+    : `command_len=${command.trim().length}${nlu?.trim() ? ` | nlu_len=${nlu.trim().length}` : ""}`;
   console.info(
-    `[ripple-desktop] GPT desktop-intent request: ${rawOnly ? "raw" : "nlu"} speech | command=${transcriptDebugLabel(command.trim(), 60)}${nlu?.trim() ? ` | nlu=${transcriptDebugLabel(nlu.trim(), 60)}` : ""}`,
+    `[ripple-desktop] GPT desktop-intent request: ${rawOnly ? "raw" : "nlu"} speech | ${detail}`,
   );
 
   try {

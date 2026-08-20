@@ -129,6 +129,20 @@ function logComposerFocusDrift(
  * (multi-monitor UIA coords have hit the desktop ListView / Program Manager).
  */
 export async function ensureBrowserComposerFocus(): Promise<boolean> {
+  // Timing only — live logs showed this firing 3x for a single insert, so its
+  // cost needs to be visible before deciding whether that repetition matters.
+  const started = Date.now();
+  try {
+    return await ensureBrowserComposerFocusInner();
+  } finally {
+    const ms = Date.now() - started;
+    if (ms >= 50) {
+      console.info(`[ripple-latency] insert_phase composer_focus=${ms}ms`);
+    }
+  }
+}
+
+async function ensureBrowserComposerFocusInner(): Promise<boolean> {
   const target = resolveTypingFocusTarget();
   if (!target?.hwnd) return true;
   const browser =

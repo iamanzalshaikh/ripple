@@ -103,6 +103,8 @@ export async function executeDictationUtterance(
     requestedLanguage?: string;
     /** P9.5 — language Whisper itself reported detecting for this audio. */
     detectedLanguage?: string;
+    /** Phase 3 — server already cleaned; skip desktop /voice/rewrite. */
+    backendCleaned?: boolean;
   },
 ): Promise<DictationExecuteResult> {
   const startedAt = Date.now();
@@ -161,11 +163,14 @@ export async function executeDictationUtterance(
   const { prepareComposeDictationText } = await import("./prepareComposeText.js");
   // Snippet match must use the *current* utterance, not an accumulated revision
   // buffer — otherwise "sig" never expands once prior text is in the buffer.
+  const composeStarted = Date.now();
   const prepared = await prepareComposeDictationText(utterance, {
     surface: "dictation",
     processName,
     previousText: priorBuffer || undefined,
+    backendCleaned: options?.backendCleaned === true,
   });
+  const composeMs = Date.now() - composeStarted;
 
   const confirmed = confirmDictationBuffer(prepared.text);
   if (!confirmed.text) {
@@ -320,6 +325,11 @@ export async function executeDictationUtterance(
       ? undefined
       : await runInsertText({ text: confirmed.text });
 
+    const pasteDoneAt = Date.now();
+    console.info(
+      `[ripple-latency] stt→compose=${composeMs}ms compose→paste=${pasteDoneAt - composeStarted - composeMs}ms post_stt_total=${pasteDoneAt - startedAt}ms kind=${prepared.kind}`,
+    );
+
     logAndRecordLanguageTelemetry({
       intent: "dictation",
       ok: true,
@@ -327,7 +337,7 @@ export async function executeDictationUtterance(
       chars: confirmed.text.length,
       requestedLanguage: options?.requestedLanguage,
       detectedLanguage: options?.detectedLanguage,
-      latencyMs: Date.now() - startedAt,
+      latencyMs: pasteDoneAt - startedAt,
       insertDetail,
     });
     return {
